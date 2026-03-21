@@ -43,9 +43,17 @@ describe('permission-commands', () => {
       expect(output).toContain('added');
     });
 
-    it('should show usage when missing arguments', async () => {
+    it('should show usage when missing arguments (handle only)', async () => {
       const ctx = makeCtx();
       await handler.execute('.adduser admin', ctx);
+
+      const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      expect(output).toContain('Usage');
+    });
+
+    it('should show usage with only handle and hostmask (no flags)', async () => {
+      const ctx = makeCtx();
+      await handler.execute('.adduser admin *!t@h', ctx);
 
       const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
       expect(output).toContain('Usage');
@@ -109,6 +117,33 @@ describe('permission-commands', () => {
       const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
       expect(output).toContain('not found');
     });
+
+    it('should show channel overrides in view mode', async () => {
+      // Set channel-specific flags first
+      const setCtx = makeCtx();
+      await handler.execute('.flags testuser +o #special', setCtx);
+
+      // Now view flags — should display channel info
+      const viewCtx = makeCtx();
+      await handler.execute('.flags testuser', viewCtx);
+
+      const output = (viewCtx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      expect(output).toContain('testuser');
+      expect(output).toContain('#special');
+      expect(output).toContain('channels');
+    });
+
+    it('should set channel-specific flags with # arg', async () => {
+      const ctx = makeCtx();
+      await handler.execute('.flags testuser +mv #ops', ctx);
+
+      const user = perms.getUser('testuser')!;
+      expect(user.channels['#ops']).toBeDefined();
+
+      const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      expect(output).toContain('#ops');
+      expect(output).toContain('Channel flags');
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -164,6 +199,30 @@ describe('permission-commands', () => {
       const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
       expect(output).toContain('Error');
       expect(output).toContain('not found');
+    });
+
+    it('should show usage when no handle provided', async () => {
+      const ctx = makeCtx();
+      await handler.execute('.deluser', ctx);
+
+      const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      expect(output).toContain('Usage');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // .flags — no args (legend)
+  // -------------------------------------------------------------------------
+
+  describe('.flags no args', () => {
+    it('should show flag legend when called with no arguments', async () => {
+      const ctx = makeCtx();
+      await handler.execute('.flags', ctx);
+
+      const calls = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls;
+      expect(calls.length).toBeGreaterThanOrEqual(2);
+      expect(calls[0][0]).toContain('legend');
+      expect(calls[1][0]).toContain('Usage');
     });
   });
 });

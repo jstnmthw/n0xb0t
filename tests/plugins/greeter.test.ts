@@ -99,4 +99,34 @@ describe('greeter plugin', () => {
 
     expect(ctx.reply).not.toHaveBeenCalled();
   });
+
+  it('should not greet the bot when nick differs in case', async () => {
+    await loadGreeter();
+
+    // Bot nick is 'testbot' (from MINIMAL_BOT_CONFIG), join as 'TestBot'
+    const ctx = makeJoinCtx('TestBot', '#test');
+    await dispatcher.dispatch('join', ctx);
+
+    expect(ctx.reply).not.toHaveBeenCalled();
+  });
+
+  it('should use empty string fallback when channel is null', async () => {
+    await loadGreeter();
+
+    const ctx: HandlerContext = {
+      nick: 'someone',
+      ident: 'user',
+      hostname: 'host.com',
+      channel: null as unknown as string,
+      text: '',
+      command: 'JOIN',
+      args: '',
+      reply: vi.fn(),
+      replyPrivate: vi.fn(),
+    };
+    await dispatcher.dispatch('join', ctx);
+
+    // The template replaces {channel} with '' (the ?? '' fallback)
+    expect(ctx.reply).toHaveBeenCalledWith('Welcome to , someone!');
+  });
 });

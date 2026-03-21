@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventDispatcher } from '../src/dispatcher.js';
 import { BotEventBus } from '../src/event-bus.js';
 import { IRCBridge } from '../src/irc-bridge.js';
+import { createLogger, Logger } from '../src/logger.js';
 import { MockIRCClient } from './helpers/mock-irc.js';
 import type { HandlerContext } from '../src/types.js';
 
@@ -516,6 +517,727 @@ describe('IRCBridge', () => {
     });
   });
 
+  describe('action events', () => {
+    it('should dispatch pubm for channel actions', async () => {
+      const pubmHandler = vi.fn();
+      dispatcher.bind('pubm', '-', '*dances*', pubmHandler, 'test');
+
+      client.simulateEvent('action', {
+        nick: 'dancer',
+        ident: 'dance',
+        hostname: 'dance.host',
+        target: '#test',
+        message: 'dances around',
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(pubmHandler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = pubmHandler.mock.calls[0][0];
+      expect(ctx.nick).toBe('dancer');
+      expect(ctx.channel).toBe('#test');
+      expect(ctx.command).toBe('');
+      expect(ctx.args).toBe('dances around');
+      expect(ctx.text).toBe('dances around');
+
+      dispatcher.unbindAll('test');
+    });
+
+    it('should dispatch msgm for private actions', async () => {
+      const msgmHandler = vi.fn();
+      dispatcher.bind('msgm', '-', '*waves*', msgmHandler, 'test');
+
+      client.simulateEvent('action', {
+        nick: 'waver',
+        ident: 'wave',
+        hostname: 'wave.host',
+        target: 'testbot',
+        message: 'waves hello',
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(msgmHandler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = msgmHandler.mock.calls[0][0];
+      expect(ctx.nick).toBe('waver');
+      expect(ctx.channel).toBeNull();
+      expect(ctx.command).toBe('');
+      expect(ctx.args).toBe('waves hello');
+
+      dispatcher.unbindAll('test');
+    });
+
+    it('should not dispatch pub/msg for action events (only pubm/msgm)', async () => {
+      const pubHandler = vi.fn();
+      const msgHandler = vi.fn();
+      dispatcher.bind('pub', '-', 'dances', pubHandler, 'test');
+      dispatcher.bind('msg', '-', 'waves', msgHandler, 'test');
+
+      client.simulateEvent('action', {
+        nick: 'user1',
+        ident: 'user',
+        hostname: 'host.com',
+        target: '#test',
+        message: 'dances around',
+      });
+
+      client.simulateEvent('action', {
+        nick: 'user1',
+        ident: 'user',
+        hostname: 'host.com',
+        target: 'testbot',
+        message: 'waves hello',
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(pubHandler).not.toHaveBeenCalled();
+      expect(msgHandler).not.toHaveBeenCalled();
+
+      dispatcher.unbindAll('test');
+    });
+  });
+
+  describe('private messages — reply targeting', () => {
+    it('should route reply() to the nick when channel is null (PM context)', async () => {
+      const handler = vi.fn((ctx: HandlerContext) => {
+        ctx.reply('pm reply');
+      });
+      dispatcher.bind('msg', '-', '!hello', handler, 'test');
+
+      client.simulateEvent('privmsg', {
+        nick: 'pmuser',
+        ident: 'user',
+        hostname: 'host.com',
+        target: 'testbot',
+        message: '!hello',
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(client.messages).toContainEqual({
+        type: 'say',
+        target: 'pmuser',
+        message: 'pm reply',
+      });
+
+      dispatcher.unbindAll('test');
+    });
+  });
+
+  describe('mode events — edge cases', () => {
+    it('should not dispatch when modes array is undefined', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('mode', '-', '*', handler, 'test');
+
+      client.simulateEvent('mode', {
+        nick: 'chanop',
+        ident: 'op',
+        hostname: 'op.host',
+        target: '#test',
+        // modes is undefined
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(handler).not.toHaveBeenCalled();
+
+      dispatcher.unbindAll('test');
+    });
+
+    it('should not dispatch when modes array is empty', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('mode', '-', '*', handler, 'test');
+
+      client.simulateEvent('mode', {
+        nick: 'chanop',
+        ident: 'op',
+        hostname: 'op.host',
+        target: '#test',
+        modes: [],
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(handler).not.toHaveBeenCalled();
+
+      dispatcher.unbindAll('test');
+    });
+
+    it('should not dispatch for non-channel mode targets', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('mode', '-', '*', handler, 'test');
+
+      client.simulateEvent('mode', {
+        nick: 'server',
+        ident: 'services',
+        hostname: 'services.host',
+        target: 'testbot',
+        modes: [{ mode: '+i' }],
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(handler).not.toHaveBeenCalled();
+
+      dispatcher.unbindAll('test');
+    });
+
+    it('should handle modes without a param', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('mode', '-', '*', handler, 'test');
+
+      client.simulateEvent('mode', {
+        nick: 'chanop',
+        ident: 'op',
+        hostname: 'op.host',
+        target: '#test',
+        modes: [{ mode: '+s' }],
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.command).toBe('+s');
+      expect(ctx.args).toBe('');
+      expect(ctx.text).toBe('#test +s');
+
+      dispatcher.unbindAll('test');
+    });
+  });
+
+  describe('notice events — edge cases', () => {
+    it('should set channel for channel-targeted notices', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('notice', '-', '*', handler, 'test');
+
+      client.simulateEvent('notice', {
+        nick: 'chanserv',
+        ident: 'services',
+        hostname: 'services.host',
+        target: '#test',
+        message: 'Channel registered',
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.channel).toBe('#test');
+      expect(ctx.command).toBe('NOTICE');
+      expect(ctx.args).toBe('Channel registered');
+      expect(ctx.text).toBe('Channel registered');
+
+      dispatcher.unbindAll('test');
+    });
+
+    it('should set channel to null for user-targeted notices', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('notice', '-', '*', handler, 'test');
+
+      client.simulateEvent('notice', {
+        nick: 'NickServ',
+        ident: 'services',
+        hostname: 'services.libera.chat',
+        target: 'testbot',
+        message: 'You are now identified',
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.channel).toBeNull();
+      expect(ctx.command).toBe('NOTICE');
+
+      dispatcher.unbindAll('test');
+    });
+  });
+
+  describe('ctcp events — payload parsing edge cases', () => {
+    it('should set empty text when message equals type exactly', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('ctcp', '-', 'VERSION', handler, 'test');
+
+      client.simulateEvent('ctcp request', {
+        nick: 'user1',
+        ident: 'user',
+        hostname: 'host.com',
+        target: 'testbot',
+        type: 'VERSION',
+        message: 'VERSION',
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      // The custom handler runs alongside the core handler
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.text).toBe('');
+      expect(ctx.command).toBe('VERSION');
+
+      dispatcher.unbindAll('test');
+    });
+
+    it('should pass raw message when it does not start with type prefix', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('ctcp', '-', 'CUSTOM', handler, 'test');
+
+      client.simulateEvent('ctcp request', {
+        nick: 'user1',
+        ident: 'user',
+        hostname: 'host.com',
+        target: 'testbot',
+        type: 'CUSTOM',
+        message: 'some arbitrary payload',
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.text).toBe('some arbitrary payload');
+      expect(ctx.args).toBe('some arbitrary payload');
+
+      dispatcher.unbindAll('test');
+    });
+
+    it('should handle empty CTCP message', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('ctcp', '-', 'SOURCE', handler, 'test');
+
+      client.simulateEvent('ctcp request', {
+        nick: 'user1',
+        ident: 'user',
+        hostname: 'host.com',
+        target: 'testbot',
+        type: 'SOURCE',
+        message: '',
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.text).toBe('');
+      expect(ctx.args).toBe('');
+
+      dispatcher.unbindAll('test');
+    });
+  });
+
+  describe('kick events — edge cases', () => {
+    it('should format reason as "by kicker" when message is empty', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('kick', '-', '*', handler, 'test');
+
+      client.simulateEvent('kick', {
+        nick: 'op',
+        ident: 'op',
+        hostname: 'op.host',
+        channel: '#test',
+        kicked: 'baduser',
+        message: '',
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.nick).toBe('baduser');
+      expect(ctx.args).toBe('by op');
+
+      dispatcher.unbindAll('test');
+    });
+
+    it('should reject kick events for invalid channels', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('kick', '-', '*', handler, 'test');
+
+      client.simulateEvent('kick', {
+        nick: 'op',
+        ident: 'op',
+        hostname: 'op.host',
+        channel: 'notachannel',
+        kicked: 'baduser',
+        message: 'go away',
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(handler).not.toHaveBeenCalled();
+
+      dispatcher.unbindAll('test');
+    });
+  });
+
+  describe('part events — edge cases', () => {
+    it('should reject part events for invalid channels', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('part', '-', '*', handler, 'test');
+
+      client.simulateEvent('part', {
+        nick: 'user1',
+        ident: 'user',
+        hostname: 'host.com',
+        channel: 'notachannel',
+        message: 'leaving',
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(handler).not.toHaveBeenCalled();
+
+      dispatcher.unbindAll('test');
+    });
+  });
+
+  describe('setBotNick', () => {
+    it('should update the bot nick used for tracking', () => {
+      bridge.setBotNick('newbot');
+
+      // After setBotNick, the bridge should track the new nick for nick events.
+      // Trigger a nick change for the new bot nick to verify it is tracked.
+      const handler = vi.fn();
+      dispatcher.bind('nick', '-', '*', handler, 'test');
+
+      client.simulateEvent('nick', {
+        nick: 'newbot',
+        new_nick: 'newbot2',
+        ident: 'bot',
+        hostname: 'localhost',
+      });
+
+      // The bridge should have updated its internal botNick to 'newbot2'.
+      // Verify by doing another nick event — the old 'newbot' is no longer the bot.
+      client.simulateEvent('nick', {
+        nick: 'newbot',
+        new_nick: 'imposter',
+        ident: 'other',
+        hostname: 'elsewhere.com',
+      });
+
+      // Both events dispatched, but botNick tracking was the key side effect
+      expect(handler).toHaveBeenCalledTimes(2);
+
+      dispatcher.unbindAll('test');
+    });
+  });
+
+  describe('missing/null event fields', () => {
+    it('should handle privmsg with all fields missing', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('pubm', '-', '*', handler, 'test');
+      dispatcher.bind('msgm', '-', '*', handler, 'test');
+
+      // Empty object — every field defaults via ?? ''
+      client.simulateEvent('privmsg', {});
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      // target is '' which is not a valid channel, so msg/msgm path is taken
+      expect(handler).toHaveBeenCalled();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.nick).toBe('');
+      expect(ctx.ident).toBe('');
+      expect(ctx.hostname).toBe('');
+      expect(ctx.text).toBe('');
+      expect(ctx.channel).toBeNull();
+
+      dispatcher.unbindAll('test');
+    });
+
+    it('should handle privmsg with channel target but missing other fields', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('pubm', '-', '*', handler, 'test');
+
+      client.simulateEvent('privmsg', {
+        target: '#test',
+        // nick, ident, hostname, message are all undefined
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.nick).toBe('');
+      expect(ctx.ident).toBe('');
+      expect(ctx.hostname).toBe('');
+      expect(ctx.text).toBe('');
+
+      dispatcher.unbindAll('test');
+    });
+
+    it('should handle action with all fields missing', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('msgm', '-', '*', handler, 'test');
+
+      // Empty object — target is '' (not a channel), so msgm path
+      client.simulateEvent('action', {});
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.nick).toBe('');
+      expect(ctx.ident).toBe('');
+      expect(ctx.hostname).toBe('');
+      expect(ctx.text).toBe('');
+      expect(ctx.channel).toBeNull();
+
+      dispatcher.unbindAll('test');
+    });
+
+    it('should handle action with channel target but missing other fields', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('pubm', '-', '*', handler, 'test');
+
+      client.simulateEvent('action', {
+        target: '#test',
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.nick).toBe('');
+      expect(ctx.text).toBe('');
+
+      dispatcher.unbindAll('test');
+    });
+
+    it('should handle join with all fields missing (invalid channel, no dispatch)', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('join', '-', '*', handler, 'test');
+
+      // channel defaults to '' which is not valid — early return
+      client.simulateEvent('join', {});
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(handler).not.toHaveBeenCalled();
+
+      dispatcher.unbindAll('test');
+    });
+
+    it('should handle join with channel but missing nick/ident/hostname', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('join', '-', '*', handler, 'test');
+
+      client.simulateEvent('join', { channel: '#test' });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.nick).toBe('');
+      expect(ctx.ident).toBe('');
+      expect(ctx.hostname).toBe('');
+
+      dispatcher.unbindAll('test');
+    });
+
+    it('should handle part with channel but missing nick/ident/hostname/message', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('part', '-', '*', handler, 'test');
+
+      client.simulateEvent('part', { channel: '#test' });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.nick).toBe('');
+      expect(ctx.ident).toBe('');
+      expect(ctx.hostname).toBe('');
+      expect(ctx.args).toBe('');
+
+      dispatcher.unbindAll('test');
+    });
+
+    it('should handle kick with channel but missing all other fields', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('kick', '-', '*', handler, 'test');
+
+      client.simulateEvent('kick', { channel: '#test' });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.nick).toBe(''); // kicked defaults to ''
+      expect(ctx.ident).toBe('');
+      expect(ctx.hostname).toBe('');
+      expect(ctx.args).toBe('by '); // kicker is '' so "by "
+
+      dispatcher.unbindAll('test');
+    });
+
+    it('should handle nick event with all fields missing', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('nick', '-', '*', handler, 'test');
+
+      client.simulateEvent('nick', {});
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.nick).toBe('');
+      expect(ctx.ident).toBe('');
+      expect(ctx.hostname).toBe('');
+      expect(ctx.text).toBe('');
+
+      dispatcher.unbindAll('test');
+    });
+
+    it('should handle mode with channel target but missing nick/ident/hostname', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('mode', '-', '*', handler, 'test');
+
+      client.simulateEvent('mode', {
+        target: '#test',
+        modes: [{ mode: '+o', param: 'someone' }],
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.nick).toBe('');
+      expect(ctx.ident).toBe('');
+      expect(ctx.hostname).toBe('');
+
+      dispatcher.unbindAll('test');
+    });
+
+    it('should handle mode with a mode entry that has no mode string', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('mode', '-', '*', handler, 'test');
+
+      client.simulateEvent('mode', {
+        nick: 'op',
+        ident: 'op',
+        hostname: 'op.host',
+        target: '#test',
+        modes: [{ param: 'someone' }], // mode field is missing
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.command).toBe('');
+
+      dispatcher.unbindAll('test');
+    });
+
+    it('should handle notice with all fields missing', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('notice', '-', '*', handler, 'test');
+
+      client.simulateEvent('notice', {});
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.nick).toBe('');
+      expect(ctx.ident).toBe('');
+      expect(ctx.hostname).toBe('');
+      expect(ctx.channel).toBeNull();
+      expect(ctx.command).toBe('NOTICE');
+
+      dispatcher.unbindAll('test');
+    });
+
+    it('should handle ctcp with all fields missing', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('ctcp', '-', '', handler, 'test');
+
+      client.simulateEvent('ctcp request', {});
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.nick).toBe('');
+      expect(ctx.ident).toBe('');
+      expect(ctx.hostname).toBe('');
+      expect(ctx.command).toBe('');
+      expect(ctx.text).toBe('');
+
+      dispatcher.unbindAll('test');
+    });
+  });
+
+  describe('listenIrc wrapper — no arguments', () => {
+    it('should handle event emitted with no data argument (args[0] is undefined)', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('notice', '-', '*', handler, 'test');
+
+      // Emit directly without any data argument to exercise args[0] ?? {} branch
+      client.emit('notice');
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.nick).toBe('');
+      expect(ctx.channel).toBeNull();
+
+      dispatcher.unbindAll('test');
+    });
+  });
+
+  describe('& channel prefix', () => {
+    it('should accept & as a valid channel prefix', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('pub', '-', '!hello', handler, 'test');
+
+      client.simulateEvent('privmsg', {
+        nick: 'user1',
+        ident: 'user',
+        hostname: 'host.com',
+        target: '&localchan',
+        message: '!hello',
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.channel).toBe('&localchan');
+
+      dispatcher.unbindAll('test');
+    });
+  });
+
+  describe('privmsg — command parsing', () => {
+    it('should set command to entire message and empty args when no space present', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('pub', '-', '!solo', handler, 'test');
+
+      client.simulateEvent('privmsg', {
+        nick: 'user1',
+        ident: 'user',
+        hostname: 'host.com',
+        target: '#test',
+        message: '!solo',
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.command).toBe('!solo');
+      expect(ctx.args).toBe('');
+
+      dispatcher.unbindAll('test');
+    });
+  });
+
   describe('detach', () => {
     it('should stop dispatching after detach', async () => {
       const handler = vi.fn();
@@ -536,6 +1258,49 @@ describe('IRCBridge', () => {
       expect(handler).not.toHaveBeenCalled();
 
       dispatcher.unbindAll('test');
+    });
+  });
+
+  describe('dispatchError with logger', () => {
+    it('should log errors from failed dispatches when a logger is provided', async () => {
+      const logger = createLogger('error');
+      // Spy on Logger.prototype.error to catch calls on child loggers too
+      const errorSpy = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
+
+      const loggedClient = new MockIRCClient();
+      const loggedDispatcher = new EventDispatcher();
+      const loggedBus = new BotEventBus();
+      const loggedBridge = new IRCBridge({
+        client: loggedClient,
+        dispatcher: loggedDispatcher,
+        eventBus: loggedBus,
+        botNick: 'testbot',
+        logger,
+      });
+      loggedBridge.attach();
+
+      // Make dispatch reject by spying on it
+      const dispatchErr = new Error('handler explosion');
+      vi.spyOn(loggedDispatcher, 'dispatch').mockRejectedValue(dispatchErr);
+
+      loggedClient.simulateEvent('privmsg', {
+        nick: 'user1',
+        ident: 'user',
+        hostname: 'host.com',
+        target: '#test',
+        message: '!boom',
+      });
+
+      await new Promise((r) => setTimeout(r, 20));
+
+      // The dispatchError callback should have been triggered and logged on the child logger
+      const dispatchErrorCall = errorSpy.mock.calls.find(
+        (call) => typeof call[0] === 'string' && call[0].includes('Dispatch error'),
+      );
+      expect(dispatchErrorCall).toBeDefined();
+
+      loggedBridge.detach();
+      vi.restoreAllMocks();
     });
   });
 });

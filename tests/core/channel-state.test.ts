@@ -214,6 +214,83 @@ describe('ChannelState', () => {
       expect(state.isUserInChannel('#test', 'Bob')).toBe(true);
       expect(state.getUserModes('#test', 'Bob')).toContain('o');
     });
+
+    it('should update ident/hostname on existing user from userlist', () => {
+      // User joins first with partial info
+      client.simulateEvent('join', {
+        nick: 'Alice', ident: '', hostname: '', channel: '#test',
+      });
+
+      // Then userlist arrives with full details
+      client.simulateEvent('userlist', {
+        channel: '#test',
+        users: [
+          { nick: 'Alice', ident: 'realident', hostname: 'real.host.com', modes: '' },
+        ],
+      });
+
+      const user = state.getUser('#test', 'Alice');
+      expect(user).toBeDefined();
+      expect(user!.ident).toBe('realident');
+      expect(user!.hostname).toBe('real.host.com');
+      expect(user!.hostmask).toBe('Alice!realident@real.host.com');
+    });
+
+    it('should update modes on existing user when userlist has modes', () => {
+      client.simulateEvent('join', {
+        nick: 'Alice', ident: 'alice', hostname: 'host', channel: '#test',
+      });
+      expect(state.getUserModes('#test', 'Alice')).toEqual([]);
+
+      client.simulateEvent('userlist', {
+        channel: '#test',
+        users: [
+          { nick: 'Alice', ident: 'alice', hostname: 'host', modes: '@' },
+        ],
+      });
+
+      expect(state.getUserModes('#test', 'Alice')).toContain('o');
+    });
+
+    it('should not overwrite modes when userlist has empty modes on existing user', () => {
+      client.simulateEvent('join', {
+        nick: 'Alice', ident: 'alice', hostname: 'host', channel: '#test',
+      });
+      // Give Alice op via mode event
+      client.simulateEvent('mode', {
+        target: '#test',
+        modes: [{ mode: '+o', param: 'Alice' }],
+      });
+      expect(state.getUserModes('#test', 'Alice')).toContain('o');
+
+      // Userlist with empty modes should not overwrite
+      client.simulateEvent('userlist', {
+        channel: '#test',
+        users: [
+          { nick: 'Alice', ident: 'alice', hostname: 'host', modes: '' },
+        ],
+      });
+
+      expect(state.getUserModes('#test', 'Alice')).toContain('o');
+    });
+
+    it('should update only ident when hostname is empty on existing user', () => {
+      client.simulateEvent('join', {
+        nick: 'Alice', ident: 'old', hostname: 'old.host', channel: '#test',
+      });
+
+      client.simulateEvent('userlist', {
+        channel: '#test',
+        users: [
+          { nick: 'Alice', ident: 'newident', hostname: '', modes: '' },
+        ],
+      });
+
+      const user = state.getUser('#test', 'Alice');
+      expect(user!.ident).toBe('newident');
+      expect(user!.hostname).toBe('old.host');
+      expect(user!.hostmask).toBe('Alice!newident@old.host');
+    });
   });
 
   describe('case insensitivity', () => {
@@ -227,6 +304,104 @@ describe('ChannelState', () => {
     });
   });
 
+  describe('wholist', () => {
+    it('should update ident and hostname from wholist', () => {
+      // User joins with incomplete info
+      client.simulateEvent('join', {
+        nick: 'Alice', ident: '', hostname: '', channel: '#test',
+      });
+
+      client.simulateEvent('wholist', {
+        users: [
+          { nick: 'Alice', ident: 'realident', hostname: 'real.host.com', channel: '#test' },
+        ],
+      });
+
+      const user = state.getUser('#test', 'Alice');
+      expect(user).toBeDefined();
+      expect(user!.ident).toBe('realident');
+      expect(user!.hostname).toBe('real.host.com');
+      expect(user!.hostmask).toBe('Alice!realident@real.host.com');
+    });
+
+    it('should update multiple users across channels', () => {
+      client.simulateEvent('join', {
+        nick: 'Alice', ident: '', hostname: '', channel: '#chan1',
+      });
+      client.simulateEvent('join', {
+        nick: 'Bob', ident: '', hostname: '', channel: '#chan2',
+      });
+
+      client.simulateEvent('wholist', {
+        users: [
+          { nick: 'Alice', ident: 'alice', hostname: 'alice.host', channel: '#chan1' },
+          { nick: 'Bob', ident: 'bob', hostname: 'bob.host', channel: '#chan2' },
+        ],
+      });
+
+      const alice = state.getUser('#chan1', 'Alice');
+      expect(alice!.ident).toBe('alice');
+      expect(alice!.hostname).toBe('alice.host');
+
+      const bob = state.getUser('#chan2', 'Bob');
+      expect(bob!.ident).toBe('bob');
+      expect(bob!.hostname).toBe('bob.host');
+    });
+
+    it('should ignore wholist entries for unknown channels', () => {
+      client.simulateEvent('wholist', {
+        users: [
+          { nick: 'Ghost', ident: 'ghost', hostname: 'ghost.host', channel: '#unknown' },
+        ],
+      });
+
+      expect(state.getChannel('#unknown')).toBeUndefined();
+      expect(state.getUser('#unknown', 'Ghost')).toBeUndefined();
+    });
+
+    it('should ignore wholist entries for unknown users in known channels', () => {
+      // Create channel by joining someone
+      client.simulateEvent('join', {
+        nick: 'Alice', ident: 'alice', hostname: 'host', channel: '#test',
+      });
+
+      // Wholist mentions a user not in the channel
+      client.simulateEvent('wholist', {
+        users: [
+          { nick: 'Ghost', ident: 'ghost', hostname: 'ghost.host', channel: '#test' },
+        ],
+      });
+
+      expect(state.getUser('#test', 'Ghost')).toBeUndefined();
+      // Alice should be unaffected
+      expect(state.getUser('#test', 'Alice')).toBeDefined();
+    });
+
+    it('should handle wholist with no users array', () => {
+      // Should not throw
+      client.simulateEvent('wholist', {});
+      expect(state.getChannel('#test')).toBeUndefined();
+    });
+
+    it('should skip wholist entries with missing nick or channel', () => {
+      client.simulateEvent('join', {
+        nick: 'Alice', ident: 'alice', hostname: 'host', channel: '#test',
+      });
+
+      client.simulateEvent('wholist', {
+        users: [
+          { nick: '', ident: 'x', hostname: 'x', channel: '#test' },
+          { nick: 'Alice', ident: 'updated', hostname: 'updated.host', channel: '' },
+        ],
+      });
+
+      // Alice should not have been updated since the entry for her had empty channel
+      const alice = state.getUser('#test', 'Alice');
+      expect(alice!.ident).toBe('alice');
+      expect(alice!.hostname).toBe('host');
+    });
+  });
+
   describe('topic', () => {
     it('should track channel topic', () => {
       client.simulateEvent('topic', {
@@ -237,6 +412,126 @@ describe('ChannelState', () => {
       const ch = state.getChannel('#test');
       expect(ch).toBeDefined();
       expect(ch!.topic).toBe('Welcome to #test!');
+    });
+
+    it('should update topic on an existing channel', () => {
+      client.simulateEvent('join', {
+        nick: 'Alice', ident: 'alice', hostname: 'host', channel: '#test',
+      });
+
+      client.simulateEvent('topic', {
+        channel: '#test',
+        topic: 'New topic',
+      });
+
+      const ch = state.getChannel('#test');
+      expect(ch!.topic).toBe('New topic');
+      // Users should still be present
+      expect(state.isUserInChannel('#test', 'Alice')).toBe(true);
+    });
+
+    it('should set empty topic', () => {
+      client.simulateEvent('topic', {
+        channel: '#test',
+        topic: 'Initial topic',
+      });
+      expect(state.getChannel('#test')!.topic).toBe('Initial topic');
+
+      client.simulateEvent('topic', {
+        channel: '#test',
+        topic: '',
+      });
+      expect(state.getChannel('#test')!.topic).toBe('');
+    });
+
+    it('should handle topic with missing channel gracefully', () => {
+      // Should not throw
+      client.simulateEvent('topic', { channel: '', topic: 'orphan topic' });
+      // No channel created for empty name
+    });
+  });
+
+  describe('parseUserlistModes', () => {
+    it('should parse @ symbol as op mode', () => {
+      client.simulateEvent('userlist', {
+        channel: '#test',
+        users: [{ nick: 'Op', ident: 'op', hostname: 'host', modes: '@' }],
+      });
+      expect(state.getUserModes('#test', 'Op')).toEqual(['o']);
+    });
+
+    it('should parse + symbol as voice mode', () => {
+      client.simulateEvent('userlist', {
+        channel: '#test',
+        users: [{ nick: 'Voice', ident: 'voice', hostname: 'host', modes: '+' }],
+      });
+      expect(state.getUserModes('#test', 'Voice')).toEqual(['v']);
+    });
+
+    it('should parse % symbol as halfop mode', () => {
+      client.simulateEvent('userlist', {
+        channel: '#test',
+        users: [{ nick: 'Half', ident: 'half', hostname: 'host', modes: '%' }],
+      });
+      expect(state.getUserModes('#test', 'Half')).toEqual(['h']);
+    });
+
+    it('should parse letter modes (o, v, h)', () => {
+      client.simulateEvent('userlist', {
+        channel: '#test',
+        users: [
+          { nick: 'UserO', ident: 'u', hostname: 'h', modes: 'o' },
+          { nick: 'UserV', ident: 'u', hostname: 'h', modes: 'v' },
+          { nick: 'UserH', ident: 'u', hostname: 'h', modes: 'h' },
+        ],
+      });
+
+      expect(state.getUserModes('#test', 'UserO')).toEqual(['o']);
+      expect(state.getUserModes('#test', 'UserV')).toEqual(['v']);
+      expect(state.getUserModes('#test', 'UserH')).toEqual(['h']);
+    });
+
+    it('should parse combined mode symbols (@+)', () => {
+      client.simulateEvent('userlist', {
+        channel: '#test',
+        users: [{ nick: 'Both', ident: 'b', hostname: 'h', modes: '@+' }],
+      });
+
+      const modes = state.getUserModes('#test', 'Both');
+      expect(modes).toContain('o');
+      expect(modes).toContain('v');
+      expect(modes).toHaveLength(2);
+    });
+
+    it('should parse all three symbols together (@%+)', () => {
+      client.simulateEvent('userlist', {
+        channel: '#test',
+        users: [{ nick: 'All', ident: 'a', hostname: 'h', modes: '@%+' }],
+      });
+
+      const modes = state.getUserModes('#test', 'All');
+      expect(modes).toContain('o');
+      expect(modes).toContain('v');
+      expect(modes).toContain('h');
+      expect(modes).toHaveLength(3);
+    });
+
+    it('should return empty modes for undefined modes string', () => {
+      client.simulateEvent('userlist', {
+        channel: '#test',
+        users: [{ nick: 'NoMode', ident: 'n', hostname: 'h' }],
+      });
+
+      expect(state.getUserModes('#test', 'NoMode')).toEqual([]);
+    });
+
+    it('should return empty modes for empty string', () => {
+      client.simulateEvent('userlist', {
+        channel: '#test',
+        users: [{ nick: 'Empty', ident: 'e', hostname: 'h', modes: '' }],
+      });
+
+      expect(state.getUserModes('#test', 'Empty')).toEqual([]);
     });
   });
 });

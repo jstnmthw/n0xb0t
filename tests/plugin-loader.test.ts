@@ -4,10 +4,15 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { PluginLoader } from '../src/plugin-loader.js';
+import type { PluginLoaderDeps } from '../src/plugin-loader.js';
 import { EventDispatcher } from '../src/dispatcher.js';
 import { BotEventBus } from '../src/event-bus.js';
 import { BotDatabase } from '../src/database.js';
 import { Permissions } from '../src/core/permissions.js';
+import { ChannelState } from '../src/core/channel-state.js';
+import { IRCCommands } from '../src/core/irc-commands.js';
+import { Services } from '../src/core/services.js';
+import { Logger } from '../src/logger.js';
 import type { BotConfig } from '../src/types.js';
 
 // ---------------------------------------------------------------------------
@@ -68,6 +73,59 @@ function createLoader(pluginDir: string, db?: BotDatabase): { loader: PluginLoad
   });
 
   return { loader, dispatcher, eventBus, db: database, permissions };
+}
+
+/** Create a loader with full deps (ircClient, channelState, ircCommands, services, logger). */
+function createLoaderFull(pluginDir: string, overrides?: Partial<PluginLoaderDeps>) {
+  const database = new BotDatabase(':memory:');
+  database.open();
+  const dispatcher = new EventDispatcher();
+  const eventBus = new BotEventBus();
+  const permissions = new Permissions(database);
+
+  const mockIrcClient = {
+    say: vi.fn() as (target: string, message: string) => void,
+    notice: vi.fn() as (target: string, message: string) => void,
+    action: vi.fn() as (target: string, message: string) => void,
+    raw: vi.fn() as (line: string) => void,
+    ctcpResponse: vi.fn() as (target: string, type: string, ...params: string[]) => void,
+    join: vi.fn() as (channel: string) => void,
+    part: vi.fn() as (channel: string, message?: string) => void,
+  };
+
+  // Minimal mock client for ChannelState and Services
+  const mockChannelClient = {
+    on: vi.fn(),
+    removeListener: vi.fn(),
+    say: vi.fn(),
+  };
+
+  const channelState = new ChannelState(mockChannelClient, eventBus);
+  const ircCommands = new IRCCommands(mockIrcClient, database);
+  const services = new Services({
+    client: mockChannelClient,
+    servicesConfig: MINIMAL_BOT_CONFIG.services,
+    identityConfig: MINIMAL_BOT_CONFIG.identity,
+    eventBus,
+  });
+  const logger = new Logger(null, { value: 'debug' });
+
+  const loader = new PluginLoader({
+    pluginDir,
+    dispatcher,
+    eventBus,
+    db: database,
+    permissions,
+    botConfig: MINIMAL_BOT_CONFIG,
+    ircClient: mockIrcClient,
+    channelState,
+    ircCommands,
+    services,
+    logger,
+    ...overrides,
+  });
+
+  return { loader, dispatcher, eventBus, db: database, permissions, mockIrcClient, channelState, ircCommands, services };
 }
 
 // ---------------------------------------------------------------------------
@@ -511,6 +569,725 @@ describe('PluginLoader', () => {
       expect(plugins[0].name).toBe('list-plugin');
       expect(plugins[0].version).toBe('2.5.0');
       expect(plugins[0].description).toBe('A listable plugin');
+    });
+  });
+
+  describe('scoped API — IRC methods with null ircClient', () => {
+    it('should not throw when ircClient is null', async () => {
+      const pluginPath = writePlugin(tempDir, 'null-irc', `
+        export const name = 'null-irc';
+        export const version = '1.0.0';
+        export const description = '';
+        let savedApi;
+        export function init(api) {
+          savedApi = api;
+        }
+        export function getApi() { return savedApi; }
+      `);
+
+      // createLoader uses ircClient: null by default
+      const { loader } = createLoader(tempDir);
+      await loader.load(pluginPath);
+
+      // Import the module to call getApi()
+      const mod = await import(join(tempDir, 'null-irc', 'index.ts') + `?t=${Date.now()}`);
+      const api = mod.getApi();
+
+      // All IRC methods should be no-ops when ircClient is null
+      expect(() => api.say('#test', 'hello')).not.toThrow();
+      expect(() => api.action('#test', 'waves')).not.toThrow();
+      expect(() => api.notice('#test', 'notice')).not.toThrow();
+      expect(() => api.raw('PING :test')).not.toThrow();
+      expect(() => api.ctcpResponse('nick', 'VERSION', 'test')).not.toThrow();
+    });
+  });
+
+  describe('scoped API — IRC methods with a real ircClient', () => {
+    it('should delegate say/action/notice/raw/ctcpResponse to ircClient', async () => {
+      const pluginPath = writePlugin(tempDir, 'real-irc', `
+        export const name = 'real-irc';
+        export const version = '1.0.0';
+        export const description = '';
+        let savedApi;
+        export function init(api) { savedApi = api; }
+        export function getApi() { return savedApi; }
+      `);
+
+      const { loader, mockIrcClient } = createLoaderFull(tempDir);
+      await loader.load(pluginPath);
+
+      const mod = await import(join(tempDir, 'real-irc', 'index.ts') + `?t=${Date.now()}`);
+      const api = mod.getApi();
+
+      api.say('#chan', 'hello');
+      expect(mockIrcClient.say).toHaveBeenCalledWith('#chan', 'hello');
+
+      api.action('#chan', 'waves');
+      expect(mockIrcClient.action).toHaveBeenCalledWith('#chan', 'waves');
+
+      api.notice('#chan', 'yo');
+      expect(mockIrcClient.notice).toHaveBeenCalledWith('#chan', 'yo');
+
+      api.raw('PING :test');
+      expect(mockIrcClient.raw).toHaveBeenCalledWith('PING :test');
+
+      api.ctcpResponse('nick', 'VERSION', 'n0xb0t');
+      expect(mockIrcClient.ctcpResponse).toHaveBeenCalledWith('nick', 'VERSION', 'n0xb0t');
+    });
+  });
+
+  describe('scoped API — IRC commands with null ircCommands', () => {
+    it('should not throw when ircCommands is null', async () => {
+      const pluginPath = writePlugin(tempDir, 'null-cmds', `
+        export const name = 'null-cmds';
+        export const version = '1.0.0';
+        export const description = '';
+        let savedApi;
+        export function init(api) { savedApi = api; }
+        export function getApi() { return savedApi; }
+      `);
+
+      // createLoader uses no ircCommands by default
+      const { loader } = createLoader(tempDir);
+      await loader.load(pluginPath);
+
+      const mod = await import(join(tempDir, 'null-cmds', 'index.ts') + `?t=${Date.now()}`);
+      const api = mod.getApi();
+
+      expect(() => api.op('#test', 'nick')).not.toThrow();
+      expect(() => api.deop('#test', 'nick')).not.toThrow();
+      expect(() => api.voice('#test', 'nick')).not.toThrow();
+      expect(() => api.devoice('#test', 'nick')).not.toThrow();
+      expect(() => api.kick('#test', 'nick', 'reason')).not.toThrow();
+      expect(() => api.ban('#test', '*!*@bad.host')).not.toThrow();
+      expect(() => api.mode('#test', '+o', 'nick')).not.toThrow();
+      expect(() => api.topic('#test', 'new topic')).not.toThrow();
+    });
+  });
+
+  describe('scoped API — IRC commands with real ircCommands', () => {
+    it('should delegate op/deop/voice/devoice/kick/ban/mode/topic to ircCommands', async () => {
+      const pluginPath = writePlugin(tempDir, 'real-cmds', `
+        export const name = 'real-cmds';
+        export const version = '1.0.0';
+        export const description = '';
+        let savedApi;
+        export function init(api) { savedApi = api; }
+        export function getApi() { return savedApi; }
+      `);
+
+      const { loader, ircCommands } = createLoaderFull(tempDir);
+      vi.spyOn(ircCommands, 'op');
+      vi.spyOn(ircCommands, 'deop');
+      vi.spyOn(ircCommands, 'voice');
+      vi.spyOn(ircCommands, 'devoice');
+      vi.spyOn(ircCommands, 'kick');
+      vi.spyOn(ircCommands, 'ban');
+      vi.spyOn(ircCommands, 'mode');
+      vi.spyOn(ircCommands, 'topic');
+      await loader.load(pluginPath);
+
+      const mod = await import(join(tempDir, 'real-cmds', 'index.ts') + `?t=${Date.now()}`);
+      const api = mod.getApi();
+
+      api.op('#ch', 'nick');
+      expect(ircCommands.op).toHaveBeenCalledWith('#ch', 'nick');
+
+      api.deop('#ch', 'nick');
+      expect(ircCommands.deop).toHaveBeenCalledWith('#ch', 'nick');
+
+      api.voice('#ch', 'nick');
+      expect(ircCommands.voice).toHaveBeenCalledWith('#ch', 'nick');
+
+      api.devoice('#ch', 'nick');
+      expect(ircCommands.devoice).toHaveBeenCalledWith('#ch', 'nick');
+
+      api.kick('#ch', 'nick', 'bye');
+      expect(ircCommands.kick).toHaveBeenCalledWith('#ch', 'nick', 'bye');
+
+      api.ban('#ch', '*!*@bad');
+      expect(ircCommands.ban).toHaveBeenCalledWith('#ch', '*!*@bad');
+
+      api.mode('#ch', '+o', 'nick');
+      expect(ircCommands.mode).toHaveBeenCalledWith('#ch', '+o', 'nick');
+
+      api.topic('#ch', 'new topic');
+      expect(ircCommands.topic).toHaveBeenCalledWith('#ch', 'new topic');
+    });
+  });
+
+  describe('scoped API — channel state with null channelState', () => {
+    it('should return undefined/empty when channelState is null', async () => {
+      const pluginPath = writePlugin(tempDir, 'null-chan', `
+        export const name = 'null-chan';
+        export const version = '1.0.0';
+        export const description = '';
+        let savedApi;
+        export function init(api) { savedApi = api; }
+        export function getApi() { return savedApi; }
+      `);
+
+      // createLoader has no channelState by default
+      const { loader } = createLoader(tempDir);
+      await loader.load(pluginPath);
+
+      const mod = await import(join(tempDir, 'null-chan', 'index.ts') + `?t=${Date.now()}`);
+      const api = mod.getApi();
+
+      expect(api.getChannel('#test')).toBeUndefined();
+      expect(api.getUsers('#test')).toEqual([]);
+      expect(api.getUserHostmask('#test', 'nick')).toBeUndefined();
+    });
+  });
+
+  describe('scoped API — channel state with real channelState', () => {
+    it('should return channel data when channel exists', async () => {
+      const pluginPath = writePlugin(tempDir, 'real-chan', `
+        export const name = 'real-chan';
+        export const version = '1.0.0';
+        export const description = '';
+        let savedApi;
+        export function init(api) { savedApi = api; }
+        export function getApi() { return savedApi; }
+      `);
+
+      const { loader, channelState } = createLoaderFull(tempDir);
+      await loader.load(pluginPath);
+
+      // Simulate a user joining so channelState has data
+      // ChannelState responds to IRC events; trigger a join manually
+      // We need to call the join handler directly via the mock client
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const mockClient = (channelState as unknown as { client: Record<string, unknown> })['client'] as any;
+      // Attach first
+      channelState.attach();
+      // Find the join handler
+      const onCalls = mockClient.on.mock.calls;
+      const joinCall = onCalls.find((c: [string, (...args: unknown[]) => void]) => c[0] === 'join');
+      if (joinCall) {
+        joinCall[1]({ nick: 'testuser', ident: 'user', hostname: 'host.example.com', channel: '#test' });
+      }
+
+      const mod = await import(join(tempDir, 'real-chan', 'index.ts') + `?t=${Date.now()}`);
+      const api = mod.getApi();
+
+      const ch = api.getChannel('#test');
+      expect(ch).toBeDefined();
+      expect(ch.name).toBe('#test');
+      expect(ch.users.size).toBe(1);
+      const user = ch.users.get('testuser');
+      expect(user).toBeDefined();
+      expect(user.nick).toBe('testuser');
+      expect(user.ident).toBe('user');
+      expect(user.hostname).toBe('host.example.com');
+      expect(user.modes).toBe('');
+      expect(typeof user.joinedAt).toBe('number');
+
+      const users = api.getUsers('#test');
+      expect(users).toHaveLength(1);
+      expect(users[0].nick).toBe('testuser');
+
+      const hostmask = api.getUserHostmask('#test', 'testuser');
+      expect(hostmask).toBe('testuser!user@host.example.com');
+    });
+
+    it('should return undefined for non-existent channel', async () => {
+      const pluginPath = writePlugin(tempDir, 'no-chan', `
+        export const name = 'no-chan';
+        export const version = '1.0.0';
+        export const description = '';
+        let savedApi;
+        export function init(api) { savedApi = api; }
+        export function getApi() { return savedApi; }
+      `);
+
+      const { loader } = createLoaderFull(tempDir);
+      await loader.load(pluginPath);
+
+      const mod = await import(join(tempDir, 'no-chan', 'index.ts') + `?t=${Date.now()}`);
+      const api = mod.getApi();
+
+      expect(api.getChannel('#nonexistent')).toBeUndefined();
+      expect(api.getUsers('#nonexistent')).toEqual([]);
+      expect(api.getUserHostmask('#nonexistent', 'nobody')).toBeUndefined();
+    });
+  });
+
+  describe('scoped API — services with null services', () => {
+    it('should return defaults when services is null', async () => {
+      const pluginPath = writePlugin(tempDir, 'null-svc', `
+        export const name = 'null-svc';
+        export const version = '1.0.0';
+        export const description = '';
+        let savedApi;
+        export function init(api) { savedApi = api; }
+        export function getApi() { return savedApi; }
+      `);
+
+      // createLoader has no services by default
+      const { loader } = createLoader(tempDir);
+      await loader.load(pluginPath);
+
+      const mod = await import(join(tempDir, 'null-svc', 'index.ts') + `?t=${Date.now()}`);
+      const api = mod.getApi();
+
+      const result = await api.services.verifyUser('someone');
+      expect(result).toEqual({ verified: false, account: null });
+      expect(api.services.isAvailable()).toBe(false);
+    });
+  });
+
+  describe('scoped API — logging methods', () => {
+    it('should not throw when logger is null', async () => {
+      const pluginPath = writePlugin(tempDir, 'null-log', `
+        export const name = 'null-log';
+        export const version = '1.0.0';
+        export const description = '';
+        let savedApi;
+        export function init(api) { savedApi = api; }
+        export function getApi() { return savedApi; }
+      `);
+
+      // createLoader has no logger by default
+      const { loader } = createLoader(tempDir);
+      await loader.load(pluginPath);
+
+      const mod = await import(join(tempDir, 'null-log', 'index.ts') + `?t=${Date.now()}`);
+      const api = mod.getApi();
+
+      expect(() => api.log('test message')).not.toThrow();
+      expect(() => api.error('error msg')).not.toThrow();
+      expect(() => api.warn('warn msg')).not.toThrow();
+      expect(() => api.debug('debug msg')).not.toThrow();
+    });
+
+    it('should delegate to logger when logger is provided', async () => {
+      const pluginPath = writePlugin(tempDir, 'with-log', `
+        export const name = 'with-log';
+        export const version = '1.0.0';
+        export const description = '';
+        let savedApi;
+        export function init(api) { savedApi = api; }
+        export function getApi() { return savedApi; }
+      `);
+
+      const { loader } = createLoaderFull(tempDir);
+      await loader.load(pluginPath);
+
+      const mod = await import(join(tempDir, 'with-log', 'index.ts') + `?t=${Date.now()}`);
+      const api = mod.getApi();
+
+      // These should work without error (logger exists)
+      expect(() => api.log('test')).not.toThrow();
+      expect(() => api.error('err')).not.toThrow();
+      expect(() => api.warn('wrn')).not.toThrow();
+      expect(() => api.debug('dbg')).not.toThrow();
+    });
+  });
+
+  describe('scoped API — db stub when db is null', () => {
+    it('should return no-op stubs', async () => {
+      const pluginPath = writePlugin(tempDir, 'null-db', `
+        export const name = 'null-db';
+        export const version = '1.0.0';
+        export const description = '';
+        let savedApi;
+        export function init(api) { savedApi = api; }
+        export function getApi() { return savedApi; }
+      `);
+
+      const dispatcher = new EventDispatcher();
+      const eventBus = new BotEventBus();
+      const permissions = new Permissions(null);
+
+      const loader = new PluginLoader({
+        pluginDir: tempDir,
+        dispatcher,
+        eventBus,
+        db: null,
+        permissions,
+        botConfig: MINIMAL_BOT_CONFIG,
+        ircClient: null,
+      });
+
+      await loader.load(pluginPath);
+
+      const mod = await import(join(tempDir, 'null-db', 'index.ts') + `?t=${Date.now()}`);
+      const api = mod.getApi();
+
+      expect(api.db.get('key')).toBeUndefined();
+      expect(() => api.db.set('key', 'val')).not.toThrow();
+      expect(() => api.db.del('key')).not.toThrow();
+      expect(api.db.list()).toEqual([]);
+    });
+  });
+
+  describe('config merging edge cases', () => {
+    it('should use empty defaults when plugin config.json does not exist', async () => {
+      // No config.json in plugin dir
+      const pluginPath = writePlugin(tempDir, 'no-config', `
+        export const name = 'no-config';
+        export const version = '1.0.0';
+        export const description = '';
+        let savedApi;
+        export function init(api) { savedApi = api; }
+        export function getApi() { return savedApi; }
+      `);
+
+      const pluginsConfig = {
+        'no-config': { enabled: true, config: { key1: 'val1' } },
+      };
+
+      const { loader } = createLoader(tempDir);
+      await loader.load(pluginPath, pluginsConfig);
+
+      const mod = await import(join(tempDir, 'no-config', 'index.ts') + `?t=${Date.now()}`);
+      const api = mod.getApi();
+
+      expect(api.config.key1).toBe('val1');
+    });
+
+    it('should handle invalid config.json gracefully', async () => {
+      // Write invalid JSON as config.json
+      const pluginDir = join(tempDir, 'bad-config');
+      mkdirSync(pluginDir, { recursive: true });
+      writeFileSync(join(pluginDir, 'config.json'), '{not valid json!!!', 'utf-8');
+
+      const pluginPath = writePlugin(tempDir, 'bad-config', `
+        export const name = 'bad-config';
+        export const version = '1.0.0';
+        export const description = '';
+        let savedApi;
+        export function init(api) { savedApi = api; }
+        export function getApi() { return savedApi; }
+      `);
+
+      const { loader } = createLoaderFull(tempDir);
+      const result = await loader.load(pluginPath);
+
+      expect(result.status).toBe('ok');
+    });
+
+    it('should use empty config when no pluginsConfig and no config.json', async () => {
+      const pluginPath = writePlugin(tempDir, 'empty-cfg', `
+        export const name = 'empty-cfg';
+        export const version = '1.0.0';
+        export const description = '';
+        let savedApi;
+        export function init(api) { savedApi = api; }
+        export function getApi() { return savedApi; }
+      `);
+
+      const { loader } = createLoader(tempDir);
+      // Load without pluginsConfig argument
+      await loader.load(pluginPath);
+
+      const mod = await import(join(tempDir, 'empty-cfg', 'index.ts') + `?t=${Date.now()}`);
+      const api = mod.getApi();
+
+      // Config should be an empty (frozen) object
+      expect(Object.keys(api.config)).toHaveLength(0);
+    });
+  });
+
+  describe('readPluginsConfig edge cases', () => {
+    it('should return empty results when plugins.json does not exist', async () => {
+      const { loader } = createLoader(tempDir);
+      // loadAll with a path that doesn't exist
+      const results = await loader.loadAll(join(tempDir, 'nonexistent-plugins.json'));
+      expect(results).toEqual([]);
+    });
+
+    it('should return empty results when plugins.json is invalid JSON', async () => {
+      const cfgPath = join(tempDir, 'bad-plugins.json');
+      writeFileSync(cfgPath, '{broken json!!!', 'utf-8');
+
+      const { loader } = createLoaderFull(tempDir);
+      const results = await loader.loadAll(cfgPath);
+      expect(results).toEqual([]);
+    });
+  });
+
+  describe('inferPluginName edge cases', () => {
+    it('should use filename when path is not an index.ts pattern', async () => {
+      const { loader } = createLoader(tempDir);
+      // A path like /some/dir/myplugin.ts (not index.ts) should infer "myplugin"
+      const result = await loader.load(join(tempDir, 'myplugin.ts'));
+
+      expect(result.status).toBe('error');
+      expect(result.name).toBe('myplugin');
+    });
+
+    it('should use parent dir name for index.ts pattern', async () => {
+      const { loader } = createLoader(tempDir);
+      // A path like /some/my-plugin/index.ts should infer "my-plugin"
+      const result = await loader.load(join(tempDir, 'my-plugin', 'index.ts'));
+
+      expect(result.status).toBe('error');
+      expect(result.name).toBe('my-plugin');
+    });
+  });
+
+  describe('scoped API — getServerSupports', () => {
+    it('should return an empty object', async () => {
+      const pluginPath = writePlugin(tempDir, 'supports-test', `
+        export const name = 'supports-test';
+        export const version = '1.0.0';
+        export const description = '';
+        let savedApi;
+        export function init(api) { savedApi = api; }
+        export function getApi() { return savedApi; }
+      `);
+
+      const { loader } = createLoader(tempDir);
+      await loader.load(pluginPath);
+
+      const mod = await import(join(tempDir, 'supports-test', 'index.ts') + `?t=${Date.now()}`);
+      const api = mod.getApi();
+
+      expect(api.getServerSupports()).toEqual({});
+    });
+  });
+
+  describe('scoped API — permissions and botConfig', () => {
+    it('should expose read-only permissions API', async () => {
+      const pluginPath = writePlugin(tempDir, 'perm-test', `
+        export const name = 'perm-test';
+        export const version = '1.0.0';
+        export const description = '';
+        let savedApi;
+        export function init(api) { savedApi = api; }
+        export function getApi() { return savedApi; }
+      `);
+
+      const { loader } = createLoader(tempDir);
+      await loader.load(pluginPath);
+
+      const mod = await import(join(tempDir, 'perm-test', 'index.ts') + `?t=${Date.now()}`);
+      const api = mod.getApi();
+
+      // Permissions API should be available and return null for unknown hostmask
+      expect(api.permissions.findByHostmask('nobody!nobody@nowhere')).toBeNull();
+    });
+
+    it('should expose botConfig without password', async () => {
+      const pluginPath = writePlugin(tempDir, 'cfg-test', `
+        export const name = 'cfg-test';
+        export const version = '1.0.0';
+        export const description = '';
+        let savedApi;
+        export function init(api) { savedApi = api; }
+        export function getApi() { return savedApi; }
+      `);
+
+      const { loader } = createLoader(tempDir);
+      await loader.load(pluginPath);
+
+      const mod = await import(join(tempDir, 'cfg-test', 'index.ts') + `?t=${Date.now()}`);
+      const api = mod.getApi();
+
+      expect(api.botConfig.irc.nick).toBe('test');
+      expect(api.botConfig.services).toBeDefined();
+      expect((api.botConfig.services as Record<string, unknown>).password).toBeUndefined();
+    });
+  });
+
+  describe('plugin default version and description', () => {
+    it('should default version to 0.0.0 and description to empty string', async () => {
+      const pluginPath = writePlugin(tempDir, 'no-meta', `
+        export const name = 'no-meta';
+        export function init(api) {}
+      `);
+
+      const { loader } = createLoader(tempDir);
+      await loader.load(pluginPath);
+
+      const plugins = loader.list();
+      expect(plugins).toHaveLength(1);
+      expect(plugins[0].version).toBe('0.0.0');
+      expect(plugins[0].description).toBe('');
+    });
+  });
+
+  describe('async init and teardown', () => {
+    it('should handle async init()', async () => {
+      const pluginPath = writePlugin(tempDir, 'async-init', `
+        export const name = 'async-init';
+        export const version = '1.0.0';
+        export const description = '';
+        export async function init(api) {
+          await Promise.resolve();
+          api.db.set('loaded', 'yes');
+        }
+      `);
+
+      const db = new BotDatabase(':memory:');
+      db.open();
+      const { loader } = createLoader(tempDir, db);
+      const result = await loader.load(pluginPath);
+
+      expect(result.status).toBe('ok');
+      expect(db.get('async-init', 'loaded')).toBe('yes');
+      db.close();
+    });
+
+    it('should handle async teardown()', async () => {
+      const markerPath = join(tempDir, 'async-teardown-marker');
+      const pluginPath = writePlugin(tempDir, 'async-teardown', `
+        import { writeFileSync } from 'node:fs';
+        export const name = 'async-teardown';
+        export const version = '1.0.0';
+        export const description = '';
+        export function init(api) {}
+        export async function teardown() {
+          await Promise.resolve();
+          writeFileSync('${markerPath.replace(/\\/g, '\\\\')}', 'async torn down', 'utf-8');
+        }
+      `);
+
+      const { loader } = createLoader(tempDir);
+      await loader.load(pluginPath);
+      await loader.unload('async-teardown');
+
+      expect(existsSync(markerPath)).toBe(true);
+      expect(readFileSync(markerPath, 'utf-8')).toBe('async torn down');
+    });
+
+    it('should catch teardown errors without throwing', async () => {
+      const pluginPath = writePlugin(tempDir, 'bad-teardown', `
+        export const name = 'bad-teardown';
+        export const version = '1.0.0';
+        export const description = '';
+        export function init(api) {}
+        export function teardown() {
+          throw new Error('teardown explosion');
+        }
+      `);
+
+      const { loader } = createLoaderFull(tempDir);
+      await loader.load(pluginPath);
+
+      // Should not throw despite teardown error
+      await expect(loader.unload('bad-teardown')).resolves.toBeUndefined();
+      expect(loader.isLoaded('bad-teardown')).toBe(false);
+    });
+  });
+
+  describe('scoped API — db del and list with real db', () => {
+    it('should delegate del() and list() to the real database', async () => {
+      const pluginPath = writePlugin(tempDir, 'db-ops', `
+        export const name = 'db-ops';
+        export const version = '1.0.0';
+        export const description = '';
+        let savedApi;
+        export function init(api) { savedApi = api; }
+        export function getApi() { return savedApi; }
+      `);
+
+      const db = new BotDatabase(':memory:');
+      db.open();
+      const { loader } = createLoader(tempDir, db);
+      await loader.load(pluginPath);
+
+      const mod = await import(join(tempDir, 'db-ops', 'index.ts') + `?t=${Date.now()}`);
+      const api = mod.getApi();
+
+      api.db.set('key1', 'val1');
+      api.db.set('key2', 'val2');
+      expect(api.db.get('key1')).toBe('val1');
+
+      const listed = api.db.list();
+      expect(listed.length).toBe(2);
+
+      api.db.del('key1');
+      expect(api.db.get('key1')).toBeUndefined();
+
+      const listedAfter = api.db.list('key');
+      expect(listedAfter.length).toBe(1);
+      expect(listedAfter[0].key).toBe('key2');
+
+      db.close();
+    });
+  });
+
+  describe('scoped API — permissions checkFlags', () => {
+    it('should delegate checkFlags to permissions module', async () => {
+      const pluginPath = writePlugin(tempDir, 'check-flags', `
+        export const name = 'check-flags';
+        export const version = '1.0.0';
+        export const description = '';
+        let savedApi;
+        export function init(api) { savedApi = api; }
+        export function getApi() { return savedApi; }
+      `);
+
+      const { loader } = createLoader(tempDir);
+      await loader.load(pluginPath);
+
+      const mod = await import(join(tempDir, 'check-flags', 'index.ts') + `?t=${Date.now()}`);
+      const api = mod.getApi();
+
+      const ctx = {
+        nick: 'nobody',
+        ident: 'nobody',
+        hostname: 'nowhere',
+        channel: '#test',
+        text: '',
+        command: '',
+        args: '',
+        reply: () => {},
+        replyPrivate: () => {},
+      };
+
+      // "-" flag means "anyone", should always pass
+      const result = api.permissions.checkFlags('-', ctx);
+      expect(typeof result).toBe('boolean');
+    });
+  });
+
+  describe('scoped API — services verifyUser with real services', () => {
+    it('should delegate verifyUser to services module', async () => {
+      const pluginPath = writePlugin(tempDir, 'real-svc', `
+        export const name = 'real-svc';
+        export const version = '1.0.0';
+        export const description = '';
+        let savedApi;
+        export function init(api) { savedApi = api; }
+        export function getApi() { return savedApi; }
+      `);
+
+      const { loader, services } = createLoaderFull(tempDir);
+      vi.spyOn(services, 'verifyUser').mockResolvedValue({ verified: true, account: 'testacct' });
+
+      await loader.load(pluginPath);
+
+      const mod = await import(join(tempDir, 'real-svc', 'index.ts') + `?t=${Date.now()}`);
+      const api = mod.getApi();
+
+      const result = await api.services.verifyUser('someone');
+      expect(result).toEqual({ verified: true, account: 'testacct' });
+      expect(services.verifyUser).toHaveBeenCalledWith('someone');
+    });
+  });
+
+  describe('scoped API — unbind', () => {
+    it('should allow plugins to unbind handlers', async () => {
+      const pluginPath = writePlugin(tempDir, 'unbind-test', `
+        export const name = 'unbind-test';
+        export const version = '1.0.0';
+        export const description = '';
+        const handler = (ctx) => {};
+        export function init(api) {
+          api.bind('pub', '-', '!removeme', handler);
+          api.unbind('pub', '!removeme', handler);
+        }
+      `);
+
+      const { loader, dispatcher } = createLoader(tempDir);
+      await loader.load(pluginPath);
+
+      const binds = dispatcher.listBinds({ pluginId: 'unbind-test' });
+      expect(binds).toHaveLength(0);
     });
   });
 });

@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Permissions } from '../../src/core/permissions.js';
 import { BotDatabase } from '../../src/database.js';
+import { createLogger } from '../../src/logger.js';
 
 describe('Permissions', () => {
   let perms: Permissions;
@@ -94,6 +95,11 @@ describe('Permissions', () => {
 
     it('should throw when removing a nonexistent hostmask', () => {
       expect(() => perms.removeHostmask('admin', '*!bad@mask', 'REPL'))
+        .toThrow('Hostmask "*!bad@mask" not found for user "admin"');
+    });
+
+    it('should throw when removing hostmask from nonexistent user', () => {
+      expect(() => perms.removeHostmask('nobody', '*!t@h', 'REPL'))
         .toThrow('not found');
     });
   });
@@ -253,6 +259,59 @@ describe('Permissions', () => {
       const result = perms.findByNick('anynick');
       expect(result).not.toBeNull();
     });
+
+    it('should skip hostmask patterns without a ! separator', () => {
+      perms.addUser('nobangs', 'justahostmask', '', 'REPL');
+      // 'justahostmask' has no !, so findByNick should skip it
+      const result = perms.findByNick('anynick');
+      expect(result).toBeNull();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // setGlobalFlags / setChannelFlags — error paths
+  // -------------------------------------------------------------------------
+
+  describe('setGlobalFlags / setChannelFlags error paths', () => {
+    it('should throw when setting global flags for nonexistent user', () => {
+      expect(() => perms.setGlobalFlags('nobody', 'o', 'REPL'))
+        .toThrow('not found');
+    });
+
+    it('should throw when setting channel flags for nonexistent user', () => {
+      expect(() => perms.setChannelFlags('nobody', '#test', 'o', 'REPL'))
+        .toThrow('not found');
+    });
+
+    it('should delete channel entry when flags normalize to empty', () => {
+      perms.addUser('user1', '*!u@h', 'o', 'REPL');
+      perms.setChannelFlags('user1', '#test', 'o', 'REPL');
+      expect(perms.getUser('user1')!.channels['#test']).toBe('o');
+
+      // Set empty flags — should remove the channel entry
+      perms.setChannelFlags('user1', '#test', '', 'REPL');
+      expect(perms.getUser('user1')!.channels['#test']).toBeUndefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Insecure hostmask warning
+  // -------------------------------------------------------------------------
+
+  describe('insecure hostmask warning', () => {
+    it('should warn about nick!*@* hostmask for privileged users', () => {
+      const logger = createLogger('debug');
+      // Spy on Logger.prototype.warn before creating the Permissions instance,
+      // so the child logger created internally also gets intercepted.
+      const warnSpy = vi.spyOn(logger.constructor.prototype, 'warn');
+      const permsWithLogger = new Permissions(null, logger);
+      permsWithLogger.addUser('insecure', 'admin!*@*', 'o', 'REPL');
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('SECURITY')
+      );
+      warnSpy.mockRestore();
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -335,6 +394,26 @@ describe('Permissions', () => {
 
       const raw = db.get('_permissions', 'test');
       expect(raw).toBeNull();
+    });
+
+    it('should skip corrupt records when loading from db', () => {
+      // Manually insert a corrupt JSON record into the _permissions namespace
+      db.set('_permissions', 'corrupt', '{not valid json!!!');
+      // Also insert a valid record
+      db.set('_permissions', 'valid', JSON.stringify({
+        handle: 'valid',
+        hostmasks: ['*!v@h'],
+        global: 'o',
+        channels: {},
+      }));
+
+      const p = new Permissions(db);
+      p.loadFromDb();
+
+      // The corrupt record should be skipped, but the valid one loaded
+      expect(p.getUser('corrupt')).toBeNull();
+      expect(p.getUser('valid')).not.toBeNull();
+      expect(p.getUser('valid')!.global).toBe('o');
     });
   });
 });

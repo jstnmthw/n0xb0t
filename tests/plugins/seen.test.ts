@@ -148,4 +148,125 @@ describe('seen plugin', () => {
     expect(db.get('seen', 'seen:alice')).toBeTruthy();
     expect(db.get('other-plugin', 'seen:alice')).toBeNull();
   });
+
+  it('should reply "haven\'t seen" when stored JSON is corrupt', async () => {
+    // Manually insert corrupt JSON into the seen namespace
+    db.set('seen', 'seen:corrupt', '{not valid json!!!');
+
+    const ctx = makePubCtx('bob', '!seen corrupt');
+    await dispatcher.dispatch('pub', ctx);
+
+    expect(ctx.reply).toHaveBeenCalledWith("I haven't seen corrupt.");
+  });
+
+  it('should delete stale record during query and reply "haven\'t seen"', async () => {
+    // To hit the stale-check branch (lines 56-59), we need the record to survive
+    // cleanupStale but then fail the age check in the query handler.
+    // We achieve this by mocking Date.now() to advance time between calls.
+    const baseTime = 1_000_000_000_000;
+    const maxAgeMs = 365 * 24 * 60 * 60 * 1000;
+
+    // Record was created at a time just barely within the max age window
+    const recordTime = baseTime - maxAgeMs + 500; // 500ms under the limit
+    const record = JSON.stringify({
+      nick: 'ancient',
+      channel: '#test',
+      text: 'old message',
+      time: recordTime,
+    });
+    db.set('seen', 'seen:ancient', record);
+
+    // First calls to Date.now() (during cleanupStale): record is fresh
+    // Later call (during age check in handler): record is stale
+    let callCount = 0;
+    const spy = vi.spyOn(Date, 'now');
+    spy.mockImplementation(() => {
+      callCount++;
+      // The first call is in cleanupStale (const now = Date.now()),
+      // the second is in the handler (const age = Date.now() - record.time)
+      if (callCount <= 1) return baseTime; // cleanupStale: record is fresh (500ms under limit)
+      return baseTime + 1000; // handler: record is now 500ms over limit
+    });
+
+    const ctx = makePubCtx('bob', '!seen ancient');
+    await dispatcher.dispatch('pub', ctx);
+
+    spy.mockRestore();
+
+    expect(ctx.reply).toHaveBeenCalledWith("I haven't seen ancient.");
+    // The stale entry should have been deleted during query
+    expect(db.get('seen', 'seen:ancient')).toBeNull();
+  });
+
+  it('should remove corrupt entries during cleanupStale', async () => {
+    // Insert a corrupt entry and a valid recent entry
+    db.set('seen', 'seen:badentry', 'NOT JSON');
+    const validRecord = JSON.stringify({
+      nick: 'gooduser',
+      channel: '#test',
+      text: 'hi',
+      time: Date.now(),
+    });
+    db.set('seen', 'seen:gooduser', validRecord);
+
+    // Trigger cleanupStale by issuing a !seen query
+    const ctx = makePubCtx('bob', '!seen gooduser');
+    await dispatcher.dispatch('pub', ctx);
+
+    // The corrupt entry should have been cleaned up
+    expect(db.get('seen', 'seen:badentry')).toBeNull();
+    // The valid entry should still exist
+    expect(db.get('seen', 'seen:gooduser')).toBeTruthy();
+  });
+
+  it('should format relative time in minutes', async () => {
+    // Insert a record from ~5 minutes ago
+    const fiveMinAgo = Date.now() - (5 * 60 * 1000 + 500);
+    db.set('seen', 'seen:minuser', JSON.stringify({
+      nick: 'minuser',
+      channel: '#test',
+      text: 'hi',
+      time: fiveMinAgo,
+    }));
+
+    const ctx = makePubCtx('bob', '!seen minuser');
+    await dispatcher.dispatch('pub', ctx);
+
+    const response = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    expect(response).toMatch(/\d+m ago/);
+  });
+
+  it('should format relative time in hours', async () => {
+    // Insert a record from ~3 hours ago
+    const threeHrsAgo = Date.now() - (3 * 60 * 60 * 1000 + 500);
+    db.set('seen', 'seen:houruser', JSON.stringify({
+      nick: 'houruser',
+      channel: '#test',
+      text: 'hi',
+      time: threeHrsAgo,
+    }));
+
+    const ctx = makePubCtx('bob', '!seen houruser');
+    await dispatcher.dispatch('pub', ctx);
+
+    const response = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    expect(response).toMatch(/\d+h \d+m ago/);
+  });
+
+  it('should format relative time in days', async () => {
+    // Insert a record from ~2 days ago
+    const twoDaysAgo = Date.now() - (2 * 24 * 60 * 60 * 1000 + 500);
+    db.set('seen', 'seen:dayuser', JSON.stringify({
+      nick: 'dayuser',
+      channel: '#test',
+      text: 'hi',
+      time: twoDaysAgo,
+    }));
+
+    const ctx = makePubCtx('bob', '!seen dayuser');
+    await dispatcher.dispatch('pub', ctx);
+
+    const response = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    expect(response).toMatch(/\d+d \d+h ago/);
+  });
 });
