@@ -1,6 +1,7 @@
 // n0xb0t — IRC commands core module
 // Convenience wrappers for common IRC operations with mod action logging.
 
+import { sanitize } from '../utils/sanitize.js';
 import type { BotDatabase } from '../database.js';
 
 // ---------------------------------------------------------------------------
@@ -62,7 +63,7 @@ export class IRCCommands {
   }
 
   kick(channel: string, nick: string, reason?: string): void {
-    const safe = reason?.replace(/[\r\n]/g, '') ?? '';
+    const safe = sanitize(reason ?? '');
     this.client.raw(`KICK ${channel} ${nick} :${safe}`);
     this.logMod('kick', channel, nick, 'bot', reason ?? null);
   }
@@ -96,7 +97,7 @@ export class IRCCommands {
   }
 
   topic(channel: string, text: string): void {
-    const safe = text.replace(/[\r\n]/g, '');
+    const safe = sanitize(text);
     this.client.raw(`TOPIC ${channel} :${safe}`);
   }
 

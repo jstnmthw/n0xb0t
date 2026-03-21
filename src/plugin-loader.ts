@@ -5,6 +5,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { sanitize } from './utils/sanitize.js';
 import type { EventDispatcher } from './dispatcher.js';
 import type { BotEventBus } from './event-bus.js';
 import type { BotDatabase } from './database.js';
@@ -356,7 +357,7 @@ export class PluginLoader {
         ircClient?.notice(target, message);
       },
       raw(line: string): void {
-        ircClient?.raw(line.replace(/[\r\n]/g, ''));
+        ircClient?.raw(sanitize(line));
       },
 
       // IRC channel operations (delegated to IRCCommands)
@@ -380,6 +381,9 @@ export class PluginLoader {
       },
       mode(channel: string, modes: string, ...params: string[]): void {
         ircCommands?.mode(channel, modes, ...params);
+      },
+      topic(channel: string, text: string): void {
+        ircCommands?.topic(channel, text);
       },
 
       // Channel state

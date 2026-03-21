@@ -1,6 +1,7 @@
 // n0xb0t — IRC admin commands
 // Registers .say, .join, .part, .status with the command handler.
 
+import { sanitize } from '../../utils/sanitize.js';
 import type { CommandHandler } from '../../command-handler.js';
 
 /** Minimal IRC client interface for admin commands. */
@@ -46,8 +47,7 @@ export function registerIRCAdminCommands(
       ctx.reply('Usage: .say <target> <message>');
       return;
     }
-    // Strip newlines for safety
-    const safe = message.replace(/[\r\n]/g, '');
+    const safe = sanitize(message);
     client.say(target, safe);
     ctx.reply(`Message sent to ${target}`);
   });

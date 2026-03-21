@@ -4,5 +4,6 @@ export default defineConfig({
   test: {
     passWithNoTests: true,
     setupFiles: ['tests/setup.ts'],
+    exclude: ['**/node_modules/**', '.claude/worktrees/**'],
   },
 });

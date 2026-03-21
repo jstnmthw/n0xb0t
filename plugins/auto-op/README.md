@@ -24,10 +24,11 @@ When a user joins a channel, the plugin:
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `verify_timeout_ms` | number | 5000 | Timeout for NickServ ACC verification |
-| `notify_on_fail` | boolean | false | Send a notice to the user if verification fails |
 | `op_flags` | string[] | `["n", "m", "o"]` | Flags that trigger +o |
 | `voice_flags` | string[] | `["v"]` | Flags that trigger +v |
+| `notify_on_fail` | boolean | `false` | Send a notice to the user if verification fails |
+
+NickServ verification timeout is controlled by the Services core module (default 5 seconds), not by this plugin.
 
 ## Security
 

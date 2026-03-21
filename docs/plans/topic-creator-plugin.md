@@ -22,7 +22,7 @@ A plugin that lets channel operators set styled IRC topics using pre-built color
 - [x] Dispatcher bind system (`src/dispatcher.ts`)
 - [x] IRC commands core module (`src/core/irc-commands.ts`) — `topic()` exists
 - [x] Channel state (`src/core/channel-state.ts`) — can read current topic
-- [ ] Expose `topic()` on `PluginAPI` interface
+- [x] Expose `topic()` on `PluginAPI` interface
 
 ## Phases
 
@@ -30,9 +30,9 @@ A plugin that lets channel operators set styled IRC topics using pre-built color
 
 **Goal:** Add `topic(channel, text)` to the plugin interface so plugins can set topics using a typed method instead of `api.raw()`.
 
-- [ ] Add `topic(channel: string, text: string): void` to the `PluginAPI` interface in `src/types.ts`
-- [ ] Wire it up in `src/plugin-loader.ts` where the scoped API object is constructed — delegate to `ircCommands.topic(channel, text)`
-- [ ] Verify: load any existing plugin, confirm `api.topic` is a function on the API object
+- [x] Add `topic(channel: string, text: string): void` to the `PluginAPI` interface in `src/types.ts`
+- [x] Wire it up in `src/plugin-loader.ts` where the scoped API object is constructed — delegate to `ircCommands.topic(channel, text)`
+- [x] Verify: load any existing plugin, confirm `api.topic` is a function on the API object
 
 ### Phase 2: Plugin with built-in themes
 
@@ -56,15 +56,15 @@ The `$text` placeholder is replaced with the user's sanitized input at runtime.
 
 #### Tasks
 
-- [ ] Create `plugins/topic/themes.ts` — map of theme name → IRC-formatted template string (all 22 built-in themes with `\x03` escapes)
-- [ ] Create `plugins/topic/config.json` — default config:
+- [x] Create `plugins/topic/themes.ts` — map of theme name → IRC-formatted template string (all 22 built-in themes with `\x03` escapes)
+- [x] Create `plugins/topic/config.json` — default config:
   ```json
   {
     "default_theme": "silverscreen"
   }
   ```
-- [ ] Create `plugins/topic/index.ts` — plugin skeleton (name, version, description, init, teardown)
-- [ ] Implement `!topic <theme> <text>` command:
+- [x] Create `plugins/topic/index.ts` — plugin skeleton (name, version, description, init, teardown)
+- [x] Implement `!topic <theme> <text>` command:
   - Bind: `api.bind('pub', 'o', '!topic', handler)` — requires `o` flag
   - Parse args: first word is theme name, rest is topic text
   - If no args → reply with usage: `Usage: !topic <theme> <text> | !topic preview <theme> <text>`
@@ -74,15 +74,15 @@ The `$text` placeholder is replaced with the user's sanitized input at runtime.
   - Replace `$text` in template with sanitized text
   - Send via `api.topic(channel, formatted)`
   - Reply with confirmation
-- [ ] Implement `!topic preview <theme> <text>` subcommand:
+- [x] Implement `!topic preview <theme> <text>` subcommand:
   - When first arg is `preview`, treat second arg as theme name and rest as text
   - Sends the formatted text as a regular channel message (`api.say()`) instead of setting the topic
   - Lets users preview a theme before committing
-- [ ] Implement `!topics` command:
+- [x] Implement `!topics` command:
   - Bind: `api.bind('pub', '-', '!topics', handler)` — anyone can list
   - List all available theme names
   - Reply with comma-separated list (keep under IRC line limit)
-- [ ] Create `plugins/topic/README.md`
+- [x] Create `plugins/topic/README.md`
 
 #### Verification
 - Load plugin via `.load topic`

@@ -22,7 +22,7 @@ In `config/plugins.json`:
 }
 ```
 
-| Key | Default | Description |
-|-----|---------|-------------|
-| `message` | `Welcome to {channel}, {nick}!` | Greeting template. `{channel}` and `{nick}` are replaced. |
-| `botNick` | `""` | The bot's nick — won't greet itself. |
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `message` | string | `Welcome to {channel}, {nick}!` | Greeting template. `{channel}` and `{nick}` are replaced. |
+| `botNick` | string | `""` | The bot's nick — the plugin won't greet itself. |

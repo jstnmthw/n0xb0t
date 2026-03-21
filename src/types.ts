@@ -90,6 +90,7 @@ export interface PluginAPI {
   kick(channel: string, nick: string, reason?: string): void;
   ban(channel: string, mask: string): void;
   mode(channel: string, modes: string, ...params: string[]): void;
+  topic(channel: string, text: string): void;
 
   // Channel state
   getChannel(name: string): ChannelState | undefined;

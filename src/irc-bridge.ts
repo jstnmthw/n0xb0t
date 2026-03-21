@@ -2,6 +2,7 @@
 // Translates irc-framework events into dispatcher events.
 // This is the trust boundary — all IRC data entering the dispatcher passes through here.
 
+import { sanitize } from './utils/sanitize.js';
 import { splitMessage } from './utils/split-message.js';
 import type { EventDispatcher } from './dispatcher.js';
 import type { BotEventBus } from './event-bus.js';
@@ -29,11 +30,6 @@ interface IRCBridgeOptions {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** Strip \r and \n from text to prevent IRC protocol injection. */
-function sanitize(text: string): string {
-  return text.replace(/[\r\n]/g, '');
-}
 
 /** Strip IRC formatting/control characters (bold, color, underline, etc.) from text. */
 const IRC_FORMATTING_CHARS = String.fromCharCode(0x02, 0x03, 0x0F, 0x16, 0x1D, 0x1E, 0x1F);
