@@ -1,4 +1,4 @@
-// n0xb0t — Eggdrop-style event dispatcher
+// n0xb0t — Event dispatcher
 // Routes IRC events to registered handlers based on bind type, mask, and flags.
 
 import { wildcardMatch } from './utils/wildcard.js';

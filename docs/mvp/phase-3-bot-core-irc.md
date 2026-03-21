@@ -14,17 +14,17 @@ Wire up `irc-framework`, bridge IRC events to the dispatcher, implement the REPL
 
 **Goal:** A typed EventEmitter for internal bot events (separate from IRC dispatcher).
 
-- [ ] Create `src/event-bus.ts`:
+- [x] Create `src/event-bus.ts`:
   - Export a typed `EventEmitter` using a `BotEvents` interface (no wrapper class needed — use TypeScript's typed EventEmitter pattern)
   - Event names: `bot:connected`, `bot:disconnected`, `bot:error`, `plugin:loaded`, `plugin:unloaded`, `plugin:reloaded`, `mod:op`, `mod:kick`, `mod:ban`, `user:identified`
   - The bot instantiates one and passes it to modules that need it
-- [ ] No tests needed for this — it's a typed emitter. Will be tested through integration.
+- [x] No tests needed for this — it's a typed emitter. Will be tested through integration.
 
 ## Phase 3B: IRC bridge
 
 **Goal:** Translate irc-framework events into dispatcher events. This is the adapter layer between the IRC library and the bind system.
 
-- [ ] Create `src/irc-bridge.ts` implementing the `IRCBridge` class:
+- [x] Create `src/irc-bridge.ts` implementing the `IRCBridge` class:
   - Constructor takes `{ client, dispatcher, eventBus, botNick }`
   - `attach()` — register all irc-framework event listeners:
     - `message` → parse into pub/pubm or msg/msgm, build `HandlerContext`, dispatch both
@@ -49,7 +49,7 @@ Wire up `irc-framework`, bridge IRC events to the dispatcher, implement the REPL
 
 **Goal:** Thin orchestrator that wires modules together. The Bot creates and connects the pieces but delegates all real work.
 
-- [ ] Create `src/bot.ts` implementing the `Bot` class:
+- [x] Create `src/bot.ts` implementing the `Bot` class:
   - Constructor takes config path (default `./config/bot.json`)
   - `async start()`:
     1. Load and validate config from JSON file
@@ -71,15 +71,15 @@ Wire up `irc-framework`, bridge IRC events to the dispatcher, implement the REPL
   - `async shutdown()`: bridge.detach(), disconnect, close database
   - Expose `client`, `dispatcher`, `permissions`, `db`, `commandHandler`, `config`, `eventBus` as readonly properties
 
-- [ ] Handle config file not found: print helpful error message and exit
-- [ ] Handle config file invalid JSON: print parse error with line number and exit
-- [ ] Handle IRC connection failure: log error, retry based on auto-reconnect settings
+- [x] Handle config file not found: print helpful error message and exit
+- [x] Handle config file invalid JSON: print parse error with line number and exit
+- [x] Handle IRC connection failure: log error, retry based on auto-reconnect settings
 
 ## Phase 3D: REPL
 
 **Goal:** Interactive terminal REPL when started with `--repl` flag.
 
-- [ ] Create `src/repl.ts` implementing the `BotREPL` class:
+- [x] Create `src/repl.ts` implementing the `BotREPL` class:
   - Constructor takes the `Bot` instance
   - `start()`:
     - Create readline interface on stdin/stdout
@@ -95,7 +95,7 @@ Wire up `irc-framework`, bridge IRC events to the dispatcher, implement the REPL
 
 **Goal:** Wire everything together in `src/index.ts`.
 
-- [ ] Update `src/index.ts`:
+- [x] Update `src/index.ts`:
   - Parse command-line args: `--repl`, `--config <path>`
   - Create Bot instance
   - Call `bot.start()`
@@ -126,25 +126,25 @@ This phase requires a real IRC connection. Either:
 
 ## Phase 3G: Automated tests (where possible)
 
-- [ ] Create `tests/helpers/mock-irc.ts`:
+- [x] Create `tests/helpers/mock-irc.ts`:
   - Mock irc-framework Client that captures outgoing messages
   - Can simulate incoming events
   - Tracks join/part/mode/say calls
-- [ ] Create `tests/helpers/mock-bot.ts`:
+- [x] Create `tests/helpers/mock-bot.ts`:
   - Creates a Bot-like object with real dispatcher, real permissions, real database (temp file), real command handler
   - Uses mock IRC client instead of real connection
   - Returns `{ bot, messages, events }` for assertions
-- [ ] Create `tests/irc-bridge.test.ts`:
+- [x] Create `tests/irc-bridge.test.ts`:
   - Test that IRC message events are correctly bridged to dispatcher pub/pubm
   - Test that private messages are bridged to msg/msgm
   - Test that join/part/kick events are dispatched
   - Test that HandlerContext is built correctly from irc-framework event data
-- [ ] Create `tests/bot.test.ts`:
+- [x] Create `tests/bot.test.ts`:
   - Test that admin commands via IRC route through command handler
   - Test that `.say` sends a message via the IRC client
   - Test startup sequence creates all modules
   - Test shutdown cleans up bridge, database, connection
-- [ ] **Verify:** `pnpm test` — all tests pass (Phase 1 + 2 + 3)
+- [x] **Verify:** `pnpm test` — all tests pass (Phase 1 + 2 + 3)
 
 ---
 

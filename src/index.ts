@@ -1,6 +1,68 @@
-// n0xb0t — Modular IRC bot framework
-// This is a placeholder. Real implementation starts in Phase 1.
+// n0xb0t — Entry point
+// Parses CLI args, starts the bot, optionally starts the REPL.
 
-console.log('[n0xb0t] Phase 0 scaffolding complete. Nothing to run yet.');
-console.log('[n0xb0t] Run "pnpm test" to verify the project is set up correctly.');
-process.exit(0);
+import { Bot } from './bot.js';
+import { BotREPL } from './repl.js';
+
+// ---------------------------------------------------------------------------
+// CLI argument parsing
+// ---------------------------------------------------------------------------
+
+const args = process.argv.slice(2);
+const useRepl = args.includes('--repl');
+const configIdx = args.indexOf('--config');
+const configPath = configIdx !== -1 ? args[configIdx + 1] : undefined;
+
+// ---------------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------------
+
+let bot: Bot | null = null;
+
+async function main(): Promise<void> {
+  bot = new Bot(configPath);
+
+  await bot.start();
+
+  if (useRepl) {
+    const repl = new BotREPL(bot);
+    repl.start();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Signal / error handlers
+// ---------------------------------------------------------------------------
+
+async function gracefulShutdown(signal: string): Promise<void> {
+  console.log(`\n[bot] Received ${signal}, shutting down...`);
+  if (bot) {
+    await bot.shutdown();
+  }
+  process.exit(0);
+}
+
+process.on('SIGINT', () => { gracefulShutdown('SIGINT'); });
+process.on('SIGTERM', () => { gracefulShutdown('SIGTERM'); });
+
+process.on('uncaughtException', (err) => {
+  console.error('[bot] Uncaught exception:', err);
+  if (bot) {
+    bot.shutdown().finally(() => process.exit(1));
+  } else {
+    process.exit(1);
+  }
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[bot] Unhandled rejection:', reason);
+});
+
+// ---------------------------------------------------------------------------
+// Start
+// ---------------------------------------------------------------------------
+
+main().catch((err) => {
+  console.error('[bot] Fatal error during startup:', err);
+  process.exit(1);
+});

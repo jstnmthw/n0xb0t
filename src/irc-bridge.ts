@@ -1,0 +1,354 @@
+// n0xb0t — IRC bridge
+// Translates irc-framework events into dispatcher events.
+// This is the trust boundary — all IRC data entering the dispatcher passes through here.
+
+import type { EventDispatcher } from './dispatcher.js';
+import type { BotEventBus } from './event-bus.js';
+import type { HandlerContext } from './types.js';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/** Minimal irc-framework Client interface (for testability). */
+export interface IRCClient {
+  on(event: string, listener: (...args: unknown[]) => void): void;
+  removeListener(event: string, listener: (...args: unknown[]) => void): void;
+  say(target: string, message: string): void;
+  notice(target: string, message: string): void;
+}
+
+interface IRCBridgeOptions {
+  client: IRCClient;
+  dispatcher: EventDispatcher;
+  eventBus: BotEventBus;
+  botNick: string;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Strip \r and \n from text to prevent IRC protocol injection. */
+function sanitize(text: string): string {
+  return text.replace(/[\r\n]/g, '');
+}
+
+/** Strip IRC formatting/control characters (bold, color, underline, etc.) from text. */
+const IRC_FORMATTING_CHARS = String.fromCharCode(0x02, 0x03, 0x0F, 0x16, 0x1D, 0x1E, 0x1F);
+const IRC_COLOR_CHAR = String.fromCharCode(0x03);
+const IRC_FORMAT_RE = new RegExp(
+  `[${IRC_FORMATTING_CHARS}]|${IRC_COLOR_CHAR}\\d{1,2}(,\\d{1,2})?`,
+  'g',
+);
+function stripFormatting(text: string): string {
+  return text.replace(IRC_FORMAT_RE, '');
+}
+
+/** Validate channel name starts with # or &. */
+function isValidChannel(name: string): boolean {
+  return /^[#&]/.test(name);
+}
+
+// ---------------------------------------------------------------------------
+// IRCBridge
+// ---------------------------------------------------------------------------
+
+export class IRCBridge {
+  private client: IRCClient;
+  private dispatcher: EventDispatcher;
+  private eventBus: BotEventBus;
+  private botNick: string;
+  private listeners: Array<{ event: string; fn: (...args: unknown[]) => void }> = [];
+
+  constructor(options: IRCBridgeOptions) {
+    this.client = options.client;
+    this.dispatcher = options.dispatcher;
+    this.eventBus = options.eventBus;
+    this.botNick = options.botNick;
+  }
+
+  /** Register all irc-framework event listeners. */
+  attach(): void {
+    this.listenIrc('privmsg', this.onPrivmsg.bind(this));
+    this.listenIrc('action', this.onAction.bind(this));
+    this.listenIrc('join', this.onJoin.bind(this));
+    this.listenIrc('part', this.onPart.bind(this));
+    this.listenIrc('kick', this.onKick.bind(this));
+    this.listenIrc('nick', this.onNick.bind(this));
+    this.listenIrc('mode', this.onMode.bind(this));
+    this.listenIrc('notice', this.onNotice.bind(this));
+    this.listenIrc('ctcp request', this.onCtcp.bind(this));
+
+    console.log('[irc-bridge] Attached to IRC client');
+  }
+
+  /** Remove all listeners (for clean shutdown). */
+  detach(): void {
+    for (const { event, fn } of this.listeners) {
+      this.client.removeListener(event, fn);
+    }
+    this.listeners = [];
+    console.log('[irc-bridge] Detached from IRC client');
+  }
+
+  /** Update the bot nick (e.g., after a nick change). */
+  setBotNick(nick: string): void {
+    this.botNick = nick;
+  }
+
+  // -------------------------------------------------------------------------
+  // Event handlers
+  // -------------------------------------------------------------------------
+
+  private onPrivmsg(event: Record<string, unknown>): void {
+    const nick = sanitize(String(event.nick ?? ''));
+    const ident = sanitize(String(event.ident ?? ''));
+    const hostname = sanitize(String(event.hostname ?? ''));
+    const target = sanitize(String(event.target ?? ''));
+    const message = sanitize(String(event.message ?? ''));
+
+    const isChannel = isValidChannel(target);
+    const channel = isChannel ? target : null;
+
+    // Parse command and args from the message text
+    const stripped = stripFormatting(message);
+    const spaceIdx = stripped.indexOf(' ');
+    const command = spaceIdx === -1 ? stripped : stripped.substring(0, spaceIdx);
+    const args = spaceIdx === -1 ? '' : stripped.substring(spaceIdx + 1).trim();
+
+    const ctx = this.buildContext({
+      nick, ident, hostname, channel,
+      text: message,
+      command,
+      args,
+    });
+
+    if (isChannel) {
+      // Dispatch pub (exact command) and pubm (wildcard on full text)
+      this.dispatcher.dispatch('pub', ctx).catch(this.dispatchError('pub'));
+      this.dispatcher.dispatch('pubm', ctx).catch(this.dispatchError('pubm'));
+    } else {
+      // Private message
+      this.dispatcher.dispatch('msg', ctx).catch(this.dispatchError('msg'));
+      this.dispatcher.dispatch('msgm', ctx).catch(this.dispatchError('msgm'));
+    }
+  }
+
+  private onAction(event: Record<string, unknown>): void {
+    const nick = sanitize(String(event.nick ?? ''));
+    const ident = sanitize(String(event.ident ?? ''));
+    const hostname = sanitize(String(event.hostname ?? ''));
+    const target = sanitize(String(event.target ?? ''));
+    const message = sanitize(String(event.message ?? ''));
+
+    const isChannel = isValidChannel(target);
+    const channel = isChannel ? target : null;
+
+    const ctx = this.buildContext({
+      nick, ident, hostname, channel,
+      text: message,
+      command: '',
+      args: message,
+    });
+
+    // Actions dispatch through pubm/msgm (wildcard text match)
+    if (isChannel) {
+      this.dispatcher.dispatch('pubm', ctx).catch(this.dispatchError('pubm'));
+    } else {
+      this.dispatcher.dispatch('msgm', ctx).catch(this.dispatchError('msgm'));
+    }
+  }
+
+  private onJoin(event: Record<string, unknown>): void {
+    const nick = sanitize(String(event.nick ?? ''));
+    const ident = sanitize(String(event.ident ?? ''));
+    const hostname = sanitize(String(event.hostname ?? ''));
+    const channel = sanitize(String(event.channel ?? ''));
+
+    if (!isValidChannel(channel)) return;
+
+    const ctx = this.buildContext({
+      nick, ident, hostname, channel,
+      text: `${channel} ${nick}!${ident}@${hostname}`,
+      command: 'JOIN',
+      args: '',
+    });
+
+    this.dispatcher.dispatch('join', ctx).catch(this.dispatchError('join'));
+  }
+
+  private onPart(event: Record<string, unknown>): void {
+    const nick = sanitize(String(event.nick ?? ''));
+    const ident = sanitize(String(event.ident ?? ''));
+    const hostname = sanitize(String(event.hostname ?? ''));
+    const channel = sanitize(String(event.channel ?? ''));
+    const message = sanitize(String(event.message ?? ''));
+
+    if (!isValidChannel(channel)) return;
+
+    const ctx = this.buildContext({
+      nick, ident, hostname, channel,
+      text: `${channel} ${nick}!${ident}@${hostname}`,
+      command: 'PART',
+      args: message,
+    });
+
+    this.dispatcher.dispatch('part', ctx).catch(this.dispatchError('part'));
+  }
+
+  private onKick(event: Record<string, unknown>): void {
+    const kicker = sanitize(String(event.nick ?? ''));
+    const ident = sanitize(String(event.ident ?? ''));
+    const hostname = sanitize(String(event.hostname ?? ''));
+    const channel = sanitize(String(event.channel ?? ''));
+    const kicked = sanitize(String(event.kicked ?? ''));
+    const message = sanitize(String(event.message ?? ''));
+
+    if (!isValidChannel(channel)) return;
+
+    // For kick events, the context nick is the kicked user
+    const reason = message ? `${message} (by ${kicker})` : `by ${kicker}`;
+    const ctx = this.buildContext({
+      nick: kicked,
+      ident,
+      hostname,
+      channel,
+      text: `${channel} ${kicked}!${ident}@${hostname}`,
+      command: 'KICK',
+      args: reason,
+    });
+
+    this.dispatcher.dispatch('kick', ctx).catch(this.dispatchError('kick'));
+  }
+
+  private onNick(event: Record<string, unknown>): void {
+    const nick = sanitize(String(event.nick ?? ''));
+    const ident = sanitize(String(event.ident ?? ''));
+    const hostname = sanitize(String(event.hostname ?? ''));
+    const newNick = sanitize(String(event.new_nick ?? ''));
+
+    // Track bot's own nick changes
+    if (nick === this.botNick) {
+      this.botNick = newNick;
+    }
+
+    const ctx = this.buildContext({
+      nick,
+      ident,
+      hostname,
+      channel: null,
+      text: newNick,
+      command: 'NICK',
+      args: newNick,
+    });
+
+    this.dispatcher.dispatch('nick', ctx).catch(this.dispatchError('nick'));
+  }
+
+  private onMode(event: Record<string, unknown>): void {
+    const nick = sanitize(String(event.nick ?? ''));
+    const ident = sanitize(String(event.ident ?? ''));
+    const hostname = sanitize(String(event.hostname ?? ''));
+    const target = sanitize(String(event.target ?? ''));
+    const modes = event.modes as Array<{ mode: string; param?: string }> | undefined;
+
+    if (!modes || !isValidChannel(target)) return;
+
+    // Break compound modes into individual dispatches
+    for (const m of modes) {
+      const modeStr = sanitize(String(m.mode ?? ''));
+      const param = m.param ? sanitize(String(m.param)) : '';
+      const modeText = `${target} ${modeStr}${param ? ' ' + param : ''}`;
+
+      const ctx = this.buildContext({
+        nick,
+        ident,
+        hostname,
+        channel: target,
+        text: modeText,
+        command: modeStr,
+        args: param,
+      });
+
+      this.dispatcher.dispatch('mode', ctx).catch(this.dispatchError('mode'));
+    }
+  }
+
+  private onNotice(event: Record<string, unknown>): void {
+    const nick = sanitize(String(event.nick ?? ''));
+    const ident = sanitize(String(event.ident ?? ''));
+    const hostname = sanitize(String(event.hostname ?? ''));
+    const target = sanitize(String(event.target ?? ''));
+    const message = sanitize(String(event.message ?? ''));
+
+    const isChannel = isValidChannel(target);
+    const channel = isChannel ? target : null;
+
+    const ctx = this.buildContext({
+      nick, ident, hostname, channel,
+      text: message,
+      command: 'NOTICE',
+      args: message,
+    });
+
+    this.dispatcher.dispatch('notice', ctx).catch(this.dispatchError('notice'));
+  }
+
+  private onCtcp(event: Record<string, unknown>): void {
+    const nick = sanitize(String(event.nick ?? ''));
+    const ident = sanitize(String(event.ident ?? ''));
+    const hostname = sanitize(String(event.hostname ?? ''));
+    const type = sanitize(String(event.type ?? '')).toUpperCase();
+    const message = sanitize(String(event.message ?? ''));
+
+    const ctx = this.buildContext({
+      nick, ident, hostname,
+      channel: null,
+      text: message,
+      command: type,
+      args: message,
+    });
+
+    this.dispatcher.dispatch('ctcp', ctx).catch(this.dispatchError('ctcp'));
+  }
+
+  // -------------------------------------------------------------------------
+  // Internal helpers
+  // -------------------------------------------------------------------------
+
+  /** Wrap a typed handler for use with the generic irc-framework event API. */
+  private listenIrc(event: string, handler: (event: Record<string, unknown>) => void): void {
+    const fn = (...args: unknown[]) => handler((args[0] ?? {}) as Record<string, unknown>);
+    this.client.on(event, fn);
+    this.listeners.push({ event, fn });
+  }
+
+  private buildContext(fields: {
+    nick: string;
+    ident: string;
+    hostname: string;
+    channel: string | null;
+    text: string;
+    command: string;
+    args: string;
+  }): HandlerContext {
+    const client = this.client;
+    return {
+      ...fields,
+      reply: (msg: string) => {
+        const target = fields.channel ?? fields.nick;
+        client.say(target, sanitize(msg));
+      },
+      replyPrivate: (msg: string) => {
+        client.notice(fields.nick, sanitize(msg));
+      },
+    };
+  }
+
+  private dispatchError(type: string): (err: unknown) => void {
+    return (err) => {
+      console.error(`[irc-bridge] Dispatch error (${type}):`, err);
+    };
+  }
+}

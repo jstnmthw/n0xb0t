@@ -1,4 +1,4 @@
-// n0xb0t — Eggdrop-style permissions system
+// n0xb0t — Permissions system
 // Hostmask-based identity, n/m/o/v flags with per-channel overrides.
 
 import { wildcardMatch } from '../utils/wildcard.js';

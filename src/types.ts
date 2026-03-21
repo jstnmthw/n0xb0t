@@ -5,7 +5,7 @@
 // Bind system types
 // ---------------------------------------------------------------------------
 
-/** Bind types supported by the dispatcher (Eggdrop-style). */
+/** Bind types supported by the dispatcher. */
 export type BindType =
   | 'pub'    // Channel message — exact command match, non-stackable
   | 'pubm'   // Channel message — wildcard on full text, stackable
