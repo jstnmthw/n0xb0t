@@ -259,4 +259,4 @@ Before shipping a plugin:
 
 ## Full API reference
 
-See [docs/plugin-api.md](../docs/plugin-api.md) for the complete PluginAPI surface including channel state, permissions, services, and all 13 bind types.
+See [docs/PLUGIN_API.md](../docs/PLUGIN_API.md) for the complete PluginAPI surface including channel state, permissions, services, and all 13 bind types.
