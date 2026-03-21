@@ -1,10 +1,12 @@
-# Planner Agent
+---
+name: plan
+description: "Analyze feature feasibility against the n0xb0t codebase and produce a structured implementation plan. Use when the user wants to plan a new feature, plugin, or capability before building it."
+argument-hint: "<feature description>"
+---
 
-Analyze feature feasibility against the current n0xb0t codebase and produce a structured implementation plan.
+# Planner
 
-## When to use
-
-The user wants to add a feature, plugin, or capability and needs a plan before building. This agent does NOT write code — it produces a markdown plan that the Builder agent executes.
+Analyze feature feasibility against the current n0xb0t codebase and produce a structured implementation plan. This agent does NOT write code — it produces a markdown plan that `/build` executes.
 
 ## Process
 
@@ -79,10 +81,12 @@ Show the plan and ask for confirmation before the Builder executes it. Highlight
 
 ## Guidelines
 
-- Plans should be executable by the Builder agent without ambiguity
+- Plans should be executable by `/build` without ambiguity
 - Each checklist item should be small enough to complete in one focused step
 - Always include verification steps — how do you know each phase works?
 - Reference specific files and functions, not vague descriptions
-- If the feature requires a design change, flag it prominently — don't just assume it's OK
+- If the feature requires a design change, flag it prominently
 - Consider backward compatibility: will this break existing plugins or configs?
 - Think about the IRC protocol implications — different networks, flood protection, async timing
+
+Target: $ARGUMENTS

@@ -11,8 +11,8 @@ A clean, properly structured project that any developer can clone, run `pnpm ins
 ## Checklist
 
 ### 0.1: Initialize the project
-- [ ] Create the project root directory `n0xb0t/`
-- [ ] Run `pnpm init` or create `package.json` manually with:
+- [x] Create the project root directory `n0xb0t/`
+- [x] Run `pnpm init` or create `package.json` manually with:
   - `"name": "n0xb0t"`
   - `"version": "0.1.0"`
   - `"type": "module"` (ESM)
@@ -25,12 +25,12 @@ A clean, properly structured project that any developer can clone, run `pnpm ins
     - `"test:watch": "vitest"`
   - `"engines": { "node": ">=20.0.0" }`
   - `"license": "GPL-2.0"`
-- [ ] Install production dependencies: `pnpm add irc-framework better-sqlite3`
-- [ ] Install dev dependencies: `pnpm add -D typescript tsx vitest @types/better-sqlite3 @types/node`
-- [ ] Verify `pnpm install` completes without errors
+- [x] Install production dependencies: `pnpm add irc-framework better-sqlite3`
+- [x] Install dev dependencies: `pnpm add -D typescript tsx vitest @types/better-sqlite3 @types/node`
+- [x] Verify `pnpm install` completes without errors
 
 ### 0.2: Create directory structure
-- [ ] Create all directories:
+- [x] Create all directories:
 ```
 n0xb0t/
 ├── src/
@@ -52,7 +52,7 @@ n0xb0t/
 ```
 
 ### 0.3: Config examples
-- [ ] Create `config/bot.example.json`:
+- [x] Create `config/bot.example.json`:
 ```json
 {
   "irc": {
@@ -86,7 +86,7 @@ n0xb0t/
   }
 }
 ```
-- [ ] Create `config/plugins.example.json`:
+- [x] Create `config/plugins.example.json`:
 ```json
 {
   "auto-op": {
@@ -110,7 +110,7 @@ n0xb0t/
 ```
 
 ### 0.4: Gitignore and project files
-- [ ] Create `.gitignore`:
+- [x] Create `.gitignore`:
 ```
 node_modules/
 data/
@@ -121,8 +121,8 @@ config/plugins.json
 *.db-wal
 .DS_Store
 ```
-- [ ] Copy `DESIGN.md` into the project root
-- [ ] Copy `CLAUDE.md` into the project root
+- [x] Copy `DESIGN.md` into the project root
+- [x] Copy `CLAUDE.md` into the project root
 - [ ] Create `README.md` with:
   - Project name and one-line description
   - "Under construction" note
@@ -131,7 +131,7 @@ config/plugins.json
   - License (GPL-2.0)
 
 ### 0.5: Core type definitions
-- [ ] Create `src/types.ts` with the shared interfaces referenced by DESIGN.md:
+- [x] Create `src/types.ts` with the shared interfaces referenced by DESIGN.md:
   - `HandlerContext` — the context object passed to every bind handler
   - `PluginAPI` — the scoped API object plugins receive in `init()`
   - `PluginExports` — what a plugin module must export (`name`, `version`, `description`, `init`, `teardown?`)
@@ -141,7 +141,7 @@ config/plugins.json
   - These are type-only definitions (interfaces/types) — no runtime code
 
 ### 0.6: Stub entry point
-- [ ] Create `src/index.ts` with a minimal placeholder:
+- [x] Create `src/index.ts` with a minimal placeholder:
 ```typescript
 // n0xb0t — Modular IRC bot framework
 // This is a placeholder. Real implementation starts in Phase 1.
@@ -152,13 +152,13 @@ process.exit(0);
 ```
 
 ### 0.7: Verify everything
-- [ ] `pnpm install` succeeds
-- [ ] `pnpm start` runs the stub and exits cleanly
-- [ ] `pnpm test` runs (will report 0 tests, but no errors)
-- [ ] Directory structure matches what's listed above
-- [ ] Config examples are valid JSON (no syntax errors)
-- [ ] `.gitignore` correctly ignores `data/`, `config/bot.json`, `config/plugins.json`, `node_modules/`
-- [ ] `git init && git add . && git status` shows only the files you expect
+- [x] `pnpm install` succeeds
+- [x] `pnpm start` runs the stub and exits cleanly
+- [x] `pnpm test` runs (will report 0 tests, but no errors)
+- [x] Directory structure matches what's listed above
+- [x] Config examples are valid JSON (no syntax errors)
+- [x] `.gitignore` correctly ignores `data/`, `config/bot.json`, `config/plugins.json`, `node_modules/`
+- [x] `git init && git add . && git status` shows only the files you expect
 
 ---
 

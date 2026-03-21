@@ -1,10 +1,12 @@
-# Builder Agent
+---
+name: build
+description: "Execute an implementation plan step by step for n0xb0t. Use when a plan markdown file exists (in plans/) and the user wants it built, or when directly asked to implement something."
+argument-hint: "<plan.md or feature>"
+---
 
-Execute an implementation plan produced by the Planner agent, building features step by step.
+# Builder
 
-## When to use
-
-A plan markdown file exists (in `plans/` or provided by the user) and the user wants it built. Also used when the user directly asks to implement something simple enough that a formal plan isn't needed.
+Execute an implementation plan produced by `/plan`, building features step by step.
 
 ## Process
 
@@ -37,41 +39,35 @@ For each phase in the plan:
 ### Step 4: Post-implementation
 
 After all phases are complete:
-1. Run the full test suite (if it exists)
+1. Run the full test suite
 2. Update any documentation affected by the changes
 3. Check the plan's checklist — mark items as done
 4. Summarize what was built and any deviations from the plan
 
 ## Code conventions
 
-Follow these strictly — they're the n0xb0t way:
-
 **Module style:**
-```javascript
+```typescript
 // ESM imports at top
 import { EventDispatcher } from './dispatcher.js';
 
-// JSDoc on all exports
 /**
  * Brief description.
- * @param {string} channel - Channel name
- * @returns {Promise<void>}
+ * @param channel - Channel name
  */
-export async function doThing(channel) { }
+export async function doThing(channel: string): Promise<void> { }
 ```
 
 **Plugin structure:**
-```javascript
+```typescript
 export const name = 'plugin-name';
 export const version = '1.0.0';
 export const description = 'What it does';
 
-export function init(api) {
-  // Register binds
+export function init(api: PluginAPI) {
   api.bind('pub', '-', '!command', async (ctx) => {
     ctx.reply('response');
   });
-
   api.log('Plugin loaded');
 }
 
@@ -80,17 +76,7 @@ export function teardown() {
 }
 ```
 
-**Error handling:**
-```javascript
-// Specific, actionable error messages
-throw new Error(`Plugin '${name}' is missing required export 'init' (expected a function, got ${typeof plugin.init})`);
-```
-
-**Logging:**
-```javascript
-console.log(`[plugin:${pluginId}] Loaded successfully`);
-console.error(`[dispatcher] Failed to dispatch ${type}:${mask}:`, err.message);
-```
+**Logging:** `console.log(\`[plugin:\${pluginId}] Loaded successfully\`);`
 
 ## Guidelines
 
@@ -98,6 +84,7 @@ console.error(`[dispatcher] Failed to dispatch ${type}:${mask}:`, err.message);
 - If a plan step is ambiguous, ask before guessing
 - Write tests alongside code, not after
 - Keep plugins self-contained — no cross-plugin imports
-- Use `api.db` for persistence, never direct file I/O from plugins
 - Respect the bind type semantics (stackable vs non-stackable)
 - Always handle async errors — an unhandled rejection in a plugin should not crash the bot
+
+Target: $ARGUMENTS
