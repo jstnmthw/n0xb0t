@@ -54,6 +54,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - PluginAPI extended with `op`, `deop`, `voice`, `devoice`, `kick`, `ban`, `mode`, `getUserHostmask`, `permissions`, `services`, `botConfig`
 - `topic` plugin — IRC-formatted channel topics with 22 built-in themes, `!topic`, `!topic preview`, `!topics` commands
 - `api.topic(channel, text)` added to PluginAPI
+- **Logger service** (`src/logger.ts`) — structured logging with chalk colors, configurable log levels (`debug`/`info`/`warn`/`error`), child loggers with `[source]` prefixes, and startup banner
+- **CTCP replies** — built-in VERSION, PING, and TIME handlers registered through the dispatcher bind system in irc-bridge
+- `api.ctcpResponse(target, type, message)` added to PluginAPI and IRCClient interface
+- `.flags` with no arguments now shows the flag legend (`n`=owner, `m`=master, `o`=op, `v`=voice)
+- `topic` plugin enabled in `config/plugins.example.json`
 - Config examples: `config/bot.example.json`, `config/plugins.example.json`
 - Security guide: `docs/SECURITY.md`
 - Design document: `DESIGN.md`
@@ -63,6 +68,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- All modules now use the logger service instead of bare `console.log` — bot, dispatcher, database, permissions, irc-bridge, plugin-loader, repl, channel-state, irc-commands, and services
+- Removed `api.log('Loaded')` calls from all plugins — the plugin loader already logs load events
 - Seen plugin updated to v1.1.0 with TTL cleanup — records older than `max_age_days` (default 365) are automatically purged on query
 - Extracted `sanitize()` (newline stripping) into shared `src/utils/sanitize.ts`, replacing inline implementations in irc-bridge, irc-commands, and plugin-loader
 - Vitest config excludes `.claude/worktrees/` to prevent duplicate test runs
