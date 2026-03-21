@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { CommandHandler, type CommandContext } from '../src/command-handler.js';
+import { CommandHandler, type CommandContext, type CommandPermissionsProvider } from '../src/command-handler.js';
 
 /** Helper: create a minimal CommandContext. */
 function makeCtx(overrides: Partial<CommandContext> = {}): CommandContext {
@@ -172,6 +172,85 @@ describe('CommandHandler', () => {
 
       const ctx = makeCtx();
       await handler.execute('.TEST', ctx);
+      expect(handlerFn).toHaveBeenCalledOnce();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Permission flag enforcement
+  // -------------------------------------------------------------------------
+
+  describe('flag enforcement', () => {
+    function makePermissions(allows: boolean): CommandPermissionsProvider {
+      return { checkFlags: vi.fn().mockReturnValue(allows) };
+    }
+
+    it('should block IRC user without required flags', async () => {
+      const perms = makePermissions(false);
+      const handler = new CommandHandler(perms);
+      const handlerFn = vi.fn();
+      handler.registerCommand('admin', {
+        flags: '+n',
+        description: 'Admin only',
+        usage: '.admin',
+        category: 'test',
+      }, handlerFn);
+
+      const ctx = makeCtx({ source: 'irc', nick: 'stranger', ident: 'user', hostname: 'evil.host' });
+      await handler.execute('.admin', ctx);
+
+      expect(handlerFn).not.toHaveBeenCalled();
+      expect(ctx.reply).toHaveBeenCalledWith('Permission denied.');
+    });
+
+    it('should allow IRC user with required flags', async () => {
+      const perms = makePermissions(true);
+      const handler = new CommandHandler(perms);
+      const handlerFn = vi.fn();
+      handler.registerCommand('admin', {
+        flags: '+n',
+        description: 'Admin only',
+        usage: '.admin',
+        category: 'test',
+      }, handlerFn);
+
+      const ctx = makeCtx({ source: 'irc', nick: 'owner', ident: 'admin', hostname: 'trusted.host' });
+      await handler.execute('.admin', ctx);
+
+      expect(handlerFn).toHaveBeenCalledOnce();
+    });
+
+    it('should skip flag check for REPL source', async () => {
+      const perms = makePermissions(false);
+      const handler = new CommandHandler(perms);
+      const handlerFn = vi.fn();
+      handler.registerCommand('admin', {
+        flags: '+n',
+        description: 'Admin only',
+        usage: '.admin',
+        category: 'test',
+      }, handlerFn);
+
+      const ctx = makeCtx({ source: 'repl' });
+      await handler.execute('.admin', ctx);
+
+      expect(handlerFn).toHaveBeenCalledOnce();
+    });
+
+    it('should allow anyone for flags "-" from IRC', async () => {
+      const perms = makePermissions(false);
+      const handler = new CommandHandler(perms);
+      const handlerFn = vi.fn();
+      handler.registerCommand('public', {
+        flags: '-',
+        description: 'Public',
+        usage: '.public',
+        category: 'test',
+      }, handlerFn);
+
+      const ctx = makeCtx({ source: 'irc' });
+      await handler.execute('.public', ctx);
+
       expect(handlerFn).toHaveBeenCalledOnce();
     });
   });

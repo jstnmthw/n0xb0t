@@ -48,7 +48,7 @@ export function createMockBot(options?: { botNick?: string }): MockBot {
 
   const permissions = new Permissions(db);
   const dispatcher = new EventDispatcher(permissions);
-  const commandHandler = new CommandHandler();
+  const commandHandler = new CommandHandler(permissions);
   const eventBus = new BotEventBus();
   const client = new MockIRCClient();
   client.user.nick = botNick;

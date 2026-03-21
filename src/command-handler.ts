@@ -10,8 +10,15 @@
 export interface CommandContext {
   source: 'repl' | 'irc';
   nick: string;
+  ident?: string;
+  hostname?: string;
   channel: string | null;
   reply(msg: string): void;
+}
+
+/** Permission checker interface for flag enforcement. */
+export interface CommandPermissionsProvider {
+  checkFlags(requiredFlags: string, ctx: { nick: string; ident: string; hostname: string; channel: string | null; text: string; command: string; args: string; reply: (msg: string) => void; replyPrivate: (msg: string) => void }): boolean;
 }
 
 /** Options for registering a command. */
@@ -41,8 +48,10 @@ const COMMAND_PREFIX = '.';
 
 export class CommandHandler {
   private commands: Map<string, CommandEntry> = new Map();
+  private permissions: CommandPermissionsProvider | null;
 
-  constructor() {
+  constructor(permissions?: CommandPermissionsProvider | null) {
+    this.permissions = permissions ?? null;
     // Register the built-in .help command
     this.registerCommand('help', {
       flags: '-',
@@ -82,6 +91,27 @@ export class CommandHandler {
     if (!entry) {
       ctx.reply(`Unknown command: .${commandName} — type .help for a list of commands`);
       return;
+    }
+
+    // Check permission flags for non-REPL sources
+    if (ctx.source !== 'repl' && entry.options.flags !== '-' && entry.options.flags !== '') {
+      if (!this.permissions) {
+        ctx.reply('Permission denied.');
+        return;
+      }
+      const handlerCtx = {
+        nick: ctx.nick,
+        ident: ctx.ident ?? '',
+        hostname: ctx.hostname ?? '',
+        channel: ctx.channel,
+        text: '', command: commandName, args,
+        reply: ctx.reply,
+        replyPrivate: ctx.reply,
+      };
+      if (!this.permissions.checkFlags(entry.options.flags, handlerCtx)) {
+        ctx.reply('Permission denied.');
+        return;
+      }
     }
 
     // Execute the handler

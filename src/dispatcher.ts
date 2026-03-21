@@ -1,7 +1,7 @@
 // n0xb0t — Event dispatcher
 // Routes IRC events to registered handlers based on bind type, mask, and flags.
 
-import { wildcardMatch } from './utils/wildcard.js';
+import { wildcardMatch, ircLower } from './utils/wildcard.js';
 import type { BindType, BindHandler, HandlerContext } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -67,7 +67,7 @@ export class EventDispatcher {
     // Non-stackable: remove any existing bind on the same type + mask
     if (NON_STACKABLE_TYPES.has(type)) {
       this.binds = this.binds.filter(
-        (b) => !(b.type === type && b.mask.toLowerCase() === mask.toLowerCase())
+        (b) => !(b.type === type && ircLower(b.mask) === ircLower(mask))
       );
     }
 
@@ -75,10 +75,15 @@ export class EventDispatcher {
 
     // Timer binds: set up an interval
     if (type === 'time') {
-      const intervalMs = parseInt(mask, 10) * 1000;
-      if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+      const MIN_TIMER_MS = 10_000;
+      const rawMs = parseInt(mask, 10) * 1000;
+      if (!Number.isFinite(rawMs) || rawMs <= 0) {
         console.error(`[dispatcher] Invalid time bind mask: "${mask}" — must be seconds as a string`);
         return;
+      }
+      const intervalMs = Math.max(rawMs, MIN_TIMER_MS);
+      if (rawMs < MIN_TIMER_MS) {
+        console.warn(`[dispatcher] Timer interval "${mask}s" raised to 10s minimum`);
       }
       const timer = setInterval(() => {
         entry.hits++;
@@ -176,8 +181,8 @@ export class EventDispatcher {
     switch (type) {
       case 'pub':
       case 'msg':
-        // Exact command match (case-insensitive)
-        return ctx.command.toLowerCase() === mask.toLowerCase();
+        // Exact command match (IRC case-insensitive)
+        return ircLower(ctx.command) === ircLower(mask);
 
       case 'pubm':
       case 'msgm':
@@ -209,8 +214,8 @@ export class EventDispatcher {
         return wildcardMatch(mask, ctx.text, true);
 
       case 'ctcp':
-        // Match CTCP type
-        return ctx.command.toLowerCase() === mask.toLowerCase();
+        // Match CTCP type (IRC case-insensitive)
+        return ircLower(ctx.command) === ircLower(mask);
 
       case 'time':
         // Timer binds are handled by setInterval, not by dispatch

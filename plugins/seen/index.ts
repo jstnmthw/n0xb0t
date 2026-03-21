@@ -4,10 +4,15 @@
 import type { PluginAPI, HandlerContext } from '../../src/types.js';
 
 export const name = 'seen';
-export const version = '1.0.0';
+export const version = '1.1.0';
 export const description = 'Tracks and reports when users were last seen';
 
+const DEFAULT_MAX_AGE_DAYS = 365;
+
 export function init(api: PluginAPI): void {
+  const maxAgeDays = (api.config.max_age_days as number | undefined) ?? DEFAULT_MAX_AGE_DAYS;
+  const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
+
   // Track every channel message (pubm is stackable, won't interfere with others)
   api.bind('pubm', '-', '*', (ctx: HandlerContext) => {
     if (!ctx.channel) return;
@@ -30,6 +35,9 @@ export function init(api: PluginAPI): void {
       return;
     }
 
+    // Clean up stale entries on each query
+    cleanupStale(api, maxAgeMs);
+
     const raw = api.db.get(`seen:${targetNick.toLowerCase()}`);
     if (!raw) {
       ctx.reply(`I haven't seen ${targetNick}.`);
@@ -38,7 +46,15 @@ export function init(api: PluginAPI): void {
 
     try {
       const record = JSON.parse(raw) as { nick: string; channel: string; text: string; time: number };
-      const ago = formatRelativeTime(Date.now() - record.time);
+      const age = Date.now() - record.time;
+
+      if (age > maxAgeMs) {
+        api.db.del(`seen:${targetNick.toLowerCase()}`);
+        ctx.reply(`I haven't seen ${targetNick}.`);
+        return;
+      }
+
+      const ago = formatRelativeTime(age);
       ctx.reply(`${record.nick} was last seen ${ago} in ${record.channel} saying: ${record.text}`);
     } catch {
       ctx.reply(`I haven't seen ${targetNick}.`);
@@ -55,6 +71,23 @@ export function teardown(): void {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function cleanupStale(api: PluginAPI, maxAgeMs: number): void {
+  const now = Date.now();
+  const entries = api.db.list('seen:');
+
+  for (const entry of entries) {
+    try {
+      const record = JSON.parse(entry.value) as { time: number };
+      if (now - record.time > maxAgeMs) {
+        api.db.del(entry.key);
+      }
+    } catch {
+      // Corrupt entry — remove it
+      api.db.del(entry.key);
+    }
+  }
+}
 
 function formatRelativeTime(ms: number): string {
   const seconds = Math.floor(ms / 1000);

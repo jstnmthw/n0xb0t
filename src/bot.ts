@@ -55,7 +55,7 @@ export class Bot {
     this.eventBus = new BotEventBus();
     this.permissions = new Permissions(this.db);
     this.dispatcher = new EventDispatcher(this.permissions);
-    this.commandHandler = new CommandHandler();
+    this.commandHandler = new CommandHandler(this.permissions);
     this.client = new IrcClient();
     this.configuredChannels = [...this.config.irc.channels];
     this.channelState = new ChannelState(this.client, this.eventBus);
@@ -252,6 +252,10 @@ export class Bot {
     if (!existing) {
       this.permissions.addUser(ownerCfg.handle, ownerCfg.hostmask, 'n', 'config');
       console.log(`[bot] Owner "${ownerCfg.handle}" added from config`);
+    } else if (!existing.hostmasks.includes(ownerCfg.hostmask)) {
+      // Config hostmask not present — add it without removing existing ones
+      this.permissions.addHostmask(ownerCfg.handle, ownerCfg.hostmask, 'config');
+      console.log(`[bot] Owner "${ownerCfg.handle}" hostmask updated from config: ${ownerCfg.hostmask}`);
     }
   }
 }

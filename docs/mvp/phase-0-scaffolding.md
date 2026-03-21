@@ -45,9 +45,9 @@ n0xb0t/
 │   ├── core/
 │   ├── plugins/
 │   └── helpers/
-├── plans/
 ├── data/               # SQLite DB will live here (gitignored)
 ├── docs/
+│   ├── plans/
 └── types/
 ```
 

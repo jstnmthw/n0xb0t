@@ -356,7 +356,7 @@ export class PluginLoader {
         ircClient?.notice(target, message);
       },
       raw(line: string): void {
-        ircClient?.raw(line);
+        ircClient?.raw(line.replace(/[\r\n]/g, ''));
       },
 
       // IRC channel operations (delegated to IRCCommands)
@@ -425,8 +425,21 @@ export class PluginLoader {
       // Database
       db: pluginDb,
 
-      // Bot config (read-only)
-      botConfig: Object.freeze({ ...this.botConfig }),
+      // Bot config (read-only, deep-frozen, password redacted)
+      botConfig: Object.freeze({
+        irc: Object.freeze({ ...this.botConfig.irc }),
+        owner: Object.freeze({ ...this.botConfig.owner }),
+        identity: Object.freeze({ ...this.botConfig.identity }),
+        services: Object.freeze({
+          type: this.botConfig.services.type,
+          nickserv: this.botConfig.services.nickserv,
+          sasl: this.botConfig.services.sasl,
+          // password intentionally omitted
+        }),
+        database: this.botConfig.database,
+        pluginDir: this.botConfig.pluginDir,
+        logging: Object.freeze({ ...this.botConfig.logging }),
+      }),
 
       // Config
       config: Object.freeze({ ...config }),

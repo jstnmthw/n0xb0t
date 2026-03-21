@@ -2,6 +2,7 @@
 // Tracks who is in each channel, their modes, and hostmasks.
 // Updated in real time from IRC events.
 
+import { ircLower } from '../utils/wildcard.js';
 import type { BotEventBus } from '../event-bus.js';
 
 // ---------------------------------------------------------------------------
@@ -73,13 +74,13 @@ export class ChannelState {
   // -------------------------------------------------------------------------
 
   getChannel(name: string): ChannelInfo | undefined {
-    return this.channels.get(name.toLowerCase());
+    return this.channels.get(ircLower(name));
   }
 
   getUser(channel: string, nick: string): UserInfo | undefined {
-    const ch = this.channels.get(channel.toLowerCase());
+    const ch = this.channels.get(ircLower(channel));
     if (!ch) return undefined;
-    return ch.users.get(nick.toLowerCase());
+    return ch.users.get(ircLower(nick));
   }
 
   getUserHostmask(channel: string, nick: string): string | undefined {
@@ -118,7 +119,7 @@ export class ChannelState {
       modes: [],
       joinedAt: new Date(),
     };
-    ch.users.set(nick.toLowerCase(), user);
+    ch.users.set(ircLower(nick), user);
 
     this.eventBus.emit('channel:userJoined', channel, nick);
   }
@@ -129,9 +130,9 @@ export class ChannelState {
 
     if (!channel || !nick) return;
 
-    const ch = this.channels.get(channel.toLowerCase());
+    const ch = this.channels.get(ircLower(channel));
     if (ch) {
-      ch.users.delete(nick.toLowerCase());
+      ch.users.delete(ircLower(nick));
     }
 
     this.eventBus.emit('channel:userLeft', channel, nick);
@@ -141,7 +142,7 @@ export class ChannelState {
     const nick = String(event.nick ?? '');
     if (!nick) return;
 
-    const lower = nick.toLowerCase();
+    const lower = ircLower(nick);
     for (const ch of this.channels.values()) {
       ch.users.delete(lower);
     }
@@ -155,9 +156,9 @@ export class ChannelState {
 
     if (!channel || !kicked) return;
 
-    const ch = this.channels.get(channel.toLowerCase());
+    const ch = this.channels.get(ircLower(channel));
     if (ch) {
-      ch.users.delete(kicked.toLowerCase());
+      ch.users.delete(ircLower(kicked));
     }
 
     this.eventBus.emit('channel:userLeft', channel, kicked);
@@ -169,8 +170,8 @@ export class ChannelState {
 
     if (!oldNick || !newNick) return;
 
-    const oldLower = oldNick.toLowerCase();
-    const newLower = newNick.toLowerCase();
+    const oldLower = ircLower(oldNick);
+    const newLower = ircLower(newNick);
 
     for (const ch of this.channels.values()) {
       const user = ch.users.get(oldLower);
@@ -189,7 +190,7 @@ export class ChannelState {
 
     if (!target || !modes) return;
 
-    const ch = this.channels.get(target.toLowerCase());
+    const ch = this.channels.get(ircLower(target));
     if (!ch) return;
 
     for (const m of modes) {
@@ -200,7 +201,7 @@ export class ChannelState {
       if (param && (mode === '+o' || mode === '-o' || mode === '+v' || mode === '-v' ||
                     mode === '+h' || mode === '-h' || mode === '+a' || mode === '-a' ||
                     mode === '+q' || mode === '-q')) {
-        const user = ch.users.get(param.toLowerCase());
+        const user = ch.users.get(ircLower(param));
         if (user) {
           const modeChar = mode.charAt(1); // 'o', 'v', etc.
           if (mode.charAt(0) === '+') {
@@ -233,8 +234,8 @@ export class ChannelState {
       const modes = this.parseUserlistModes(u.modes as string | undefined);
 
       // Only add if not already present (join event may have fired first)
-      if (!ch.users.has(nick.toLowerCase())) {
-        ch.users.set(nick.toLowerCase(), {
+      if (!ch.users.has(ircLower(nick))) {
+        ch.users.set(ircLower(nick), {
           nick,
           ident,
           hostname,
@@ -244,7 +245,7 @@ export class ChannelState {
         });
       } else {
         // Update ident/hostname/modes from NAMES if we have them
-        const existing = ch.users.get(nick.toLowerCase())!;
+        const existing = ch.users.get(ircLower(nick))!;
         if (ident) existing.ident = ident;
         if (hostname) existing.hostname = hostname;
         if (ident || hostname) {
@@ -267,10 +268,10 @@ export class ChannelState {
 
       if (!nick || !channel) continue;
 
-      const ch = this.channels.get(channel.toLowerCase());
+      const ch = this.channels.get(ircLower(channel));
       if (!ch) continue;
 
-      const user = ch.users.get(nick.toLowerCase());
+      const user = ch.users.get(ircLower(nick));
       if (user) {
         user.ident = ident;
         user.hostname = hostname;
@@ -294,7 +295,7 @@ export class ChannelState {
   // -------------------------------------------------------------------------
 
   private ensureChannel(name: string): ChannelInfo {
-    const lower = name.toLowerCase();
+    const lower = ircLower(name);
     let ch = this.channels.get(lower);
     if (!ch) {
       ch = { name, topic: '', modes: '', users: new Map() };

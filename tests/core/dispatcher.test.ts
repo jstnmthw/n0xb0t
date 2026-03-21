@@ -411,19 +411,38 @@ describe('EventDispatcher', () => {
   // -------------------------------------------------------------------------
 
   describe('time binds', () => {
-    it('should fire on interval', async () => {
+    it('should fire on interval (respects 10s minimum)', async () => {
       vi.useFakeTimers();
       const handler = vi.fn();
-      dispatcher.bind('time', '-', '1', handler, 'test-plugin');
+      // Request 15s interval (above the 10s minimum)
+      dispatcher.bind('time', '-', '15', handler, 'test-plugin');
 
-      // Advance past one interval (1 second)
-      vi.advanceTimersByTime(1100);
+      // Advance past one interval (15 seconds)
+      vi.advanceTimersByTime(15_100);
 
       expect(handler).toHaveBeenCalledOnce();
 
       // Advance another interval
-      vi.advanceTimersByTime(1000);
+      vi.advanceTimersByTime(15_000);
       expect(handler).toHaveBeenCalledTimes(2);
+
+      dispatcher.unbindAll('test-plugin');
+      vi.useRealTimers();
+    });
+
+    it('should raise sub-10s intervals to 10s minimum', async () => {
+      vi.useFakeTimers();
+      const handler = vi.fn();
+      // Request 1s — will be raised to 10s
+      dispatcher.bind('time', '-', '1', handler, 'test-plugin');
+
+      // 1s should NOT fire
+      vi.advanceTimersByTime(1100);
+      expect(handler).not.toHaveBeenCalled();
+
+      // 10s should fire
+      vi.advanceTimersByTime(9000);
+      expect(handler).toHaveBeenCalledOnce();
 
       dispatcher.unbindAll('test-plugin');
       vi.useRealTimers();
@@ -432,11 +451,11 @@ describe('EventDispatcher', () => {
     it('should clean up timers on unbindAll', () => {
       vi.useFakeTimers();
       const handler = vi.fn();
-      dispatcher.bind('time', '-', '1', handler, 'test-plugin');
+      dispatcher.bind('time', '-', '15', handler, 'test-plugin');
 
       dispatcher.unbindAll('test-plugin');
 
-      vi.advanceTimersByTime(2000);
+      vi.advanceTimersByTime(20_000);
       expect(handler).not.toHaveBeenCalled();
 
       vi.useRealTimers();

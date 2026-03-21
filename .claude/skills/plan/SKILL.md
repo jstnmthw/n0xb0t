@@ -36,7 +36,7 @@ Produce a brief assessment covering:
 
 ### Step 4: Produce the plan
 
-Write a markdown file to `plans/<feature-name>.md` with this structure:
+Write a markdown file to `docs/plans/<feature-name>.md` with this structure:
 
 ```markdown
 # Plan: <Feature Name>

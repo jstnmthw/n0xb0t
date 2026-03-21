@@ -23,6 +23,8 @@ describe('Bot (mock)', () => {
         await bot.commandHandler.execute(ctx.text, {
           source: 'irc',
           nick: ctx.nick,
+          ident: ctx.ident,
+          hostname: ctx.hostname,
           channel: ctx.channel,
           reply: (msg: string) => ctx.reply(msg),
         });

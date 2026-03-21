@@ -69,6 +69,8 @@ export class BotREPL {
       return;
     }
 
+    console.log(`[repl] Command: ${trimmed}`);
+
     // Route through the command handler (REPL has implicit owner privileges)
     await this.bot.commandHandler.execute(trimmed, {
       source: 'repl',

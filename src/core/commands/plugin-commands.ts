@@ -36,6 +36,12 @@ export function registerPluginCommands(
       return;
     }
 
+    // Validate plugin name to prevent path traversal
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(name)) {
+      ctx.reply('Invalid plugin name. Use alphanumeric characters, hyphens, and underscores only.');
+      return;
+    }
+
     const pluginPath = `${pluginDir}/${name}/index.ts`;
     const result = await pluginLoader.load(pluginPath);
 

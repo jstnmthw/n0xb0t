@@ -2,6 +2,7 @@
 // Translates irc-framework events into dispatcher events.
 // This is the trust boundary — all IRC data entering the dispatcher passes through here.
 
+import { splitMessage } from './utils/split-message.js';
 import type { EventDispatcher } from './dispatcher.js';
 import type { BotEventBus } from './event-bus.js';
 import type { HandlerContext } from './types.js';
@@ -338,10 +339,16 @@ export class IRCBridge {
       ...fields,
       reply: (msg: string) => {
         const target = fields.channel ?? fields.nick;
-        client.say(target, sanitize(msg));
+        const lines = splitMessage(sanitize(msg));
+        for (const line of lines) {
+          client.say(target, line);
+        }
       },
       replyPrivate: (msg: string) => {
-        client.notice(fields.nick, sanitize(msg));
+        const lines = splitMessage(sanitize(msg));
+        for (const line of lines) {
+          client.notice(fields.nick, line);
+        }
       },
     };
   }

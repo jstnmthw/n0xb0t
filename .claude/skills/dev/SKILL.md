@@ -33,7 +33,7 @@ Before doing any work, read:
 
 ## Output conventions
 
-- Plans go in `plans/<feature-name>.md`
+- Plans go in `docs/plans/<feature-name>.md`
 - Tests go in `tests/<module-name>.test.ts` or `tests/plugins/<plugin-name>.test.ts`
 - Generated docs go alongside the code they document
 - Type declarations go in `types/` at project root
