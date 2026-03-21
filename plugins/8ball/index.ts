@@ -43,8 +43,6 @@ export function init(api: PluginAPI): void {
     const answer = RESPONSES[Math.floor(Math.random() * RESPONSES.length)];
     ctx.reply(`🎱 ${answer}`);
   });
-
-  api.log('Loaded');
 }
 
 export function teardown(): void {

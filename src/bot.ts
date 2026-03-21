@@ -120,7 +120,7 @@ export class Bot {
     });
     registerPluginCommands(this.commandHandler, this.pluginLoader, resolve(this.config.pluginDir));
 
-    this.printStatus('Starting...');
+    this.botLogger.info('Starting...');
 
     // 5. Connect to IRC
     await this.connect();
@@ -145,7 +145,7 @@ export class Bot {
 
     this.startTime = Date.now();
     const elapsed = this.startTime - this.bootStart;
-    this.printStatus(`Ready in ${elapsed}ms`);
+    this.botLogger.info(`Ready in ${elapsed}ms`);
   }
 
   /** Graceful shutdown. */
@@ -188,6 +188,9 @@ export class Bot {
         auto_reconnect: true,
         auto_reconnect_max_wait: 30000,
         auto_reconnect_max_retries: 10,
+        // Disable irc-framework's built-in CTCP VERSION reply —
+        // we handle it ourselves in irc-bridge.ts via the dispatcher
+        version: null,
       };
 
       // SASL config
@@ -283,10 +286,6 @@ export class Bot {
   }
 
   /** Print a status line with a lime green check mark. */
-  private printStatus(message: string): void {
-    console.log(`${chalk.greenBright('✓')} ${message}`);
-  }
-
   /** Read the version field from package.json. */
   private readPackageVersion(): string {
     try {

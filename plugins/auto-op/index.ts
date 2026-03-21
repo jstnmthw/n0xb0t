@@ -76,8 +76,6 @@ export function init(pluginApi: PluginAPI): void {
       api.log(`Voiced ${nick} in ${channel}`);
     }
   });
-
-  api.log('Loaded');
 }
 
 export function teardown(): void {

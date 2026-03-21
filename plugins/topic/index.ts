@@ -72,8 +72,6 @@ export function init(api: PluginAPI): void {
   api.bind('pub', '-', '!topics', (ctx: HandlerContext) => {
     ctx.reply(`Available themes: ${themeNames.join(', ')}`);
   });
-
-  api.log('Loaded');
 }
 
 export function teardown(): void {

@@ -75,6 +75,7 @@ export interface IRCClientForPlugins {
   notice(target: string, message: string): void;
   action(target: string, message: string): void;
   raw(line: string): void;
+  ctcpResponse(target: string, type: string, ...params: string[]): void;
 }
 
 /** Safe plugin name pattern. */
@@ -216,7 +217,7 @@ export class PluginLoader {
     this.loaded.set(pluginName, plugin);
 
     this.eventBus.emit('plugin:loaded', pluginName);
-    this.logger?.info(`Loaded: ${pluginName} v${plugin.version}`);
+    this.logger?.child(`plugin:${pluginName}`).info(`Loaded v${plugin.version}`);
 
     return { name: pluginName, status: 'ok' };
   }
@@ -365,6 +366,9 @@ export class PluginLoader {
       },
       raw(line: string): void {
         ircClient?.raw(sanitize(line));
+      },
+      ctcpResponse(target: string, type: string, message: string): void {
+        ircClient?.ctcpResponse(sanitize(target), sanitize(type), sanitize(message));
       },
 
       // IRC channel operations (delegated to IRCCommands)

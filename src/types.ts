@@ -81,6 +81,7 @@ export interface PluginAPI {
   action(target: string, message: string): void;
   notice(target: string, message: string): void;
   raw(line: string): void;
+  ctcpResponse(target: string, type: string, message: string): void;
 
   // IRC channel operations
   op(channel: string, nick: string): void;

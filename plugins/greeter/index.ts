@@ -25,8 +25,6 @@ export function init(api: PluginAPI): void {
 
     ctx.reply(greeting);
   });
-
-  api.log('Loaded');
 }
 
 export function teardown(): void {

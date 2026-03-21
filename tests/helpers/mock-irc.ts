@@ -5,7 +5,7 @@ import { EventEmitter } from 'node:events';
 
 /** A captured outgoing message. */
 export interface OutgoingMessage {
-  type: 'say' | 'notice' | 'action' | 'join' | 'part' | 'mode' | 'raw' | 'quit';
+  type: 'say' | 'notice' | 'action' | 'join' | 'part' | 'mode' | 'raw' | 'quit' | 'ctcpResponse';
   target?: string;
   message?: string;
   args?: string[];
@@ -46,6 +46,10 @@ export class MockIRCClient extends EventEmitter {
 
   raw(line: string): void {
     this.messages.push({ type: 'raw', message: line });
+  }
+
+  ctcpResponse(target: string, type: string, ...params: string[]): void {
+    this.messages.push({ type: 'ctcpResponse', target, message: `${type} ${params.join(' ')}`.trim() });
   }
 
   quit(message?: string): void {

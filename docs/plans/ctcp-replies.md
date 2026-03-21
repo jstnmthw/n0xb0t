@@ -27,35 +27,35 @@ Handle incoming CTCP requests (VERSION, PING, TIME) and send proper CTCP respons
 
 **Goal:** Make `ctcpResponse()` callable from the bridge and from plugins.
 
-- [ ] Add `ctcpResponse(target: string, type: string, ...params: string[]): void` to the `IRCClient` interface in `src/irc-bridge.ts`
-- [ ] Add `ctcpResponse(target: string, type: string, ...params: string[]): void` to the irc-framework type declarations in `src/types/irc-framework.d.ts`
-- [ ] Add `ctcpResponse(target: string, type: string, message: string): void` to `PluginAPI` in `src/types.ts` — so plugins can also send CTCP responses
-- [ ] Wire `ctcpResponse` in the plugin loader's API builder (`src/plugin-loader.ts`)
-- [ ] **Verify:** TypeScript compiles with no errors (`pnpm exec tsc --noEmit`)
+- [x]Add `ctcpResponse(target: string, type: string, ...params: string[]): void` to the `IRCClient` interface in `src/irc-bridge.ts`
+- [x]Add `ctcpResponse(target: string, type: string, ...params: string[]): void` to the irc-framework type declarations in `src/types/irc-framework.d.ts`
+- [x]Add `ctcpResponse(target: string, type: string, message: string): void` to `PluginAPI` in `src/types.ts` — so plugins can also send CTCP responses
+- [x]Wire `ctcpResponse` in the plugin loader's API builder (`src/plugin-loader.ts`)
+- [x]**Verify:** TypeScript compiles with no errors (`pnpm exec tsc --noEmit`)
 
 ### Phase 2: Register built-in CTCP handlers in the bridge
 
 **Goal:** The bridge auto-replies to VERSION, PING, and TIME CTCP requests.
 
-- [ ] In `IRCBridge`, after `attach()` registers the event listener, register three `ctcp` binds on the dispatcher:
+- [x]In `IRCBridge`, after `attach()` registers the event listener, register three `ctcp` binds on the dispatcher:
   - `VERSION` → replies with `n0xb0t v0.1` (version string from `package.json` or hardcoded)
   - `PING` → echoes `ctx.text` back (the sender's timestamp payload)
   - `TIME` → replies with the bot's local time formatted as an ISO 8601 string (e.g. `2026-03-21T15:04:05-05:00`)
-- [ ] Use `client.ctcpResponse(ctx.nick, type, payload)` for replies — this handles the `\x01` NOTICE wrapping
-- [ ] Register these binds with pluginId `'core'` so they show up in `.binds` output as core binds
-- [ ] Unbind them in `detach()` (or rely on the existing listener cleanup — the dispatcher binds are separate from the IRC event listeners, so we need explicit cleanup)
-- [ ] **Verify:** Unit tests pass, manual test with `/ctcp botname VERSION` on a real IRC client
+- [x]Use `client.ctcpResponse(ctx.nick, type, payload)` for replies — this handles the `\x01` NOTICE wrapping
+- [x]Register these binds with pluginId `'core'` so they show up in `.binds` output as core binds
+- [x]Unbind them in `detach()` (or rely on the existing listener cleanup — the dispatcher binds are separate from the IRC event listeners, so we need explicit cleanup)
+- [x]**Verify:** Unit tests pass, manual test with `/ctcp botname VERSION` on a real IRC client
 
 ### Phase 3: Tests
 
 **Goal:** Confirm CTCP replies work correctly.
 
-- [ ] Add tests in `tests/irc-bridge.test.ts`:
+- [x]Add tests in `tests/irc-bridge.test.ts`:
   - VERSION request → bot sends CTCP VERSION response with version string
   - PING request → bot echoes the payload back as CTCP PING response
   - TIME request → bot sends CTCP TIME response with a time string
   - Plugins can still bind to `ctcp` type and their handlers also fire (stackable)
-- [ ] **Verify:** `pnpm test` passes
+- [x]**Verify:** `pnpm test` passes
 
 ## Config changes
 

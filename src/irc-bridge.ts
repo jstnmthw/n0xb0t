@@ -2,6 +2,9 @@
 // Translates irc-framework events into dispatcher events.
 // This is the trust boundary — all IRC data entering the dispatcher passes through here.
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { sanitize } from './utils/sanitize.js';
 import { splitMessage } from './utils/split-message.js';
 import type { EventDispatcher } from './dispatcher.js';
@@ -19,6 +22,7 @@ export interface IRCClient {
   removeListener(event: string, listener: (...args: unknown[]) => void): void;
   say(target: string, message: string): void;
   notice(target: string, message: string): void;
+  ctcpResponse(target: string, type: string, ...params: string[]): void;
 }
 
 interface IRCBridgeOptions {
@@ -60,6 +64,7 @@ export class IRCBridge {
   private botNick: string;
   private logger: Logger | null;
   private listeners: Array<{ event: string; fn: (...args: unknown[]) => void }> = [];
+  private version: string;
 
   constructor(options: IRCBridgeOptions) {
     this.client = options.client;
@@ -67,6 +72,14 @@ export class IRCBridge {
     this.eventBus = options.eventBus;
     this.botNick = options.botNick;
     this.logger = options.logger?.child('irc-bridge') ?? null;
+
+    // Read version from package.json for CTCP VERSION replies
+    try {
+      const pkg = JSON.parse(readFileSync(resolve('package.json'), 'utf-8'));
+      this.version = `n0xb0t v${pkg.version}`;
+    } catch {
+      this.version = 'n0xb0t';
+    }
   }
 
   /** Register all irc-framework event listeners. */
@@ -81,6 +94,9 @@ export class IRCBridge {
     this.listenIrc('notice', this.onNotice.bind(this));
     this.listenIrc('ctcp request', this.onCtcp.bind(this));
 
+    // Register built-in CTCP reply handlers
+    this.registerCtcpHandlers();
+
     this.logger?.info('Attached to IRC client');
   }
 
@@ -90,12 +106,35 @@ export class IRCBridge {
       this.client.removeListener(event, fn);
     }
     this.listeners = [];
+    this.dispatcher.unbindAll('core');
     this.logger?.info('Detached from IRC client');
   }
 
   /** Update the bot nick (e.g., after a nick change). */
   setBotNick(nick: string): void {
     this.botNick = nick;
+  }
+
+  // -------------------------------------------------------------------------
+  // Built-in CTCP handlers
+  // -------------------------------------------------------------------------
+
+  /** Register core CTCP reply handlers (VERSION, PING, TIME). */
+  private registerCtcpHandlers(): void {
+    const client = this.client;
+    const version = this.version;
+
+    this.dispatcher.bind('ctcp', '-', 'VERSION', (ctx) => {
+      client.ctcpResponse(ctx.nick, 'VERSION', version);
+    }, 'core');
+
+    this.dispatcher.bind('ctcp', '-', 'PING', (ctx) => {
+      client.ctcpResponse(ctx.nick, 'PING', ctx.text);
+    }, 'core');
+
+    this.dispatcher.bind('ctcp', '-', 'TIME', (ctx) => {
+      client.ctcpResponse(ctx.nick, 'TIME', new Date().toString());
+    }, 'core');
   }
 
   // -------------------------------------------------------------------------
@@ -301,14 +340,20 @@ export class IRCBridge {
     const ident = sanitize(String(event.ident ?? ''));
     const hostname = sanitize(String(event.hostname ?? ''));
     const type = sanitize(String(event.type ?? '')).toUpperCase();
-    const message = sanitize(String(event.message ?? ''));
+    const rawMessage = sanitize(String(event.message ?? ''));
+
+    // irc-framework includes the CTCP type in the message (e.g. "PING 1234567890").
+    // Strip the type prefix so ctx.text contains only the payload.
+    const payload = rawMessage.startsWith(type + ' ')
+      ? rawMessage.substring(type.length + 1)
+      : rawMessage === type ? '' : rawMessage;
 
     const ctx = this.buildContext({
       nick, ident, hostname,
       channel: null,
-      text: message,
+      text: payload,
       command: type,
-      args: message,
+      args: payload,
     });
 
     this.dispatcher.dispatch('ctcp', ctx).catch(this.dispatchError('ctcp'));

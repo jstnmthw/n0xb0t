@@ -60,8 +60,6 @@ export function init(api: PluginAPI): void {
       ctx.reply(`I haven't seen ${targetNick}.`);
     }
   });
-
-  api.log('Loaded');
 }
 
 export function teardown(): void {
