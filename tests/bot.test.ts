@@ -90,6 +90,10 @@ describe('Bot (mock)', () => {
       expect(names).toContain('join');
       expect(names).toContain('part');
       expect(names).toContain('status');
+      expect(names).toContain('plugins');
+      expect(names).toContain('load');
+      expect(names).toContain('unload');
+      expect(names).toContain('reload');
     });
   });
 

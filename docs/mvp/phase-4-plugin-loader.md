@@ -15,7 +15,7 @@ Build the plugin loader with full hot-reload support, then create the first exam
 
 **Goal:** Discover, load, unload, and hot-reload plugins. Each plugin gets a scoped API.
 
-- [ ] Create `src/plugin-loader.ts` implementing the `PluginLoader` class:
+- [x] Create `src/plugin-loader.ts` implementing the `PluginLoader` class:
   - Constructor takes `{ bot, pluginDir }`
   - `async loadAll()` — discover and load all enabled plugins from config
     - Read `config/plugins.json` to determine which plugins are enabled
@@ -111,12 +111,12 @@ Build the plugin loader with full hot-reload support, then create the first exam
     - `botConfig` is frozen — plugins can read identity settings but not modify them
     - Plugin `init()` and all handler calls must be wrapped in try/catch
 
-- [ ] Wire plugin loader into Bot class:
+- [x] Wire plugin loader into Bot class:
   - After IRC connection is established, call `pluginLoader.loadAll()`
   - Expose `pluginLoader` on bot instance
   - Update command handler stubs: `.plugins`, `.load`, `.unload`, `.reload` now call real plugin loader methods
 
-- [ ] Create `tests/plugin-loader.test.ts`:
+- [x] Create `tests/plugin-loader.test.ts`:
   - Create a temp directory with test plugins for each test
   - Test load: plugin's init() is called with scoped API
   - Test load: plugin's binds are registered in dispatcher
@@ -131,19 +131,19 @@ Build the plugin loader with full hot-reload support, then create the first exam
   - Test scoped API: plugin A can't access plugin B's database
   - Test config merge: plugin defaults overridden by plugins.json
   - Test loadAll: loads only enabled plugins from config
-- [ ] **Verify:** `pnpm vitest run tests/plugin-loader.test.ts` — all pass
+- [x] **Verify:** `pnpm vitest run tests/plugin-loader.test.ts` — all pass
 
 ## Phase 4B: 8ball plugin (simplest possible plugin)
 
 **Goal:** Prove the plugin system works with the simplest possible plugin.
 
-- [ ] Create `plugins/8ball/index.ts`:
+- [x] Create `plugins/8ball/index.ts`:
   - Exports: `name`, `version`, `description`, `init`, `teardown`
   - One bind: `pub`, `-`, `!8ball` → random response from a list
   - No database, no config, no state
-- [ ] Create `plugins/8ball/config.json`: `{}`
-- [ ] Create `plugins/8ball/README.md`: usage docs
-- [ ] Create `tests/plugins/8ball.test.ts`:
+- [x] Create `plugins/8ball/config.json`: `{}`
+- [x] Create `plugins/8ball/README.md`: usage docs
+- [x] Create `tests/plugins/8ball.test.ts`:
   - Test: dispatching a `pub` event with command `!8ball` triggers a reply
   - Test: reply is one of the known responses
   - Test: `!8ball` with no question returns usage hint
@@ -158,17 +158,17 @@ Build the plugin loader with full hot-reload support, then create the first exam
 
 **Goal:** Prove config resolution works.
 
-- [ ] Create `plugins/greeter/index.ts`:
+- [x] Create `plugins/greeter/index.ts`:
   - Binds `join` on `*` mask
   - Reads greeting template from `api.config.message`
   - Replaces `{channel}` and `{nick}` in template
   - Skips greeting the bot itself
-- [ ] Create `plugins/greeter/config.json`:
+- [x] Create `plugins/greeter/config.json`:
   ```json
   { "message": "Welcome to {channel}, {nick}!" }
   ```
-- [ ] Create `plugins/greeter/README.md`
-- [ ] Create `tests/plugins/greeter.test.ts`:
+- [x] Create `plugins/greeter/README.md`
+- [x] Create `tests/plugins/greeter.test.ts`:
   - Test: join event triggers greeting with default message
   - Test: custom message from config is used
   - Test: bot doesn't greet itself
@@ -178,14 +178,14 @@ Build the plugin loader with full hot-reload support, then create the first exam
 
 **Goal:** Prove database namespacing works for plugins.
 
-- [ ] Create `plugins/seen/index.ts`:
+- [x] Create `plugins/seen/index.ts`:
   - Binds `pubm` on `*` to track every channel message (stackable, doesn't interfere with other binds)
   - Stores `{ nick, channel, text, time }` in DB keyed by lowercase nick
   - Binds `pub` on `!seen` to look up last-seen data
   - Formats relative time (seconds/minutes/hours/days ago)
-- [ ] Create `plugins/seen/config.json`: `{}`
-- [ ] Create `plugins/seen/README.md`
-- [ ] Create `tests/plugins/seen.test.ts`:
+- [x] Create `plugins/seen/config.json`: `{}`
+- [x] Create `plugins/seen/README.md`
+- [x] Create `tests/plugins/seen.test.ts`:
   - Test: channel message updates seen record in DB
   - Test: `!seen nick` returns last-seen info
   - Test: `!seen unknown` returns "haven't seen" message
@@ -197,7 +197,7 @@ Build the plugin loader with full hot-reload support, then create the first exam
 
 ## Phase 4E: Full integration
 
-- [ ] Run `pnpm test` — all tests pass (Phase 1 + 2 + 3 + 4)
+- [x] Run `pnpm test` — all tests pass (Phase 1 + 2 + 3 + 4)
 - [ ] Start bot, load all three plugins, verify all work simultaneously
 - [ ] Verify hot-reload: modify a plugin's response, `.reload` it, verify new behavior
 - [ ] Verify unload: `.unload 8ball`, confirm `!8ball` no longer responds, other plugins unaffected

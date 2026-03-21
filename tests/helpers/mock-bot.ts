@@ -8,9 +8,14 @@ import { CommandHandler } from '../../src/command-handler.js';
 import { BotEventBus } from '../../src/event-bus.js';
 import { IRCBridge } from '../../src/irc-bridge.js';
 import { MockIRCClient } from './mock-irc.js';
+import { PluginLoader } from '../../src/plugin-loader.js';
+
 import { registerPermissionCommands } from '../../src/core/commands/permission-commands.js';
 import { registerDispatcherCommands } from '../../src/core/commands/dispatcher-commands.js';
 import { registerIRCAdminCommands } from '../../src/core/commands/irc-commands-admin.js';
+import { registerPluginCommands } from '../../src/core/commands/plugin-commands.js';
+
+import type { BotConfig } from '../../src/types.js';
 
 export interface MockBot {
   client: MockIRCClient;
@@ -20,6 +25,7 @@ export interface MockBot {
   commandHandler: CommandHandler;
   eventBus: BotEventBus;
   bridge: IRCBridge;
+  pluginLoader: PluginLoader;
   cleanup(): void;
 }
 
@@ -50,6 +56,27 @@ export function createMockBot(options?: { botNick?: string }): MockBot {
   });
   bridge.attach();
 
+  // Create plugin loader
+  const botConfig: BotConfig = {
+    irc: { host: 'localhost', port: 6667, tls: false, nick: botNick, username: botNick, realname: botNick, channels: ['#test'] },
+    owner: { handle: 'admin', hostmask: '*!*@localhost' },
+    identity: { method: 'hostmask', require_acc_for: [] },
+    services: { type: 'none', nickserv: 'NickServ', password: '', sasl: false },
+    database: ':memory:',
+    pluginDir: './plugins',
+    logging: { level: 'info', mod_actions: false },
+  };
+
+  const pluginLoader = new PluginLoader({
+    pluginDir: './plugins',
+    dispatcher,
+    eventBus,
+    db,
+    permissions,
+    botConfig,
+    ircClient: client,
+  });
+
   // Register commands
   registerPermissionCommands(commandHandler, permissions);
   registerDispatcherCommands(commandHandler, dispatcher);
@@ -59,6 +86,7 @@ export function createMockBot(options?: { botNick?: string }): MockBot {
     getBindCount: () => dispatcher.listBinds().length,
     getUserCount: () => permissions.listUsers().length,
   });
+  registerPluginCommands(commandHandler, pluginLoader, './plugins');
 
   return {
     client,
@@ -68,6 +96,7 @@ export function createMockBot(options?: { botNick?: string }): MockBot {
     commandHandler,
     eventBus,
     bridge,
+    pluginLoader,
     cleanup() {
       bridge.detach();
       db.close();

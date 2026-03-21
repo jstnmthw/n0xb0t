@@ -13,9 +13,12 @@ import { CommandHandler } from './command-handler.js';
 import { BotEventBus } from './event-bus.js';
 import { IRCBridge } from './irc-bridge.js';
 
+import { PluginLoader } from './plugin-loader.js';
+
 import { registerPermissionCommands } from './core/commands/permission-commands.js';
 import { registerDispatcherCommands } from './core/commands/dispatcher-commands.js';
 import { registerIRCAdminCommands } from './core/commands/irc-commands-admin.js';
+import { registerPluginCommands } from './core/commands/plugin-commands.js';
 
 import type { BotConfig } from './types.js';
 
@@ -32,6 +35,8 @@ export class Bot {
   readonly eventBus: BotEventBus;
   readonly client: InstanceType<typeof IrcClient>;
 
+  readonly pluginLoader: PluginLoader;
+
   private bridge: IRCBridge | null = null;
   private startTime: number = Date.now();
   private configuredChannels: string[] = [];
@@ -47,6 +52,15 @@ export class Bot {
     this.commandHandler = new CommandHandler();
     this.client = new IrcClient();
     this.configuredChannels = [...this.config.irc.channels];
+    this.pluginLoader = new PluginLoader({
+      pluginDir: this.config.pluginDir,
+      dispatcher: this.dispatcher,
+      eventBus: this.eventBus,
+      db: this.db,
+      permissions: this.permissions,
+      botConfig: this.config,
+      ircClient: this.client,
+    });
   }
 
   /** Start the bot: open DB, load permissions, connect to IRC, wire everything. */
@@ -70,6 +84,7 @@ export class Bot {
       getBindCount: () => this.dispatcher.listBinds().length,
       getUserCount: () => this.permissions.listUsers().length,
     });
+    registerPluginCommands(this.commandHandler, this.pluginLoader, resolve(this.config.pluginDir));
 
     // 5. Connect to IRC
     await this.connect();
@@ -82,6 +97,9 @@ export class Bot {
       botNick: this.config.irc.nick,
     });
     this.bridge.attach();
+
+    // 7. Load plugins
+    await this.pluginLoader.loadAll();
 
     this.startTime = Date.now();
     console.log('[bot] Started');
