@@ -6,7 +6,7 @@ import { createMockBot, type MockBot } from '../helpers/mock-bot.js';
 // Helpers
 // ---------------------------------------------------------------------------
 
-const PLUGIN_PATH = resolve('./plugins/chanop/index.ts');
+const PLUGIN_PATH = resolve('./plugins/chanmod/index.ts');
 
 function simulateJoin(bot: MockBot, nick: string, ident: string, hostname: string, channel: string): void {
   bot.client.simulateEvent('join', { nick, ident, hostname, channel });
@@ -40,7 +40,7 @@ function addToChannel(bot: MockBot, nick: string, ident: string, hostname: strin
 // Auto-op tests
 // ---------------------------------------------------------------------------
 
-describe('chanop plugin — auto-op', () => {
+describe('chanmod plugin — auto-op', () => {
   let bot: MockBot;
 
   beforeEach(async () => {
@@ -137,7 +137,7 @@ describe('chanop plugin — auto-op', () => {
     bot = createMockBot({ botNick: 'n0xb0t' });
     // Load with auto_op disabled via plugins config override
     const result = await bot.pluginLoader.load(PLUGIN_PATH, {
-      chanop: { enabled: true, config: { auto_op: false } },
+      chanmod: { enabled: true, config: { auto_op: false } },
     });
     expect(result.status).toBe('ok');
 
@@ -154,13 +154,13 @@ describe('chanop plugin — auto-op', () => {
 // Mode enforcement tests
 // ---------------------------------------------------------------------------
 
-describe('chanop plugin — mode enforcement', () => {
+describe('chanmod plugin — mode enforcement', () => {
   let bot: MockBot;
 
   beforeEach(async () => {
     bot = createMockBot({ botNick: 'n0xb0t' });
     const result = await bot.pluginLoader.load(PLUGIN_PATH, {
-      chanop: { enabled: true, config: { enforce_modes: true, enforce_delay_ms: 5 } },
+      chanmod: { enabled: true, config: { enforce_modes: true, enforce_delay_ms: 5 } },
     });
     expect(result.status).toBe('ok');
   });
@@ -237,7 +237,7 @@ describe('chanop plugin — mode enforcement', () => {
 
     bot = createMockBot({ botNick: 'n0xb0t' });
     const result = await bot.pluginLoader.load(PLUGIN_PATH, {
-      chanop: { enabled: true, config: { enforce_modes: false } },
+      chanmod: { enabled: true, config: { enforce_modes: false } },
     });
     expect(result.status).toBe('ok');
 
@@ -259,7 +259,7 @@ describe('chanop plugin — mode enforcement', () => {
     bot.cleanup();
     bot = createMockBot({ botNick: 'n0xb0t' });
     const res = await bot.pluginLoader.load(PLUGIN_PATH, {
-      chanop: { enabled: true, config: { enforce_modes: true, enforce_delay_ms: 5, auto_op: false } },
+      chanmod: { enabled: true, config: { enforce_modes: true, enforce_delay_ms: 5, auto_op: false } },
     });
     expect(res.status).toBe('ok');
 
@@ -327,7 +327,7 @@ describe('chanop plugin — mode enforcement', () => {
 // Command tests: !op, !deop, !voice, !devoice
 // ---------------------------------------------------------------------------
 
-describe('chanop plugin — mode commands', () => {
+describe('chanmod plugin — mode commands', () => {
   let bot: MockBot;
 
   beforeEach(async () => {
@@ -614,7 +614,7 @@ describe('chanop plugin — mode commands', () => {
 // Command tests: !kick
 // ---------------------------------------------------------------------------
 
-describe('chanop plugin — kick command', () => {
+describe('chanmod plugin — kick command', () => {
   let bot: MockBot;
 
   beforeEach(async () => {
@@ -681,7 +681,7 @@ describe('chanop plugin — kick command', () => {
 // Command tests: !ban, !unban, !kickban
 // ---------------------------------------------------------------------------
 
-describe('chanop plugin — ban commands', () => {
+describe('chanmod plugin — ban commands', () => {
   let bot: MockBot;
 
   beforeEach(async () => {

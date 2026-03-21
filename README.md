@@ -57,7 +57,7 @@ Plugins live in `plugins/<name>/` and are enabled via `config/plugins.json`. The
 | Plugin | Commands | Description |
 |--------|----------|-------------|
 | **8ball** | `!8ball <question>` | Magic 8-ball responses |
-| **chanop** | `!op`, `!deop`, `!voice`, `!devoice`, `!kick`, `!ban`, `!unban`, `!kickban` | Channel protection: auto-op/voice on join, mode enforcement, and moderation commands |
+| **chanmod** | `!op`, `!deop`, `!voice`, `!devoice`, `!kick`, `!ban`, `!unban`, `!kickban` | Channel protection: auto-op/voice on join, mode enforcement, and moderation commands |
 | **greeter** | *(automatic)* | Greets users on channel join |
 | **seen** | `!seen <nick>` | Tracks when a user was last active |
 | **topic** | `!topic <theme> <text>`, `!topics` | Set channel topics with IRC color themes |

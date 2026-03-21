@@ -1,5 +1,5 @@
 {
-  "chanop": {
+  "chanmod": {
     "enabled": true,
     "channels": ["#n0xb0t-test"]
   },

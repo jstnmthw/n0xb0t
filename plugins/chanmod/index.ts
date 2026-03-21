@@ -1,10 +1,10 @@
-// chanop — Channel protection plugin.
+// chanmod — Channel protection plugin.
 // Provides auto-op/voice on join, mode enforcement, and manual moderation
 // commands: !op, !deop, !voice, !devoice, !kick, !ban, !unban, !kickban.
 
 import type { PluginAPI, HandlerContext } from '../../src/types.js';
 
-export const name = 'chanop';
+export const name = 'chanmod';
 export const version = '1.0.0';
 export const description = 'Channel operator tools: auto-op, mode enforcement, kick/ban commands';
 
