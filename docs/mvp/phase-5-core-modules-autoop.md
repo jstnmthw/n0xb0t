@@ -194,17 +194,17 @@ Build the remaining core modules (services integration, IRC command helpers, cha
 ## Phase 5F: Full MVP verification
 
 - [x] Run `pnpm test` — entire test suite passes (all phases)
-- [ ] Start bot on a real IRC network
-- [ ] Add yourself as owner: `.adduser myadmin *!myident@my.host nmov`
-- [ ] Part and rejoin the channel → bot ops you
-- [ ] Have someone else join who isn't in the user list → nothing happens
-- [ ] Add them with voice: `.adduser friend *!their@host v`
-- [ ] They rejoin → bot voices them
-- [ ] Test hot-reload of auto-op: change a config value, `.reload auto-op`, verify new behavior
-- [ ] Test all example plugins still work alongside auto-op
-- [ ] `.plugins` shows all four plugins loaded with correct versions
-- [ ] `.binds` shows all registered binds from all plugins
-- [ ] `.status` shows bot uptime, channels, loaded plugins
+- [x] Start bot on a real IRC network
+- [x] Add yourself as owner: `.adduser myadmin *!myident@my.host nmov`
+- [x] Part and rejoin the channel → bot ops you
+- [x] Have someone else join who isn't in the user list → nothing happens
+- [x] Add them with voice: `.adduser friend *!their@host v`
+- [x] They rejoin → bot voices them
+- [x] Test hot-reload of auto-op: change a config value, `.reload auto-op`, verify new behavior
+- [x] Test all example plugins still work alongside auto-op
+- [x] `.plugins` shows all four plugins loaded with correct versions
+- [x] `.binds` shows all registered binds from all plugins
+- [x] `.status` shows bot uptime, channels, loaded plugins
 
 ---
 
