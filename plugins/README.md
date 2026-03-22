@@ -170,6 +170,40 @@ api.notice('#lobby', 'Notice to channel'); // NOTICE
 api.action('#lobby', 'waves'); // /me waves
 ```
 
+All outgoing messages go through a shared rate-limiting queue (default 1 msg/sec, burst 5). This prevents IRC flood disconnects, but it also means commands that send many lines will delay responses to other users. Keep this in mind when designing commands:
+
+- **Commands that send more than ~3 lines** must implement a per-caller cooldown to prevent users from stacking the queue by repeating the command.
+- **Give immediate channel feedback** before a long PM dump, so the caller knows the bot is working:
+
+  ```typescript
+  const COOLDOWN_MS = 60_000;
+  let cooldown: Map<string, number>;
+
+  export function init(api: PluginAPI): void {
+    cooldown = new Map(); // reset on hot-reload
+
+    api.bind('pub', '-', '!bigcmd', (ctx: HandlerContext) => {
+      const key = ctx.nick.toLowerCase();
+      const expires = cooldown.get(key) ?? 0;
+      if (Date.now() < expires) {
+        const secs = Math.ceil((expires - Date.now()) / 1000);
+        ctx.reply(`Cooldown active — try again in ${secs}s.`);
+        return;
+      }
+      cooldown.set(key, Date.now() + COOLDOWN_MS);
+
+      ctx.reply(`Sending results to your PM...`); // immediate ACK in channel
+      for (const line of manyLines) {
+        api.say(ctx.nick, line);
+      }
+    });
+  }
+
+  export function teardown(): void {
+    cooldown.clear();
+  }
+  ```
+
 ### Channel operations
 
 Require the bot to have operator status:
@@ -252,6 +286,7 @@ Before shipping a plugin:
 - [ ] `name` export matches directory name
 - [ ] `version` and `description` are set
 - [ ] Commands handle missing/bad arguments with a usage reply
+- [ ] Commands that send more than ~3 lines have a per-caller cooldown
 - [ ] Privileged commands have appropriate flags (`o`, `m`, or `n`)
 - [ ] Config has sensible defaults in `config.json`
 - [ ] No `console.log` — use `api.log()` / `api.error()` instead

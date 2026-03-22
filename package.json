@@ -2,7 +2,7 @@
   "name": "hexbot",
   "version": "0.1.0",
   "type": "module",
-  "description": "Obnoxiously intelligent, AI-powered IRC bot",
+  "description": "Modular IRC bot written in TypeScript",
   "main": "src/index.ts",
   "scripts": {
     "start": "tsx src/index.ts",

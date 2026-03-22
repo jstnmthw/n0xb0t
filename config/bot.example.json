@@ -29,7 +29,7 @@
     "mod_actions": true
   },
   "queue": {
-    "rate": 2,
-    "burst": 4
+    "rate": 1,
+    "burst": 5
   }
 }

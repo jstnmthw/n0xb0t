@@ -7,7 +7,11 @@ export const name = 'topic';
 export const version = '1.0.0';
 export const description = 'Set channel topics with color-coded theme borders';
 
+const PREVIEW_COOLDOWN_MS = 60_000;
+let previewCooldown: Map<string, number>;
+
 export function init(api: PluginAPI): void {
+  previewCooldown = new Map();
   // !topic <theme> <text>  — set the channel topic (requires o flag)
   // !topic preview <theme> <text>  — preview the themed text in channel
   api.bind('pub', '+o', '!topic', (ctx: HandlerContext) => {
@@ -77,8 +81,18 @@ export function init(api: PluginAPI): void {
     const subcommand = parts[0]?.toLowerCase();
 
     if (subcommand === 'preview') {
+      const cooldownKey = ctx.nick.toLowerCase();
+      const cooldownExpires = previewCooldown.get(cooldownKey) ?? 0;
+      if (Date.now() < cooldownExpires) {
+        const secsLeft = Math.ceil((cooldownExpires - Date.now()) / 1000);
+        ctx.reply(`Preview cooldown active — try again in ${secsLeft}s.`);
+        return;
+      }
+      previewCooldown.set(cooldownKey, Date.now() + PREVIEW_COOLDOWN_MS);
+
       const sampleText = parts.length > 1 ? parts.slice(1).join(' ') : 'Sample Topic Text';
       const nick = ctx.nick;
+      ctx.reply(`Sending ${themeNames.length} theme previews to your PM...`);
       api.say(nick, `Theme previews using: "${sampleText}"`);
       for (const themeName of themeNames) {
         const formatted = themes[themeName].replace('$text', sampleText);
@@ -95,5 +109,5 @@ export function init(api: PluginAPI): void {
 }
 
 export function teardown(): void {
-  // No cleanup needed — binds are auto-removed by the loader
+  previewCooldown.clear();
 }
