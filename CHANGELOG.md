@@ -70,7 +70,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `flood` plugin — message/join/nick-change flood detection with configurable escalation (warn → kick → tempban), per-channel exemptions, and command triggers (`.flood status/reset/exempt/unexempt`)
 - Message queue (`src/core/message-queue.ts`) — token-bucket rate limiter for all outbound bot messages; prevents flood-kick disconnects; configurable via `queue.rate` and `queue.burst` in `bot.json`
 - `!topic preview [text]` subcommand — DMs all available themes rendered with sample text
-- New topic themes: crimson, aurora, sunset, and others (total 26 themes)
+- New topic themes: crimson, aurora, sunset, bloodrune, and others (total 27 themes)
 - Test coverage threshold enforced at 80% via Vitest (`vitest.config.ts`)
 - Prettier code formatting with `@trivago/prettier-plugin-sort-imports`
 - Husky pre-commit hook running lint-staged (format check) and typecheck
@@ -78,6 +78,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Plugin hot-reload: transitive dependency cache-busting — rewrites local import URLs so re-imported sub-modules are also reloaded
 - ACC/STATUS fallback for NickServ verification (supports Atheme and Anope)
 - Deployment plan (`docs/plans/deployment.md`) — Docker + docker-compose, GitHub Actions CI/CD, systemd unit guide
+- REPL mirrors incoming private messages and notices (e.g. from ChanServ/NickServ) to the console using IRC-conventional `<nick>` / `-nick-` formatting
 
 ### Changed
 
@@ -91,6 +92,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Plugin API reference renamed from `docs/plugin-api.md` to `docs/PLUGIN_API.md`
 - Project renamed from `n0xb0t` to `hexbot` throughout all source, docs, configs, and tooling
 - `topic` plugin: `sunsetpipeline` theme renamed to `sunset`
+- `topic` plugin: `deepblue` theme removes extra padding around `$text`; `arrowhead` theme fixes spacing around text and closing decorator
 
 ### Fixed
 

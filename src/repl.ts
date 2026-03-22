@@ -14,10 +14,23 @@ export class BotREPL {
   private bot: Bot;
   private rl: ReadlineInterface | null = null;
   private logger: Logger | null;
+  private ircListeners: Array<{ event: string; fn: (...args: unknown[]) => void }> = [];
 
   constructor(bot: Bot, logger?: Logger | null) {
     this.bot = bot;
     this.logger = logger?.child('repl') ?? null;
+  }
+
+  /** Print a line above the prompt without disrupting the input line. */
+  private print(line: string): void {
+    if (this.rl) {
+      // Clear the current prompt line, print the message, then redisplay the prompt
+      process.stdout.write('\r\x1b[K');
+      console.log(line);
+      this.rl.prompt(true);
+    } else {
+      console.log(line);
+    }
   }
 
   /** Start the REPL. */
@@ -27,6 +40,34 @@ export class BotREPL {
       output: process.stdout,
       prompt: 'hexbot> ',
     });
+
+    // Mirror incoming private messages and notices to the console so the
+    // operator can see responses from services (e.g. ChanServ, NickServ).
+    const onNotice = (event: unknown) => {
+      const e = event as Record<string, unknown>;
+      const nick = String(e.nick ?? '');
+      const target = String(e.target ?? '');
+      const message = String(e.message ?? '');
+      // Only print notices sent directly to the bot (not channel notices)
+      if (target && /^[#&]/.test(target)) return;
+      this.print(`-${nick}- ${message}`);
+    };
+    const onPrivmsg = (event: unknown) => {
+      const e = event as Record<string, unknown>;
+      const nick = String(e.nick ?? '');
+      const target = String(e.target ?? '');
+      const message = String(e.message ?? '');
+      // Only print private messages (not channel messages)
+      if (target && /^[#&]/.test(target)) return;
+      this.print(`<${nick}> ${message}`);
+    };
+
+    this.bot.client.on('notice', onNotice);
+    this.bot.client.on('privmsg', onPrivmsg);
+    this.ircListeners = [
+      { event: 'notice', fn: onNotice },
+      { event: 'privmsg', fn: onPrivmsg },
+    ];
 
     this.logger?.info('Interactive mode. Type .help for commands, .quit to exit.');
 
@@ -46,6 +87,10 @@ export class BotREPL {
 
   /** Stop the REPL. */
   stop(): void {
+    for (const { event, fn } of this.ircListeners) {
+      this.bot.client.removeListener(event, fn);
+    }
+    this.ircListeners = [];
     if (this.rl) {
       this.rl.close();
       this.rl = null;
