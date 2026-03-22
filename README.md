@@ -81,4 +81,4 @@ pnpm typecheck     # tsc --noEmit
 
 ## License
 
-GPL-2.0
+[GPL-2.0](LICENSE)
