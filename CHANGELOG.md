@@ -62,9 +62,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Config examples: `config/bot.example.json`, `config/plugins.example.json`
 - Security guide: `docs/SECURITY.md`
 - Design document: `DESIGN.md`
-- Plugin API reference: `docs/plugin-api.md`
+- Plugin API reference: `docs/PLUGIN_API.md`
 - Phase planning docs in `docs/mvp/`
-- Feature plans: CTCP replies, topic-creator, logger-service in `docs/plans/`
+- Plugin authoring guide: `plugins/README.md`
+- `chanmod` plugin — replaces `auto-op` with full channel protection: auto-op/voice on join, mode enforcement (re-ops flagged users when externally deopped/devoiced), and manual moderation commands (`!op`, `!deop`, `!voice`, `!devoice`, `!kick`, `!ban`, `!unban`, `!kickban`)
+- `ctcp` plugin — standalone VERSION, PING, and TIME CTCP reply handlers
+- `flood` plugin — message/join/nick-change flood detection with configurable escalation (warn → kick → tempban), per-channel exemptions, and command triggers (`.flood status/reset/exempt/unexempt`)
+- Message queue (`src/core/message-queue.ts`) — token-bucket rate limiter for all outbound bot messages; prevents flood-kick disconnects; configurable via `queue.rate` and `queue.burst` in `bot.json`
+- `!topic preview [text]` subcommand — DMs all available themes rendered with sample text
+- New topic themes: crimson, aurora, sunset, and others (total 26 themes)
+- Test coverage threshold enforced at 80% via Vitest (`vitest.config.ts`)
+- Prettier code formatting with `@trivago/prettier-plugin-sort-imports`
+- Husky pre-commit hook running lint-staged (format check) and typecheck
+- `pnpm format` / `pnpm format:check` scripts
+- Plugin hot-reload: transitive dependency cache-busting — rewrites local import URLs so re-imported sub-modules are also reloaded
+- ACC/STATUS fallback for NickServ verification (supports Atheme and Anope)
+- Deployment plan (`docs/plans/deployment.md`) — Docker + docker-compose, GitHub Actions CI/CD, systemd unit guide
 
 ### Changed
 
@@ -73,6 +86,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Seen plugin updated to v1.1.0 with TTL cleanup — records older than `max_age_days` (default 365) are automatically purged on query
 - Extracted `sanitize()` (newline stripping) into shared `src/utils/sanitize.ts`, replacing inline implementations in irc-bridge, irc-commands, and plugin-loader
 - Vitest config excludes `.claude/worktrees/` to prevent duplicate test runs
+- `auto-op` plugin replaced by `chanmod` — subsumes auto-op/voice behavior and adds manual moderation commands and mode enforcement
+- CTCP handlers moved from irc-bridge core into the standalone `ctcp` plugin
+- Plugin API reference renamed from `docs/plugin-api.md` to `docs/PLUGIN_API.md`
+- Project renamed from `n0xb0t` to `hexbot` throughout all source, docs, configs, and tooling
+- `topic` plugin: `sunsetpipeline` theme renamed to `sunset`
 
 ### Fixed
 
@@ -86,3 +104,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - IRC replies split at ~400 bytes, capped at 4 lines with `...` truncation (`src/utils/split-message.ts`)
   - RFC 2812 `ircLower()` case mapping used in wildcard matching, channel-state lookups, and dispatcher mask comparisons
   - Timer binds enforce 10-second minimum interval to prevent resource exhaustion
+- **Security audit** (all findings from `docs/audits/all-2026-03-22.md`)
+- `deepblue2` topic theme: missing background color on opening decorator
+- `chanmod` commands now check that the bot holds ops before executing mode changes
+- REPL prompt displayed before readline prompt, preventing interleaved output
+- ESLint and TypeScript errors: unused variables, stale reload temp files, IRC formatting control-char regex in greeter
+- Several `topic` theme string formatting bugs
