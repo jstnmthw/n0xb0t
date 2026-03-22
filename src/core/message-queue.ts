@@ -23,6 +23,7 @@ export interface MessageQueueOptions {
 // ---------------------------------------------------------------------------
 
 export class MessageQueue {
+  private static readonly MAX_DEPTH = 500;
   private readonly queue: Array<() => void> = [];
   private tokens: number;
   private lastRefill: number;
@@ -58,6 +59,11 @@ export class MessageQueue {
     if (this.tokens >= 1) {
       this.tokens--;
       fn();
+      return;
+    }
+
+    if (this.queue.length >= MessageQueue.MAX_DEPTH) {
+      this.logger?.warn(`Message queue full (${MessageQueue.MAX_DEPTH}), dropping outgoing message`);
       return;
     }
 

@@ -55,7 +55,7 @@ export class IRCCommands {
 
   join(channel: string, key?: string): void {
     if (key) {
-      this.client.raw(`JOIN ${channel} ${key}`);
+      this.client.raw(`JOIN ${sanitize(channel)} ${sanitize(key)}`);
     } else {
       this.client.join(channel);
     }
@@ -67,7 +67,7 @@ export class IRCCommands {
 
   kick(channel: string, nick: string, reason?: string): void {
     const safe = sanitize(reason ?? '');
-    this.client.raw(`KICK ${channel} ${nick} :${safe}`);
+    this.client.raw(`KICK ${sanitize(channel)} ${sanitize(nick)} :${safe}`);
     this.logMod('kick', channel, nick, 'bot', reason ?? null);
   }
 
@@ -101,7 +101,7 @@ export class IRCCommands {
 
   topic(channel: string, text: string): void {
     const safe = sanitize(text);
-    this.client.raw(`TOPIC ${channel} :${safe}`);
+    this.client.raw(`TOPIC ${sanitize(channel)} :${safe}`);
   }
 
   quiet(channel: string, mask: string): void {
@@ -140,14 +140,16 @@ export class IRCCommands {
     if (this.client.mode) {
       this.client.mode(channel, mode, param);
     } else {
-      this.client.raw(`MODE ${channel} ${mode} ${param}`);
+      this.client.raw(`MODE ${sanitize(channel)} ${mode} ${sanitize(param)}`);
     }
   }
 
   private sendModeRaw(channel: string, modeString: string, params: string[]): void {
-    const line = params.length > 0
-      ? `MODE ${channel} ${modeString} ${params.join(' ')}`
-      : `MODE ${channel} ${modeString}`;
+    const safeChannel = sanitize(channel);
+    const safeParams = params.map((p) => sanitize(p));
+    const line = safeParams.length > 0
+      ? `MODE ${safeChannel} ${modeString} ${safeParams.join(' ')}`
+      : `MODE ${safeChannel} ${modeString}`;
     this.client.raw(line);
   }
 

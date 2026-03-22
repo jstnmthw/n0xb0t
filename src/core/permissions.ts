@@ -1,7 +1,7 @@
 // n0xb0t — Permissions system
 // Hostmask-based identity, n/m/o/v flags with per-channel overrides.
 
-import { wildcardMatch } from '../utils/wildcard.js';
+import { wildcardMatch, ircLower } from '../utils/wildcard.js';
 import type { BotDatabase } from '../database.js';
 import type { Logger } from '../logger.js';
 import type { UserRecord, HandlerContext } from '../types.js';
@@ -131,11 +131,12 @@ export class Permissions {
       throw new Error(`User "${handle}" not found`);
     }
 
+    const normalizedChannel = ircLower(channel);
     const normalized = this.normalizeFlags(flags);
     if (normalized === '') {
-      delete record.channels[channel];
+      delete record.channels[normalizedChannel];
     } else {
-      record.channels[channel] = normalized;
+      record.channels[normalizedChannel] = normalized;
     }
     this.persist();
 
@@ -292,7 +293,7 @@ export class Permissions {
 
     // Check channel-specific flags
     if (channel) {
-      const channelFlags = record.channels[channel];
+      const channelFlags = record.channels[ircLower(channel)];
       if (channelFlags) {
         // Owner in channel implies all flags for that channel
         if (channelFlags.includes(OWNER_FLAG)) return true;

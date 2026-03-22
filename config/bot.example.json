@@ -1,6 +1,6 @@
 {
   "irc": {
-    "host": "irc.rizon.net",
+    "host": "irc.libera.chat",
     "port": 6697,
     "tls": true,
     "nick": "n0xb0t",

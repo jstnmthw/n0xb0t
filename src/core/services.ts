@@ -198,7 +198,7 @@ export class Services {
     const unknownCmd = message.match(/^Unknown command (\S+)/i);
     if (unknownCmd) {
       const failedCmd = unknownCmd[1].toUpperCase();
-      for (const [key, pending] of this.pending) {
+      for (const [_key, pending] of this.pending) {
         const shouldRetry =
           (failedCmd === 'ACC' || failedCmd === 'ACC.') && pending.method === 'acc' ||
           (failedCmd === 'STATUS' || failedCmd === 'STATUS.') && pending.method === 'status';

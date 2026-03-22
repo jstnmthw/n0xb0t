@@ -38,7 +38,7 @@ export function init(api: PluginAPI): void {
         return;
       }
 
-      const formatted = template.replace('$text', text);
+      const formatted = template.replace('$text', () => text);
       api.say(ctx.channel, formatted);
       return;
     }
@@ -57,7 +57,7 @@ export function init(api: PluginAPI): void {
       return;
     }
 
-    const formatted = template.replace('$text', text);
+    const formatted = template.replace('$text', () => text);
 
     // Warn if the formatted topic is very long (typical IRC limit ~390 chars)
     if (formatted.length > 390) {

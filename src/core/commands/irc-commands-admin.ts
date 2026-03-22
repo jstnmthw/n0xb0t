@@ -47,6 +47,11 @@ export function registerIRCAdminCommands(
       ctx.reply('Usage: .say <target> <message>');
       return;
     }
+    // Validate target looks like a channel or nick (no spaces, starts with # or alphanumeric)
+    if (!target || !/^[#&]?[^\s\r\n]+$/.test(target)) {
+      ctx.reply('Invalid target.');
+      return;
+    }
     const safe = sanitize(message);
     client.say(target, safe);
     ctx.reply(`Message sent to ${target}`);

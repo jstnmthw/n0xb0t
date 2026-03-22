@@ -1,0 +1,12 @@
+{
+  "msg_threshold": 5,
+  "msg_window_secs": 3,
+  "join_threshold": 3,
+  "join_window_secs": 60,
+  "nick_threshold": 3,
+  "nick_window_secs": 60,
+  "ban_duration_minutes": 10,
+  "ignore_ops": true,
+  "actions": ["warn", "kick", "tempban"],
+  "offence_window_ms": 300000
+}

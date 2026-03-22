@@ -84,6 +84,8 @@ export interface PluginAPI {
   ctcpResponse(target: string, type: string, message: string): void;
 
   // IRC channel operations
+  join(channel: string, key?: string): void;
+  part(channel: string, message?: string): void;
   op(channel: string, nick: string): void;
   deop(channel: string, nick: string): void;
   voice(channel: string, nick: string): void;

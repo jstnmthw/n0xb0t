@@ -413,110 +413,6 @@ describe('IRCBridge', () => {
     });
   });
 
-  describe('CTCP replies', () => {
-    it('should reply to VERSION with version string', async () => {
-      client.simulateEvent('ctcp request', {
-        nick: 'curious',
-        ident: 'user',
-        hostname: 'host.com',
-        target: 'testbot',
-        type: 'VERSION',
-        message: '',
-      });
-
-      await Promise.resolve();
-
-      const resp = client.messages.find((m) => m.type === 'ctcpResponse');
-      expect(resp).toBeDefined();
-      expect(resp!.target).toBe('curious');
-      expect(resp!.message).toMatch(/^VERSION n0xb0t v/);
-    });
-
-    it('should reply to PING by echoing the payload', async () => {
-      client.simulateEvent('ctcp request', {
-        nick: 'pinger',
-        ident: 'user',
-        hostname: 'host.com',
-        target: 'testbot',
-        type: 'PING',
-        message: '1234567890',
-      });
-
-      await Promise.resolve();
-
-      const resp = client.messages.find((m) => m.type === 'ctcpResponse');
-      expect(resp).toBeDefined();
-      expect(resp!.target).toBe('pinger');
-      expect(resp!.message).toBe('PING 1234567890');
-    });
-
-    it('should strip CTCP type prefix from ctx.text', async () => {
-      const handler = vi.fn();
-      dispatcher.bind('ctcp', '-', 'PING', handler, 'test-plugin');
-
-      client.simulateEvent('ctcp request', {
-        nick: 'pinger',
-        ident: 'user',
-        hostname: 'host.com',
-        target: 'testbot',
-        type: 'PING',
-        message: 'PING 9999999999',
-      });
-
-      await Promise.resolve();
-
-      const ctx: HandlerContext = handler.mock.calls[0][0];
-      expect(ctx.text).toBe('9999999999');
-      expect(ctx.command).toBe('PING');
-
-      dispatcher.unbindAll('test-plugin');
-    });
-
-    it('should reply to TIME with a time string', async () => {
-      client.simulateEvent('ctcp request', {
-        nick: 'timecheck',
-        ident: 'user',
-        hostname: 'host.com',
-        target: 'testbot',
-        type: 'TIME',
-        message: '',
-      });
-
-      await Promise.resolve();
-
-      const resp = client.messages.find((m) => m.type === 'ctcpResponse');
-      expect(resp).toBeDefined();
-      expect(resp!.target).toBe('timecheck');
-      // Date().toString() produces something like "Sat Mar 21 2026 ..."
-      expect(resp!.message).toMatch(/^TIME .+/);
-    });
-
-    it('should still dispatch to plugin ctcp handlers alongside core handlers', async () => {
-      const pluginHandler = vi.fn();
-      dispatcher.bind('ctcp', '-', 'VERSION', pluginHandler, 'test-plugin');
-
-      client.simulateEvent('ctcp request', {
-        nick: 'curious',
-        ident: 'user',
-        hostname: 'host.com',
-        target: 'testbot',
-        type: 'VERSION',
-        message: '',
-      });
-
-      await Promise.resolve();
-
-      // Core handler should have replied
-      const resp = client.messages.find((m) => m.type === 'ctcpResponse');
-      expect(resp).toBeDefined();
-
-      // Plugin handler should also have been called (ctcp is stackable)
-      expect(pluginHandler).toHaveBeenCalledOnce();
-
-      dispatcher.unbindAll('test-plugin');
-    });
-  });
-
   describe('action events', () => {
     it('should dispatch pubm for channel actions', async () => {
       const pubmHandler = vi.fn();
@@ -756,6 +652,28 @@ describe('IRCBridge', () => {
   });
 
   describe('ctcp events — payload parsing edge cases', () => {
+    it('should strip type prefix from message when it starts with "TYPE "', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('ctcp', '-', 'PING', handler, 'test-plugin');
+
+      client.simulateEvent('ctcp request', {
+        nick: 'pinger',
+        ident: 'user',
+        hostname: 'host.com',
+        target: 'testbot',
+        type: 'PING',
+        message: 'PING 9999999999',
+      });
+
+      await Promise.resolve();
+
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.text).toBe('9999999999');
+      expect(ctx.command).toBe('PING');
+
+      dispatcher.unbindAll('test-plugin');
+    });
+
     it('should set empty text when message equals type exactly', async () => {
       const handler = vi.fn();
       dispatcher.bind('ctcp', '-', 'VERSION', handler, 'test');

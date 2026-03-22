@@ -2,8 +2,6 @@
 // Translates irc-framework events into dispatcher events.
 // This is the trust boundary — all IRC data entering the dispatcher passes through here.
 
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 
 import { sanitize } from './utils/sanitize.js';
 import { splitMessage } from './utils/split-message.js';
@@ -26,12 +24,17 @@ export interface IRCClient {
   ctcpResponse(target: string, type: string, ...params: string[]): void;
 }
 
+interface ChannelStateProvider {
+  getUserHostmask(channel: string, nick: string): string | undefined;
+}
+
 interface IRCBridgeOptions {
   client: IRCClient;
   dispatcher: EventDispatcher;
   eventBus: BotEventBus;
   botNick: string;
   messageQueue?: MessageQueue | null;
+  channelState?: ChannelStateProvider | null;
   logger?: Logger | null;
 }
 
@@ -65,9 +68,10 @@ export class IRCBridge {
   private eventBus: BotEventBus;
   private botNick: string;
   private messageQueue: MessageQueue | null;
+  private channelState: ChannelStateProvider | null;
   private logger: Logger | null;
   private listeners: Array<{ event: string; fn: (...args: unknown[]) => void }> = [];
-  private version: string;
+  private ctcpRateLimiter: Map<string, number[]> = new Map();
 
   constructor(options: IRCBridgeOptions) {
     this.client = options.client;
@@ -75,15 +79,8 @@ export class IRCBridge {
     this.eventBus = options.eventBus;
     this.botNick = options.botNick;
     this.messageQueue = options.messageQueue ?? null;
+    this.channelState = options.channelState ?? null;
     this.logger = options.logger?.child('irc-bridge') ?? null;
-
-    // Read version from package.json for CTCP VERSION replies
-    try {
-      const pkg = JSON.parse(readFileSync(resolve('package.json'), 'utf-8'));
-      this.version = `n0xb0t v${pkg.version}`;
-    } catch {
-      this.version = 'n0xb0t';
-    }
   }
 
   /** Register all irc-framework event listeners. */
@@ -97,9 +94,6 @@ export class IRCBridge {
     this.listenIrc('mode', this.onMode.bind(this));
     this.listenIrc('notice', this.onNotice.bind(this));
     this.listenIrc('ctcp request', this.onCtcp.bind(this));
-
-    // Register built-in CTCP reply handlers
-    this.registerCtcpHandlers();
 
     this.logger?.info('Attached to IRC client');
   }
@@ -123,22 +117,16 @@ export class IRCBridge {
   // Built-in CTCP handlers
   // -------------------------------------------------------------------------
 
-  /** Register core CTCP reply handlers (VERSION, PING, TIME). */
-  private registerCtcpHandlers(): void {
-    const client = this.client;
-    const version = this.version;
-
-    this.dispatcher.bind('ctcp', '-', 'VERSION', (ctx) => {
-      client.ctcpResponse(ctx.nick, 'VERSION', version);
-    }, 'core');
-
-    this.dispatcher.bind('ctcp', '-', 'PING', (ctx) => {
-      client.ctcpResponse(ctx.nick, 'PING', ctx.text);
-    }, 'core');
-
-    this.dispatcher.bind('ctcp', '-', 'TIME', (ctx) => {
-      client.ctcpResponse(ctx.nick, 'TIME', new Date().toString());
-    }, 'core');
+  /** Rate limit CTCP responses: max 3 per nick per 10 seconds. */
+  private ctcpAllowed(nick: string): boolean {
+    const now = Date.now();
+    const WINDOW_MS = 10_000;
+    const MAX_RESPONSES = 3;
+    const times = (this.ctcpRateLimiter.get(nick) ?? []).filter((t) => now - t < WINDOW_MS);
+    if (times.length >= MAX_RESPONSES) return false;
+    times.push(now);
+    this.ctcpRateLimiter.set(nick, times);
+    return true;
   }
 
   // -------------------------------------------------------------------------
@@ -243,27 +231,39 @@ export class IRCBridge {
 
   private onKick(event: Record<string, unknown>): void {
     const kicker = sanitize(String(event.nick ?? ''));
-    const ident = sanitize(String(event.ident ?? ''));
-    const hostname = sanitize(String(event.hostname ?? ''));
     const channel = sanitize(String(event.channel ?? ''));
     const kicked = sanitize(String(event.kicked ?? ''));
     const message = sanitize(String(event.message ?? ''));
 
     if (!isValidChannel(channel)) return;
 
+    // Look up the kicked user's hostmask from channel state (more accurate than the kicker's ident/hostname)
+    const kickedHostmask = this.channelState?.getUserHostmask(channel, kicked);
+    const { ident: kickedIdent, hostname: kickedHostname } = kickedHostmask
+      ? this.splitKickedHostmask(kickedHostmask)
+      : { ident: '', hostname: '' };
+
     // For kick events, the context nick is the kicked user
     const reason = message ? `${message} (by ${kicker})` : `by ${kicker}`;
     const ctx = this.buildContext({
       nick: kicked,
-      ident,
-      hostname,
+      ident: kickedIdent,
+      hostname: kickedHostname,
       channel,
-      text: `${channel} ${kicked}!${ident}@${hostname}`,
+      text: `${channel} ${kicked}!${kickedIdent}@${kickedHostname}`,
       command: 'KICK',
       args: reason,
     });
 
     this.dispatcher.dispatch('kick', ctx).catch(this.dispatchError('kick'));
+  }
+
+  /** Parse ident and hostname from a full hostmask string (nick!ident@hostname). */
+  private splitKickedHostmask(hostmask: string): { ident: string; hostname: string } {
+    const bangIdx = hostmask.indexOf('!');
+    const atIdx = hostmask.lastIndexOf('@');
+    if (bangIdx === -1 || atIdx === -1 || atIdx <= bangIdx) return { ident: '', hostname: '' };
+    return { ident: hostmask.substring(bangIdx + 1, atIdx), hostname: hostmask.substring(atIdx + 1) };
   }
 
   private onNick(event: Record<string, unknown>): void {

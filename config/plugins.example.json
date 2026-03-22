@@ -1,7 +1,35 @@
 {
   "chanmod": {
     "enabled": true,
-    "channels": ["#n0xb0t-test"]
+    "channels": ["#n0xb0t-test"],
+    "config": {
+      "auto_op": true,
+      "enforce_modes": false,
+      "enforce_channel_modes": "+nt",
+      "nodesynch_nicks": ["ChanServ"],
+      "op_flags": ["n", "m", "o"],
+      "voice_flags": ["v"],
+      "default_ban_duration": 120,
+      "default_ban_type": 3,
+      "cycle_on_deop": false,
+      "cycle_delay_ms": 5000,
+      "enforce_delay_ms": 500
+    }
+  },
+  "flood": {
+    "enabled": false,
+    "channels": ["#n0xb0t-test"],
+    "config": {
+      "msg_threshold": 5,
+      "msg_window_secs": 3,
+      "join_threshold": 3,
+      "join_window_secs": 60,
+      "nick_threshold": 3,
+      "nick_window_secs": 60,
+      "ban_duration_minutes": 10,
+      "ignore_ops": true,
+      "actions": ["warn", "kick", "tempban"]
+    }
   },
   "greeter": {
     "enabled": true,
@@ -17,6 +45,9 @@
     "enabled": true
   },
   "topic": {
+    "enabled": true
+  },
+  "ctcp": {
     "enabled": true
   }
 }

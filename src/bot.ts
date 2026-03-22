@@ -2,7 +2,7 @@
 // Thin orchestrator that wires modules together. Creates and connects the
 // pieces but delegates all real work to the individual modules.
 
-import { readFileSync, accessSync, constants as fsConstants } from 'node:fs';
+import { readFileSync, accessSync, statSync, constants as fsConstants } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import chalk from 'chalk';
@@ -140,6 +140,7 @@ export class Bot {
       eventBus: this.eventBus,
       botNick: this.config.irc.nick,
       messageQueue: this.messageQueue,
+      channelState: this.channelState,
       logger: this.logger,
     });
     this.bridge.attach();
@@ -264,6 +265,18 @@ export class Bot {
       console.error(`[bot] Config file not found: ${configPath}`);
       console.error('[bot] Copy config/bot.example.json to config/bot.json and edit it.');
       process.exit(1);
+    }
+
+    // Warn if the config file is world-readable
+    try {
+      const stat = statSync(configPath);
+      if (stat.mode & 0o004) {
+        console.error(`[bot] SECURITY: ${configPath} is world-readable (mode ${(stat.mode & 0o777).toString(8)})`);
+        console.error(`[bot] Run: chmod 600 ${configPath}`);
+        process.exit(1);
+      }
+    } catch {
+      // stat failed — file readable check already passed above, ignore
     }
 
     try {

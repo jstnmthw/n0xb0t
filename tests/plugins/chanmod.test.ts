@@ -515,13 +515,13 @@ describe('chanmod plugin — ban commands', () => {
   afterAll(() => { bot.cleanup(); });
   beforeEach(() => { bot.client.clearMessages(); });
 
-  it('!ban nick — should ban with *!*@host mask', async () => {
+  it('!ban nick — should ban with type-3 mask (*!*ident@*.domain)', async () => {
     addToChannel(bot, 'BadUser', 'bad', 'evil.host.com', '#test');
     bot.client.clearMessages();
     simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!ban BadUser');
     await flush();
     expect(bot.client.messages.find(
-      (m) => m.type === 'mode' && m.message === '+b' && m.args?.includes('*!*@evil.host.com')
+      (m) => m.type === 'mode' && m.message === '+b' && m.args?.includes('*!*bad@*.host.com')
     )).toBeDefined();
   });
 
@@ -565,7 +565,7 @@ describe('chanmod plugin — ban commands', () => {
     simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!kickban BadUser2 being terrible');
     await flush();
     expect(bot.client.messages.find(
-      (m) => m.type === 'mode' && m.message === '+b' && m.args?.includes('*!*@evil.host.com')
+      (m) => m.type === 'mode' && m.message === '+b' && m.args?.includes('*!*bad@*.host.com')
     )).toBeDefined();
     const kickMsg = bot.client.messages.find((m) => m.type === 'raw' && m.message?.startsWith('KICK #test BadUser2'));
     expect(kickMsg).toBeDefined();
@@ -611,5 +611,202 @@ describe('chanmod plugin — teardown', () => {
 
     expect(bot.pluginLoader.isLoaded('chanmod')).toBe(false);
     bot.cleanup();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ban mask builder
+// ---------------------------------------------------------------------------
+
+describe('chanmod plugin — ban mask types', () => {
+  let bot: MockBot;
+
+  beforeAll(async () => {
+    bot = createMockBot({ botNick: 'n0xb0t' });
+    giveBotOps(bot, '#test');
+    await bot.pluginLoader.load(PLUGIN_PATH);
+    bot.permissions.addUser('admin', '*!admin@admin.host', 'o', 'test');
+  });
+
+  afterAll(() => { bot.cleanup(); });
+  beforeEach(() => { bot.client.clearMessages(); });
+
+  it('default type 3 — wildcards first hostname component', async () => {
+    addToChannel(bot, 'Target', 'evil', 'sub.example.net', '#test');
+    bot.client.clearMessages();
+    simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!ban Target');
+    await flush();
+    expect(bot.client.messages.find(
+      (m) => m.type === 'mode' && m.message === '+b' && m.args?.includes('*!*evil@*.example.net')
+    )).toBeDefined();
+  });
+
+  it('type 1 — *!*@host', async () => {
+    bot.cleanup();
+    bot = createMockBot({ botNick: 'n0xb0t' });
+    giveBotOps(bot, '#test');
+    await bot.pluginLoader.load(PLUGIN_PATH, {
+      chanmod: { enabled: true, config: { default_ban_type: 1 } },
+    });
+    bot.permissions.addUser('admin', '*!admin@admin.host', 'o', 'test');
+    addToChannel(bot, 'Target', 'evil', 'sub.example.net', '#test');
+    bot.client.clearMessages();
+    simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!ban Target');
+    await flush();
+    expect(bot.client.messages.find(
+      (m) => m.type === 'mode' && m.message === '+b' && m.args?.includes('*!*@sub.example.net')
+    )).toBeDefined();
+  });
+
+  it('type 2 — *!*ident@host', async () => {
+    bot.cleanup();
+    bot = createMockBot({ botNick: 'n0xb0t' });
+    giveBotOps(bot, '#test');
+    await bot.pluginLoader.load(PLUGIN_PATH, {
+      chanmod: { enabled: true, config: { default_ban_type: 2 } },
+    });
+    bot.permissions.addUser('admin', '*!admin@admin.host', 'o', 'test');
+    addToChannel(bot, 'Target', 'evil', 'sub.example.net', '#test');
+    bot.client.clearMessages();
+    simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!ban Target');
+    await flush();
+    expect(bot.client.messages.find(
+      (m) => m.type === 'mode' && m.message === '+b' && m.args?.includes('*!*evil@sub.example.net')
+    )).toBeDefined();
+  });
+
+  it('cloaked hostmask — uses exact cloak regardless of type', async () => {
+    bot.cleanup();
+    bot = createMockBot({ botNick: 'n0xb0t' });
+    giveBotOps(bot, '#test');
+    await bot.pluginLoader.load(PLUGIN_PATH, {
+      chanmod: { enabled: true, config: { default_ban_type: 3 } },
+    });
+    bot.permissions.addUser('admin', '*!admin@admin.host', 'o', 'test');
+    addToChannel(bot, 'Cloaked', 'cloaked', 'user/foo', '#test');
+    bot.client.clearMessages();
+    simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!ban Cloaked');
+    await flush();
+    expect(bot.client.messages.find(
+      (m) => m.type === 'mode' && m.message === '+b' && m.args?.includes('*!*@user/foo')
+    )).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Timed bans
+// ---------------------------------------------------------------------------
+
+describe('chanmod plugin — timed bans', () => {
+  let bot: MockBot;
+
+  beforeAll(async () => {
+    bot = createMockBot({ botNick: 'n0xb0t' });
+    giveBotOps(bot, '#test');
+    await bot.pluginLoader.load(PLUGIN_PATH);
+    bot.permissions.addUser('admin', '*!admin@admin.host', 'o', 'test');
+  });
+
+  afterAll(() => { bot.cleanup(); });
+  beforeEach(() => { bot.client.clearMessages(); });
+
+  it('!ban with duration stores record in DB', async () => {
+    simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!ban *!*@timed.host 60');
+    await flush();
+    const entry = bot.db.get('chanmod', 'ban:#test:*!*@timed.host');
+    expect(entry).toBeDefined();
+    const record = JSON.parse(entry!) as { mask: string; expires: number };
+    expect(record.mask).toBe('*!*@timed.host');
+    expect(record.expires).toBeGreaterThan(Date.now());
+  });
+
+  it('!ban with 0 duration stores permanent record (expires=0)', async () => {
+    simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!ban *!*@perm.host 0');
+    await flush();
+    const entry = bot.db.get('chanmod', 'ban:#test:*!*@perm.host');
+    expect(entry).toBeDefined();
+    const record = JSON.parse(entry!) as { expires: number };
+    expect(record.expires).toBe(0);
+  });
+
+  it('!bans lists active bans', async () => {
+    simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!bans');
+    await flush();
+    const replies = bot.client.messages.filter((m) => m.type === 'say' && m.target === '#test');
+    expect(replies.length).toBeGreaterThan(0);
+    expect(replies.some((r) => r.message?.includes('*!*@timed.host'))).toBe(true);
+  });
+
+  it('!bans reports no bans when channel has none', async () => {
+    simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!bans #empty');
+    await flush();
+    expect(bot.client.messages.find(
+      (m) => m.type === 'say' && m.message?.includes('No tracked bans')
+    )).toBeDefined();
+  });
+
+  it('!unban removes DB record', async () => {
+    simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!unban *!*@timed.host');
+    await flush();
+    const entry = bot.db.get('chanmod', 'ban:#test:*!*@timed.host');
+    expect(entry).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Channel mode enforcement
+// ---------------------------------------------------------------------------
+
+describe('chanmod plugin — channel mode enforcement', () => {
+  let bot: MockBot;
+
+  beforeEach(async () => {
+    bot = createMockBot({ botNick: 'n0xb0t' });
+    giveBotOps(bot, '#test');
+    await bot.pluginLoader.load(PLUGIN_PATH, {
+      chanmod: {
+        enabled: true,
+        config: { enforce_channel_modes: '+nt', enforce_delay_ms: 5 },
+      },
+    });
+  });
+
+  afterEach(() => { bot.cleanup(); });
+
+  it('re-applies +t when stripped by an external user', async () => {
+    bot.client.clearMessages();
+    simulateMode(bot, 'EvilOp', '#test', '-t', '');
+    await tick(50);
+    // Channel modes (no param) are sent via raw(), not mode()
+    expect(bot.client.messages.find(
+      (m) => m.type === 'raw' && m.message === 'MODE #test +t'
+    )).toBeDefined();
+  });
+
+  it('re-applies +n when stripped by an external user', async () => {
+    bot.client.clearMessages();
+    simulateMode(bot, 'EvilOp', '#test', '-n', '');
+    await tick(50);
+    expect(bot.client.messages.find(
+      (m) => m.type === 'raw' && m.message === 'MODE #test +n'
+    )).toBeDefined();
+  });
+
+  it('does NOT re-apply when setter is in nodesynch_nicks (ChanServ)', async () => {
+    bot.client.clearMessages();
+    simulateMode(bot, 'ChanServ', '#test', '-t', '');
+    await tick(50);
+    expect(bot.client.messages.find(
+      (m) => m.type === 'raw' && m.message === 'MODE #test +t'
+    )).toBeUndefined();
+  });
+
+  it('does NOT re-apply when the bot itself removes the mode', async () => {
+    bot.client.clearMessages();
+    simulateMode(bot, 'n0xb0t', '#test', '-t', '');
+    await tick(50);
+    expect(bot.client.messages.find(
+      (m) => m.type === 'raw' && m.message === 'MODE #test +t'
+    )).toBeUndefined();
   });
 });

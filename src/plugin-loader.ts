@@ -416,6 +416,12 @@ export class PluginLoader {
       topic(channel: string, text: string): void {
         ircCommands?.topic(channel, text);
       },
+      join(channel: string, key?: string): void {
+        ircCommands?.join(channel, key);
+      },
+      part(channel: string, message?: string): void {
+        ircCommands?.part(channel, message);
+      },
 
       // Channel state
       getChannel(name: string) {
@@ -462,7 +468,10 @@ export class PluginLoader {
 
       // Bot config (read-only, deep-frozen, password redacted)
       botConfig: Object.freeze({
-        irc: Object.freeze({ ...this.botConfig.irc }),
+        irc: Object.freeze({
+          ...this.botConfig.irc,
+          channels: Object.freeze([...this.botConfig.irc.channels]),
+        }),
         owner: Object.freeze({ ...this.botConfig.owner }),
         identity: Object.freeze({ ...this.botConfig.identity }),
         services: Object.freeze({

@@ -1,12 +1,13 @@
 // chanmod — Channel protection plugin.
-// Provides auto-op/voice on join, mode enforcement, and manual moderation
-// commands: !op, !deop, !voice, !devoice, !kick, !ban, !unban, !kickban.
+// Provides auto-op/voice on join, mode enforcement, timed bans, cycle recovery,
+// and manual moderation commands: !op, !deop, !voice, !devoice, !kick,
+// !ban, !unban, !kickban, !bans.
 
 import type { PluginAPI, HandlerContext } from '../../src/types.js';
 
 export const name = 'chanmod';
-export const version = '1.0.0';
-export const description = 'Channel operator tools: auto-op, mode enforcement, kick/ban commands';
+export const version = '2.0.0';
+export const description = 'Channel operator tools: auto-op, mode enforcement, timed bans, kick/ban, cycle';
 
 let api: PluginAPI;
 
@@ -14,10 +15,25 @@ let api: PluginAPI;
 let intentionalModeChanges: Map<string, number>;
 let enforcementTimers: ReturnType<typeof setTimeout>[];
 let enforcementCooldown: Map<string, { count: number; expiresAt: number }>;
+let cycleTimers: ReturnType<typeof setTimeout>[];
+let cycleScheduled: Set<string>;
+let startupTimer: ReturnType<typeof setTimeout> | null;
 
 const INTENTIONAL_TTL_MS = 5000;
 const COOLDOWN_WINDOW_MS = 10_000;
 const MAX_ENFORCEMENTS = 3;
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface BanRecord {
+  mask: string;
+  channel: string;
+  by: string;
+  ts: number;
+  expires: number; // 0 = permanent, otherwise unix timestamp ms
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -64,13 +80,45 @@ function wasIntentional(channel: string, nick: string): boolean {
   return false;
 }
 
-/** Build a ban mask from a full hostmask: nick!ident@host → *!*@host */
-function buildBanMask(hostmask: string): string | null {
+/**
+ * Build a ban mask from a full hostmask (nick!ident@host).
+ *   Type 1: *!*@host
+ *   Type 2: *!*ident@host
+ *   Type 3: *!*ident@*.domain  (wildcard first component; falls back if < 3 parts)
+ * Cloaked hosts (containing '/') always use exact host: *!*@host
+ */
+function buildBanMask(hostmask: string, banType: number): string | null {
+  const bangIdx = hostmask.indexOf('!');
   const atIdx = hostmask.lastIndexOf('@');
   if (atIdx === -1) return null;
+
   const host = hostmask.substring(atIdx + 1);
   if (!host) return null;
-  return `*!*@${host}`;
+
+  // Cloaked hostmask (e.g. user/foo, gateway/web/foo) — exact match regardless of type
+  if (host.includes('/')) {
+    return `*!*@${host}`;
+  }
+
+  if (banType === 1) {
+    return `*!*@${host}`;
+  }
+
+  const ident = bangIdx !== -1 && bangIdx < atIdx
+    ? hostmask.substring(bangIdx + 1, atIdx)
+    : '*';
+
+  if (banType === 2) {
+    return `*!*${ident}@${host}`;
+  }
+
+  // Type 3: wildcard first hostname component (bar.baz.net → *.baz.net)
+  const parts = host.split('.');
+  if (parts.length > 2) {
+    return `*!*${ident}@*.${parts.slice(1).join('.')}`;
+  }
+  // Fewer than 3 parts — fall back to exact host
+  return `*!*${ident}@${host}`;
 }
 
 /** Get effective flags for a nick in a channel by looking up their hostmask. */
@@ -88,6 +136,77 @@ function getUserFlags(channel: string, nick: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// Timed ban helpers
+// ---------------------------------------------------------------------------
+
+function banDbKey(channel: string, mask: string): string {
+  return `ban:${channel.toLowerCase()}:${mask}`;
+}
+
+function storeBan(channel: string, mask: string, by: string, durationMinutes: number): void {
+  const now = Date.now();
+  const expires = durationMinutes === 0 ? 0 : now + durationMinutes * 60_000;
+  const record: BanRecord = { mask, channel: channel.toLowerCase(), by, ts: now, expires };
+  api.db.set(banDbKey(channel, mask), JSON.stringify(record));
+}
+
+function removeBanRecord(channel: string, mask: string): void {
+  api.db.del(banDbKey(channel, mask));
+}
+
+function getAllBanRecords(): BanRecord[] {
+  return api.db.list('ban:').map(({ value }) => JSON.parse(value) as BanRecord);
+}
+
+function getChannelBanRecords(channel: string): BanRecord[] {
+  return api.db
+    .list(`ban:${channel.toLowerCase()}:`)
+    .map(({ value }) => JSON.parse(value) as BanRecord);
+}
+
+/** Lift expired bans in channels where the bot has ops. Returns count lifted. */
+function liftExpiredBans(): number {
+  const now = Date.now();
+  let lifted = 0;
+  for (const record of getAllBanRecords()) {
+    if (record.expires > 0 && record.expires <= now) {
+      if (botHasOps(record.channel)) {
+        api.mode(record.channel, '-b', record.mask);
+        removeBanRecord(record.channel, record.mask);
+        api.log(`Auto-lifted expired ban ${record.mask} from ${record.channel}`);
+        lifted++;
+      }
+    }
+  }
+  return lifted;
+}
+
+// ---------------------------------------------------------------------------
+// Channel mode helpers
+// ---------------------------------------------------------------------------
+
+/** Parse a mode string like "+nt" into a Set of mode chars. */
+function parseModesSet(modeStr: string): Set<string> {
+  const set = new Set<string>();
+  for (const ch of modeStr) {
+    if (ch !== '+' && ch !== '-') set.add(ch);
+  }
+  return set;
+}
+
+/** Format a ban expiry for display. */
+function formatExpiry(expires: number): string {
+  if (expires === 0) return 'permanent';
+  const diff = expires - Date.now();
+  if (diff <= 0) return 'expired';
+  const mins = Math.ceil(diff / 60_000);
+  if (mins < 60) return `expires in ${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  const rem = mins % 60;
+  return rem > 0 ? `expires in ${hrs}h ${rem}m` : `expires in ${hrs}h`;
+}
+
+// ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
 
@@ -98,6 +217,9 @@ export function init(pluginApi: PluginAPI): void {
   intentionalModeChanges = new Map();
   enforcementTimers = [];
   enforcementCooldown = new Map();
+  cycleTimers = [];
+  cycleScheduled = new Set();
+  startupTimer = null;
 
   const opFlags = (api.config.op_flags as string[] | undefined) ?? ['n', 'm', 'o'];
   const voiceFlags = (api.config.voice_flags as string[] | undefined) ?? ['v'];
@@ -106,18 +228,66 @@ export function init(pluginApi: PluginAPI): void {
   const notifyOnFail = (api.config.notify_on_fail as boolean | undefined) ?? false;
   const defaultKickReason = (api.config.default_kick_reason as string | undefined) ?? 'Requested';
   const enforceDelayMs = (api.config.enforce_delay_ms as number | undefined) ?? 500;
+  const defaultBanDuration = (api.config.default_ban_duration as number | undefined) ?? 120;
+  const defaultBanType = (api.config.default_ban_type as number | undefined) ?? 3;
+  const enforceChannelModes = (api.config.enforce_channel_modes as string | undefined) ?? '';
+  const nodesynchNicks = (api.config.nodesynch_nicks as string[] | undefined) ?? ['ChanServ'];
+  const cycleOnDeop = (api.config.cycle_on_deop as boolean | undefined) ?? false;
+  const cycleDelayMs = (api.config.cycle_delay_ms as number | undefined) ?? 5000;
+
+  const enforceChannelModeSet = parseModesSet(enforceChannelModes);
 
   // ---------------------------------------------------------------------------
-  // Auto-op on join
+  // Startup: lift bans that expired during downtime (after a short delay to
+  // allow the bot to join channels and receive ops from ChanServ)
+  // ---------------------------------------------------------------------------
+
+  startupTimer = setTimeout(() => {
+    startupTimer = null;
+    const lifted = liftExpiredBans();
+    if (lifted > 0) {
+      api.log(`Lifted ${lifted} expired ban${lifted === 1 ? '' : 's'} after downtime`);
+    }
+  }, 5000);
+
+  // ---------------------------------------------------------------------------
+  // Timed ban cleanup (every 60 seconds)
+  // ---------------------------------------------------------------------------
+
+  api.bind('time', '-', '60', () => {
+    liftExpiredBans();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Auto-op / bot-join mode check
   // ---------------------------------------------------------------------------
 
   api.bind('join', '-', '*', async (ctx: HandlerContext) => {
+    const { nick, channel } = ctx;
+    if (!channel) return;
+
+    // Bot joined — check if channel needs enforce_channel_modes applied
+    if (isBotNick(nick)) {
+      if (enforceChannelModeSet.size > 0) {
+        const timer = setTimeout(() => {
+          if (!botHasOps(channel)) return;
+          const ch = api.getChannel(channel);
+          if (!ch) return;
+          const missing = [...enforceChannelModeSet].filter((m) => !ch.modes.includes(m));
+          if (missing.length > 0) {
+            const modeString = '+' + missing.join('');
+            api.mode(channel, modeString);
+            api.log(`Set channel modes ${modeString} on ${channel} (enforce_channel_modes)`);
+          }
+        }, enforceDelayMs);
+        enforcementTimers.push(timer);
+      }
+      return;
+    }
+
     if (!autoOpEnabled) return;
 
-    const { nick, ident, hostname, channel } = ctx;
-    if (!channel) return;
-    if (isBotNick(nick)) return;
-
+    const { ident, hostname } = ctx;
     const fullHostmask = `${nick}!${ident}@${hostname}`;
     const user = api.permissions.findByHostmask(fullHostmask);
     if (!user) return;
@@ -165,17 +335,67 @@ export function init(pluginApi: PluginAPI): void {
   });
 
   // ---------------------------------------------------------------------------
-  // Mode enforcement
+  // Mode enforcement — user ops/voice + channel modes + cycle
   // ---------------------------------------------------------------------------
 
   api.bind('mode', '-', '*', (ctx: HandlerContext) => {
-    if (!enforceModes) return;
-
     const { nick: setter, channel, command: modeStr, args: target } = ctx;
-    if (!channel || !target) return;
+    if (!channel) return;
 
-    // Only care about -o and -v
+    // --- Channel mode enforcement (e.g. +nt) ---
+    if (enforceChannelModeSet.size > 0 && modeStr.startsWith('-') && modeStr.length === 2) {
+      const modeChar = modeStr[1];
+      if (enforceChannelModeSet.has(modeChar)) {
+        const isNodesynch = nodesynchNicks.some(
+          (n) => n.toLowerCase() === setter.toLowerCase()
+        );
+        if (!isNodesynch && !isBotNick(setter) && botHasOps(channel)) {
+          api.log(`Re-enforcing +${modeChar} on ${channel} (removed by ${setter})`);
+          const timer = setTimeout(() => {
+            api.mode(channel, '+' + modeChar);
+          }, enforceDelayMs);
+          enforcementTimers.push(timer);
+        }
+      }
+    }
+
+    // --- Bot self-deop → cycle ---
+    if (modeStr === '-o' && isBotNick(target)) {
+      if (cycleOnDeop && !cycleScheduled.has(channel.toLowerCase())) {
+        const cooldownKey = `${channel.toLowerCase()}:cycle`;
+        const now = Date.now();
+        const cooldown = enforcementCooldown.get(cooldownKey);
+        if (cooldown && now < cooldown.expiresAt) {
+          cooldown.count++;
+          if (cooldown.count >= MAX_ENFORCEMENTS) {
+            const ch = api.getChannel(channel);
+            const isInviteOnly = ch?.modes.includes('i') ?? false;
+            if (!isInviteOnly) {
+              api.log(`Cycling ${channel} to regain ops`);
+              cycleScheduled.add(channel.toLowerCase());
+              const timer = setTimeout(() => {
+                api.part(channel, 'Cycling to regain ops');
+                const rejoinTimer = setTimeout(() => {
+                  api.join(channel);
+                  cycleScheduled.delete(channel.toLowerCase());
+                  enforcementCooldown.delete(cooldownKey);
+                }, 2000);
+                cycleTimers.push(rejoinTimer);
+              }, cycleDelayMs);
+              cycleTimers.push(timer);
+            }
+          }
+        } else {
+          enforcementCooldown.set(cooldownKey, { count: 1, expiresAt: now + COOLDOWN_WINDOW_MS });
+        }
+      }
+      return; // Don't apply user-flag enforcement for bot self-deop
+    }
+
+    // --- User op/voice enforcement ---
+    if (!enforceModes) return;
     if (modeStr !== '-o' && modeStr !== '-v') return;
+    if (!target) return;
 
     // Don't re-enforce if the bot set this mode
     if (isBotNick(setter)) return;
@@ -285,24 +505,32 @@ export function init(pluginApi: PluginAPI): void {
   });
 
   // ---------------------------------------------------------------------------
-  // !ban / !unban / !kickban
+  // !ban / !unban / !kickban / !bans
   // ---------------------------------------------------------------------------
 
   api.bind('pub', '+o', '!ban', (ctx: HandlerContext) => {
     if (!ctx.channel) return;
     if (!botHasOps(ctx.channel)) { ctx.reply('I am not opped in this channel.'); return; }
-    const target = ctx.args.trim().split(/\s+/)[0];
-    if (!target) { ctx.reply('Usage: !ban <nick|mask>'); return; }
+    const parts = ctx.args.trim().split(/\s+/);
+    if (!parts[0]) { ctx.reply('Usage: !ban <nick|mask> [duration_minutes]'); return; }
 
-    // If it looks like an explicit mask, use it directly
+    // Check if last arg is a duration (pure integer)
+    const lastArg = parts[parts.length - 1];
+    const hasDuration = parts.length > 1 && /^\d+$/.test(lastArg);
+    const durationMinutes = hasDuration ? parseInt(lastArg, 10) : defaultBanDuration;
+    const target = hasDuration ? parts.slice(0, -1).join(' ') : parts.join(' ');
+
+    // Explicit mask
     if (target.includes('!') || target.includes('@')) {
       if (/[\r\n]/.test(target)) { ctx.reply('Invalid ban mask.'); return; }
       api.ban(ctx.channel, target);
-      api.log(`${ctx.nick} banned ${target} in ${ctx.channel}`);
+      storeBan(ctx.channel, target, ctx.nick, durationMinutes);
+      const durStr = durationMinutes === 0 ? 'permanent' : `${durationMinutes}m`;
+      api.log(`${ctx.nick} banned ${target} in ${ctx.channel} (${durStr})`);
       return;
     }
 
-    // Otherwise resolve nick → hostmask → ban mask
+    // Nick → resolve hostmask → build mask
     if (!isValidNick(target)) { ctx.reply('Invalid nick.'); return; }
     if (isBotNick(target)) { ctx.reply('I cannot ban myself.'); return; }
 
@@ -312,14 +540,17 @@ export function init(pluginApi: PluginAPI): void {
       return;
     }
 
-    const banMask = buildBanMask(hostmask);
+    const fullHostmask = hostmask.includes('!') ? hostmask : `${target}!${hostmask}`;
+    const banMask = buildBanMask(fullHostmask, defaultBanType);
     if (!banMask) {
       ctx.reply(`Cannot build ban mask from hostmask: ${hostmask}`);
       return;
     }
 
     api.ban(ctx.channel, banMask);
-    api.log(`${ctx.nick} banned ${target} (${banMask}) in ${ctx.channel}`);
+    storeBan(ctx.channel, banMask, ctx.nick, durationMinutes);
+    const durStr = durationMinutes === 0 ? 'permanent' : `${durationMinutes}m`;
+    api.log(`${ctx.nick} banned ${target} (${banMask}) in ${ctx.channel} (${durStr})`);
   });
 
   api.bind('pub', '+o', '!unban', (ctx: HandlerContext) => {
@@ -329,6 +560,7 @@ export function init(pluginApi: PluginAPI): void {
     if (!mask) { ctx.reply('Usage: !unban <mask>'); return; }
     if (/[\r\n]/.test(mask)) { ctx.reply('Invalid ban mask.'); return; }
     api.mode(ctx.channel, '-b', mask);
+    removeBanRecord(ctx.channel, mask);
     api.log(`${ctx.nick} unbanned ${mask} in ${ctx.channel}`);
   });
 
@@ -349,15 +581,30 @@ export function init(pluginApi: PluginAPI): void {
       return;
     }
 
-    const banMask = buildBanMask(hostmask);
+    const fullHostmask = hostmask.includes('!') ? hostmask : `${target}!${hostmask}`;
+    const banMask = buildBanMask(fullHostmask, defaultBanType);
     if (!banMask) {
       ctx.reply(`Cannot build ban mask from hostmask: ${hostmask}`);
       return;
     }
 
     api.ban(ctx.channel, banMask);
+    storeBan(ctx.channel, banMask, ctx.nick, defaultBanDuration);
     api.kick(ctx.channel, target, reason);
     api.log(`${ctx.nick} kickbanned ${target} (${banMask}) from ${ctx.channel} (${reason})`);
+  });
+
+  api.bind('pub', '+o', '!bans', (ctx: HandlerContext) => {
+    if (!ctx.channel) return;
+    const targetChannel = ctx.args.trim() || ctx.channel;
+    const bans = getChannelBanRecords(targetChannel);
+    if (bans.length === 0) {
+      ctx.reply(`No tracked bans for ${targetChannel}.`);
+      return;
+    }
+    for (const ban of bans) {
+      ctx.reply(`${ban.mask} — set by ${ban.by}, ${formatExpiry(ban.expires)}`);
+    }
   });
 
   api.log('Loaded');
@@ -368,11 +615,19 @@ export function init(pluginApi: PluginAPI): void {
 // ---------------------------------------------------------------------------
 
 export function teardown(): void {
-  // Clear enforcement timers
+  if (startupTimer !== null) {
+    clearTimeout(startupTimer);
+    startupTimer = null;
+  }
   for (const timer of enforcementTimers) {
     clearTimeout(timer);
   }
+  for (const timer of cycleTimers) {
+    clearTimeout(timer);
+  }
   enforcementTimers.length = 0;
+  cycleTimers.length = 0;
   intentionalModeChanges.clear();
   enforcementCooldown.clear();
+  cycleScheduled.clear();
 }

@@ -34,14 +34,12 @@ export function init(api: PluginAPI): void {
 
   // Respond to !seen queries
   api.bind('pub', '-', '!seen', (ctx: HandlerContext) => {
+    cleanupStale(api, maxAgeMs);
     const targetNick = ctx.args.trim().split(/\s+/)[0];
     if (!targetNick) {
       ctx.reply('Usage: !seen <nick>');
       return;
     }
-
-    // Clean up stale entries on each query
-    cleanupStale(api, maxAgeMs);
 
     const raw = api.db.get(`seen:${targetNick.toLowerCase()}`);
     if (!raw) {
@@ -64,6 +62,11 @@ export function init(api: PluginAPI): void {
     } catch {
       ctx.reply(`I haven't seen ${targetNick}.`);
     }
+  });
+
+  // Hourly cleanup of stale entries
+  api.bind('time', '-', '3600', () => {
+    cleanupStale(api, maxAgeMs);
   });
 }
 
