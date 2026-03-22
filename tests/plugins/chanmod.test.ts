@@ -41,6 +41,21 @@ function addToChannel(bot: MockBot, nick: string, ident: string, hostname: strin
   bot.client.simulateEvent('join', { nick, ident, hostname, channel });
 }
 
+/** Simulate the bot joining a channel with ops (via userlist). */
+function giveBotOps(bot: MockBot, channel: string): void {
+  const nick = (bot.client.user as { nick: string }).nick;
+  // Ensure bot is in the channel
+  bot.client.simulateEvent('join', { nick, ident: 'bot', hostname: 'bot.host', channel });
+  // Give the bot +o via mode event
+  bot.client.simulateEvent('mode', {
+    nick: 'ChanServ',
+    ident: 'ChanServ',
+    hostname: 'services.',
+    target: channel,
+    modes: [{ mode: '+o', param: nick }],
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Auto-op tests
 // ---------------------------------------------------------------------------
@@ -50,6 +65,7 @@ describe('chanmod plugin — auto-op', () => {
 
   beforeEach(async () => {
     bot = createMockBot({ botNick: 'n0xb0t' });
+    giveBotOps(bot, '#test');
     const result = await bot.pluginLoader.load(PLUGIN_PATH);
     expect(result.status).toBe('ok');
   });
@@ -144,6 +160,7 @@ describe('chanmod plugin — mode enforcement', () => {
 
   beforeEach(async () => {
     bot = createMockBot({ botNick: 'n0xb0t' });
+    giveBotOps(bot, '#test');
     const result = await bot.pluginLoader.load(PLUGIN_PATH, {
       chanmod: { enabled: true, config: { enforce_modes: true, enforce_delay_ms: 5 } },
     });
@@ -232,6 +249,7 @@ describe('chanmod plugin — mode enforcement', () => {
   it('should suppress enforcement after repeated deops (rate limit)', async () => {
     bot.cleanup();
     bot = createMockBot({ botNick: 'n0xb0t' });
+    giveBotOps(bot, '#test');
     await bot.pluginLoader.load(PLUGIN_PATH, {
       chanmod: { enabled: true, config: { enforce_modes: true, enforce_delay_ms: 5, auto_op: false } },
     });
@@ -300,6 +318,7 @@ describe('chanmod plugin — mode commands', () => {
 
   beforeAll(async () => {
     bot = createMockBot({ botNick: 'n0xb0t' });
+    giveBotOps(bot, '#test');
     const result = await bot.pluginLoader.load(PLUGIN_PATH);
     expect(result.status).toBe('ok');
     bot.permissions.addUser('admin', '*!admin@admin.host', 'o', 'test');
@@ -424,8 +443,6 @@ describe('chanmod plugin — mode commands', () => {
   }
 
   it('!kickban bot — should refuse', async () => {
-    addToChannel(bot, 'n0xb0t', 'n0xb0t', 'bot.host', '#test');
-    bot.client.clearMessages();
     simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!kickban n0xb0t');
     await flush();
     expect(bot.client.messages.find((m) => m.type === 'say' && m.message?.includes('cannot ban myself'))).toBeDefined();
@@ -441,6 +458,7 @@ describe('chanmod plugin — kick command', () => {
 
   beforeAll(async () => {
     bot = createMockBot({ botNick: 'n0xb0t' });
+    giveBotOps(bot, '#test');
     const result = await bot.pluginLoader.load(PLUGIN_PATH);
     expect(result.status).toBe('ok');
     bot.permissions.addUser('admin', '*!admin@admin.host', 'o', 'test');
@@ -488,6 +506,7 @@ describe('chanmod plugin — ban commands', () => {
 
   beforeAll(async () => {
     bot = createMockBot({ botNick: 'n0xb0t' });
+    giveBotOps(bot, '#test');
     const result = await bot.pluginLoader.load(PLUGIN_PATH);
     expect(result.status).toBe('ok');
     bot.permissions.addUser('admin', '*!admin@admin.host', 'o', 'test');
@@ -521,8 +540,6 @@ describe('chanmod plugin — ban commands', () => {
   });
 
   it('!ban bot — should refuse', async () => {
-    addToChannel(bot, 'n0xb0t', 'n0xb0t', 'bot.host', '#test');
-    bot.client.clearMessages();
     simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!ban n0xb0t');
     await flush();
     expect(bot.client.messages.find((m) => m.type === 'mode' && m.message === '+b')).toBeUndefined();

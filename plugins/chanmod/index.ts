@@ -32,6 +32,15 @@ function isBotNick(nick: string): boolean {
   return nick.toLowerCase() === getBotNick().toLowerCase();
 }
 
+/** Check whether the bot has +o in the given channel. */
+function botHasOps(channel: string): boolean {
+  const ch = api.getChannel(channel);
+  if (!ch) return false;
+  const botNick = getBotNick().toLowerCase();
+  const botUser = ch.users.get(botNick);
+  return botUser?.modes?.includes('o') ?? false;
+}
+
 /** Validate a nick argument — no newlines, no spaces. */
 function isValidNick(nick: string): boolean {
   return nick.length > 0 && !/[\r\n\s]/.test(nick);
@@ -141,6 +150,11 @@ export function init(pluginApi: PluginAPI): void {
       api.log(`Verified ${nick} (account: ${result.account}) — applying ${flagToApply} in ${channel}`);
     }
 
+    if (!botHasOps(channel)) {
+      api.log(`Cannot auto-${shouldOp ? 'op' : 'voice'} ${nick} in ${channel} — I am not opped`);
+      return;
+    }
+
     if (shouldOp) {
       api.op(channel, nick);
       api.log(`Auto-opped ${nick} in ${channel}`);
@@ -187,6 +201,8 @@ export function init(pluginApi: PluginAPI): void {
       enforcementCooldown.set(cooldownKey, { count: 1, expiresAt: now + COOLDOWN_WINDOW_MS });
     }
 
+    if (!botHasOps(channel)) return;
+
     if (modeStr === '-o') {
       const shouldBeOpped = opFlags.some((f) => flags.includes(f));
       if (shouldBeOpped) {
@@ -214,6 +230,7 @@ export function init(pluginApi: PluginAPI): void {
 
   api.bind('pub', '+o', '!op', (ctx: HandlerContext) => {
     if (!ctx.channel) return;
+    if (!botHasOps(ctx.channel)) { ctx.reply('I am not opped in this channel.'); return; }
     const target = ctx.args.trim() || ctx.nick;
     if (!isValidNick(target)) { ctx.reply('Invalid nick.'); return; }
     api.op(ctx.channel, target);
@@ -222,6 +239,7 @@ export function init(pluginApi: PluginAPI): void {
 
   api.bind('pub', '+o', '!deop', (ctx: HandlerContext) => {
     if (!ctx.channel) return;
+    if (!botHasOps(ctx.channel)) { ctx.reply('I am not opped in this channel.'); return; }
     const target = ctx.args.trim() || ctx.nick;
     if (!isValidNick(target)) { ctx.reply('Invalid nick.'); return; }
     if (isBotNick(target)) { ctx.reply('I cannot deop myself.'); return; }
@@ -232,6 +250,7 @@ export function init(pluginApi: PluginAPI): void {
 
   api.bind('pub', '+o', '!voice', (ctx: HandlerContext) => {
     if (!ctx.channel) return;
+    if (!botHasOps(ctx.channel)) { ctx.reply('I am not opped in this channel.'); return; }
     const target = ctx.args.trim() || ctx.nick;
     if (!isValidNick(target)) { ctx.reply('Invalid nick.'); return; }
     api.voice(ctx.channel, target);
@@ -240,6 +259,7 @@ export function init(pluginApi: PluginAPI): void {
 
   api.bind('pub', '+o', '!devoice', (ctx: HandlerContext) => {
     if (!ctx.channel) return;
+    if (!botHasOps(ctx.channel)) { ctx.reply('I am not opped in this channel.'); return; }
     const target = ctx.args.trim() || ctx.nick;
     if (!isValidNick(target)) { ctx.reply('Invalid nick.'); return; }
     markIntentional(ctx.channel, target);
@@ -253,6 +273,7 @@ export function init(pluginApi: PluginAPI): void {
 
   api.bind('pub', '+o', '!kick', (ctx: HandlerContext) => {
     if (!ctx.channel) return;
+    if (!botHasOps(ctx.channel)) { ctx.reply('I am not opped in this channel.'); return; }
     const parts = ctx.args.trim().split(/\s+/);
     const target = parts[0];
     if (!target) { ctx.reply('Usage: !kick <nick> [reason]'); return; }
@@ -269,6 +290,7 @@ export function init(pluginApi: PluginAPI): void {
 
   api.bind('pub', '+o', '!ban', (ctx: HandlerContext) => {
     if (!ctx.channel) return;
+    if (!botHasOps(ctx.channel)) { ctx.reply('I am not opped in this channel.'); return; }
     const target = ctx.args.trim().split(/\s+/)[0];
     if (!target) { ctx.reply('Usage: !ban <nick|mask>'); return; }
 
@@ -302,6 +324,7 @@ export function init(pluginApi: PluginAPI): void {
 
   api.bind('pub', '+o', '!unban', (ctx: HandlerContext) => {
     if (!ctx.channel) return;
+    if (!botHasOps(ctx.channel)) { ctx.reply('I am not opped in this channel.'); return; }
     const mask = ctx.args.trim().split(/\s+/)[0];
     if (!mask) { ctx.reply('Usage: !unban <mask>'); return; }
     if (/[\r\n]/.test(mask)) { ctx.reply('Invalid ban mask.'); return; }
@@ -311,6 +334,7 @@ export function init(pluginApi: PluginAPI): void {
 
   api.bind('pub', '+o', '!kickban', (ctx: HandlerContext) => {
     if (!ctx.channel) return;
+    if (!botHasOps(ctx.channel)) { ctx.reply('I am not opped in this channel.'); return; }
     const parts = ctx.args.trim().split(/\s+/);
     const target = parts[0];
     if (!target) { ctx.reply('Usage: !kickban <nick> [reason]'); return; }

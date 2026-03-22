@@ -28,7 +28,7 @@ export class BotREPL {
       prompt: 'n0xb0t> ',
     });
 
-    this.rl.prompt();
+    this.logger?.info('Interactive mode. Type .help for commands, .quit to exit.');
 
     this.rl.on('line', (line: string) => {
       this.handleLine(line).finally(() => {
@@ -41,7 +41,7 @@ export class BotREPL {
       this.bot.shutdown().then(() => process.exit(0));
     });
 
-    this.logger?.info('Interactive mode. Type .help for commands, .quit to exit.');
+    this.rl.prompt();
   }
 
   /** Stop the REPL. */
