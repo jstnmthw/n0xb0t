@@ -380,6 +380,7 @@ export class IRCBridge {
       args: payload,
     });
 
+    if (!this.ctcpAllowed(nick)) return;
     this.dispatcher.dispatch('ctcp', ctx).catch(this.dispatchError('ctcp'));
   }
 

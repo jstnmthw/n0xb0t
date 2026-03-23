@@ -79,7 +79,6 @@ export interface IRCClientForPlugins {
   say(target: string, message: string): void;
   notice(target: string, message: string): void;
   action(target: string, message: string): void;
-  raw(line: string): void;
   ctcpResponse(target: string, type: string, ...params: string[]): void;
 }
 
@@ -408,11 +407,15 @@ export class PluginLoader {
           ircClient?.notice(target, safe);
         }
       },
-      raw(line: string): void {
-        ircClient?.raw(sanitize(line));
-      },
       ctcpResponse(target: string, type: string, message: string): void {
-        ircClient?.ctcpResponse(sanitize(target), sanitize(type), sanitize(message));
+        const safeTarget = sanitize(target);
+        const safeType = sanitize(type);
+        const safeMessage = sanitize(message);
+        if (messageQueue) {
+          messageQueue.enqueue(() => ircClient?.ctcpResponse(safeTarget, safeType, safeMessage));
+        } else {
+          ircClient?.ctcpResponse(safeTarget, safeType, safeMessage);
+        }
       },
 
       // IRC channel operations (delegated to IRCCommands)

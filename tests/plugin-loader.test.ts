@@ -712,13 +712,12 @@ describe('PluginLoader', () => {
       expect(() => api.say('#test', 'hello')).not.toThrow();
       expect(() => api.action('#test', 'waves')).not.toThrow();
       expect(() => api.notice('#test', 'notice')).not.toThrow();
-      expect(() => api.raw('PING :test')).not.toThrow();
       expect(() => api.ctcpResponse('nick', 'VERSION', 'test')).not.toThrow();
     });
   });
 
   describe('scoped API — IRC methods with a real ircClient', () => {
-    it('should delegate say/action/notice/raw/ctcpResponse to ircClient', async () => {
+    it('should delegate say/action/notice/ctcpResponse to ircClient', async () => {
       const pluginPath = writePlugin(
         tempDir,
         'real-irc',
@@ -746,9 +745,6 @@ describe('PluginLoader', () => {
 
       api.notice('#chan', 'yo');
       expect(mockIrcClient.notice).toHaveBeenCalledWith('#chan', 'yo');
-
-      api.raw('PING :test');
-      expect(mockIrcClient.raw).toHaveBeenCalledWith('PING :test');
 
       api.ctcpResponse('nick', 'VERSION', 'hexbot');
       expect(mockIrcClient.ctcpResponse).toHaveBeenCalledWith('nick', 'VERSION', 'hexbot');
