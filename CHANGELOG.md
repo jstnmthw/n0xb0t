@@ -122,7 +122,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - IRC replies split at ~400 bytes, capped at 4 lines with `...` truncation (`src/utils/split-message.ts`)
   - RFC 2812 `ircLower()` case mapping used in wildcard matching, channel-state lookups, and dispatcher mask comparisons
   - Timer binds enforce 10-second minimum interval to prevent resource exhaustion
-- **Security audit** (all findings from `docs/audits/all-2026-03-22.md`)
+- **Security audit** (all findings from `docs/audits/all-2026-03-22.md`):
+  - IRC protocol injection in `IRCCommands` — `channel`, `nick`, `mask`, `key` now sanitized before interpolation into `raw()` calls
+  - Kick event context corrected — kicked user's ident/hostname looked up from channel state rather than using the kicker's identity
+  - `bot.json` world-readability check on startup — bot exits with error if config file is world-readable
+  - `botConfig.irc.channels` deep-frozen in plugin API (`Object.freeze([...channels])`)
+  - CTCP rate limiter wired up — `ctcpAllowed()` now called in `onCtcp()` before dispatching; `ctcpResponse()` routed through message queue
+  - `.say` target validated against `^[#&]?[^\s\r\n]+$` before use
+  - `topic` plugin `String.replace()` uses callback form to prevent `$&`/`$'` pattern substitution
+  - Greeter plugin strips IRC formatting codes from nick before interpolation
+  - Message queue depth capped at 500; default `rate`/`burst` corrected to `2`/`4`
+- **IRC CASEMAPPING ISUPPORT support**:
+  - CASEMAPPING token read from server on `registered` event; active mapping stored on `Bot` and propagated to all modules via `setCasemapping()`
+  - Supports `rfc1459`, `strict-rfc1459`, and `ascii`; defaults to `rfc1459` for unknown values
+  - `ircLower(text, casemapping)` and `caseCompare(a, b, casemapping)` updated in `src/utils/wildcard.ts`
+  - `wildcardMatch` accepts a fourth `casemapping` parameter
+  - All nick/channel key lookups in `ChannelState`, `Permissions`, `EventDispatcher`, `Services`, and `DCCManager` use the active network casemapping
+  - `api.ircLower(text)` added to `PluginAPI` — live closure over the current casemapping
+  - `Casemapping` type exported from `src/types.ts`
+  - All `.toLowerCase()` calls for nick/channel comparison replaced with `api.ircLower()` in `seen`, `greeter`, `flood`, and `chanmod` plugins
+- **DCC CHAT feature renamed from "botnet" to "console"**: `.botnet` → `.console`, join/leave announcements, banner text, docs, and plan files updated
+- `api.raw()` removed from `PluginAPI` — no callers; reduces attack surface (`IRCCommands` internal `raw()` usage unaffected)
 - `deepblue2` topic theme: missing background color on opening decorator
 - `chanmod` commands now check that the bot holds ops before executing mode changes
 - `!unban` in `chanmod` now accepts a nick in addition to an explicit ban mask — resolves the user's hostmask from channel state, builds all standard mask candidates, and falls back to removing all candidate masks if no stored ban record is found

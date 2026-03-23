@@ -56,7 +56,7 @@ hexbot/
 │       ├── services.ts       # NickServ/ChanServ integration, SASL
 │       ├── irc-commands.ts   # Helpers: join, part, kick, ban, mode
 │       ├── channel-state.ts  # Track users, modes, hostmasks per channel
-│       ├── dcc.ts            # DCC CHAT + botnet party line
+│       ├── dcc.ts            # DCC CHAT + console (shared admin sessions)
 │       └── commands/         # Command groups (each module registers its own)
 │           ├── permission-commands.ts
 │           ├── dispatcher-commands.ts
@@ -378,7 +378,7 @@ pnpm start
 pnpm run dev -- --repl
 ```
 
-REPL activity (commands typed) is broadcast to all connected DCC botnet sessions so remote admins can see local admin work.
+REPL activity (commands typed) is broadcast to all connected DCC console sessions so remote admins can see local admin work.
 
 **Option B (implemented):** DCC CHAT socket transport (`src/core/dcc.ts`) — see section 2.15 and `docs/DCC.md`. This is the recommended interface for production remote administration.
 
@@ -425,7 +425,7 @@ Eggdrop-style passive DCC CHAT for remote administration (`src/core/dcc.ts`). Th
 4. Bot opens a TCP port from the configured range (`port_range` in `bot.json`), sends a passive DCC token back via CTCP reply.
 5. User's client connects to the bot's port. Bot shows a banner and command prompt.
 6. Lines starting with `.` are routed through `CommandHandler` with the user's real flags enforced.
-7. Plain text lines are broadcast to all connected DCC sessions (the "botnet" party line).
+7. Plain text lines are broadcast to all connected DCC sessions (the console).
 
 **Key decisions:**
 
@@ -502,7 +502,7 @@ The MVP is: **a bot that connects, loads plugins with hot-reload, has a working 
 - AI chat module (Phase 4)
 - Flood protection / advanced moderation (Phase 2 — separate plugins)
 - Multi-bot / multi-identity support
-- Botnet / bot linking (multi-bot mesh; current botnet is single-bot party line only)
+- Bot linking (multi-bot mesh; current console is single-bot only)
 
 ---
 

@@ -6,7 +6,6 @@
   "op_flags": ["n", "m", "o"],
   "halfop_flags": [],
   "voice_flags": ["v"],
-  "verify_timeout_ms": 5000,
   "notify_on_fail": false,
   "default_kick_reason": "Requested",
   "default_ban_duration": 120,

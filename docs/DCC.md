@@ -162,14 +162,14 @@ Your permission flags are enforced — you can only run commands you have flags 
 
 These work only inside a DCC session:
 
-| Command   | Description                            |
-| --------- | -------------------------------------- |
-| `.botnet` | List connected botnet users and uptime |
-| `.who`    | Alias for `.botnet`                    |
-| `.quit`   | Disconnect from the botnet             |
-| `.exit`   | Alias for `.quit`                      |
+| Command    | Description                             |
+| ---------- | --------------------------------------- |
+| `.console` | List connected console users and uptime |
+| `.who`     | Alias for `.console`                    |
+| `.quit`    | Disconnect from the console             |
+| `.exit`    | Alias for `.quit`                       |
 
-### Botnet (party line)
+### Console (shared session)
 
 Any line that does **not** start with `.` is broadcast to all other connected users:
 
@@ -182,8 +182,8 @@ hexbot> hello everyone
 When users connect or disconnect you will see:
 
 ```
-*** otheradmin has joined the botnet
-*** otheradmin has left the botnet
+*** otheradmin has joined the console
+*** otheradmin has left the console
 ```
 
 When the REPL is being used locally, you will see:

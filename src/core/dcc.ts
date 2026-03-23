@@ -1,6 +1,6 @@
-// hexbot — DCC CHAT + Botnet (party line)
-// Implements passive DCC CHAT for remote administration and a shared party
-// line ("botnet") where connected users can chat and run bot commands.
+// hexbot — DCC CHAT + Console
+// Implements passive DCC CHAT for remote administration and a shared console
+// where connected users can manage the bot and chat with each other.
 //
 // Flow:
 //   1. User sends CTCP "DCC CHAT chat 0 0 <token>" to the bot (passive request)
@@ -165,14 +165,14 @@ export class DCCSession {
       .getSessionList()
       .filter((s) => s.handle !== this.handle)
       .map((s) => s.handle);
-    const botnets =
+    const connected =
       others.length > 0
         ? `${others.length} other(s): ${others.join(', ')}`
         : 'you are the only one here';
 
     this.writeLine(`*** Connected to Hexbot v${version} — ${now}`);
     this.writeLine(`*** Logged in as ${this.handle} (${this.nick}!${this.ident}@${this.hostname})`);
-    this.writeLine(`*** Botnet: ${botnets}`);
+    this.writeLine(`*** Console: ${connected}`);
     this.writeLine('*** Lines starting with . are commands (.help). Plain text is broadcast.');
     this.write(PROMPT);
 
@@ -211,12 +211,12 @@ export class DCCSession {
       return;
     }
 
-    if (trimmed === '.botnet' || trimmed === '.who') {
+    if (trimmed === '.console' || trimmed === '.who') {
       const list = this.manager.getSessionList();
       if (list.length === 0) {
-        this.writeLine('No users on the botnet.');
+        this.writeLine('No users on the console.');
       } else {
-        this.writeLine(`Botnet (${list.length}):`);
+        this.writeLine(`Console (${list.length}):`);
         for (const s of list) {
           const marker = s.handle === this.handle ? ' (you)' : '';
           const uptime = Math.floor((Date.now() - s.connectedAt) / 1000);
@@ -287,7 +287,7 @@ export class DCCSession {
 
     // Remove from manager and announce departure
     this.manager.removeSession(this.nick);
-    this.manager.announce(`*** ${this.handle} has left the botnet`);
+    this.manager.announce(`*** ${this.handle} has left the console`);
     this.logger?.info(`DCC disconnected: ${this.handle} (${this.nick})`);
   }
 }
@@ -512,7 +512,7 @@ export class DCCManager {
     });
 
     this.sessions.set(ircLower(pending.nick, this.casemapping), session);
-    this.announce(`*** ${pending.user.handle} has joined the botnet`);
+    this.announce(`*** ${pending.user.handle} has joined the console`);
     this.logger?.info(`DCC session opened: ${pending.user.handle} (${pending.nick})`);
 
     session.start(this.version);

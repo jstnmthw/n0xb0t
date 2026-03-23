@@ -237,7 +237,7 @@ export interface ProxyConfig {
   password?: string;
 }
 
-/** DCC CHAT / botnet settings. */
+/** DCC CHAT / console settings. */
 export interface DccConfig {
   /** Enable DCC CHAT. Default: false */
   enabled: boolean;

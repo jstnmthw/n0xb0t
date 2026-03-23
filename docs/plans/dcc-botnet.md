@@ -1,8 +1,8 @@
-# Plan: DCC CHAT + Botnet (Party Line)
+# Plan: DCC CHAT + Console
 
 ## Summary
 
-Users with sufficient flags (default `+m`) can `/dcc chat hexbot` from their IRC client to open a persistent admin session. The bot accepts via **passive DCC** — it opens a TCP port, sends the user a CTCP token, and the user's client connects in. Once connected the user sees a banner, gets a `.`-prefixed command prompt routed through the existing `CommandHandler` with their real permission flags, and joins the **botnet**: a shared party line where all connected DCC users can see each other's messages and chat in real time. This mirrors Eggdrop's party line exactly, using Node's `net` module for the TCP layer and the existing dispatcher for CTCP intercept.
+Users with sufficient flags (default `+m`) can `/dcc chat hexbot` from their IRC client to open a persistent admin session. The bot accepts via **passive DCC** — it opens a TCP port, sends the user a CTCP token, and the user's client connects in. Once connected the user sees a banner, gets a `.`-prefixed command prompt routed through the existing `CommandHandler` with their real permission flags, and joins the **console**: a shared session where all connected DCC users can manage the bot and chat in real time. This uses Node's `net` module for the TCP layer and the existing dispatcher for CTCP intercept.
 
 ---
 
@@ -47,7 +47,7 @@ Users with sufficient flags (default `+m`) can `/dcc chat hexbot` from their IRC
 
 ### Phase 2: `src/core/dcc.ts` — DCCManager and DCCSession
 
-**Goal:** The complete DCC implementation as a single core module. Two classes: `DCCManager` (lifecycle, CTCP handling, port allocation, botnet broadcast) and `DCCSession` (per-connection readline loop, command routing, idle timer).
+**Goal:** The complete DCC implementation as a single core module. Two classes: `DCCManager` (lifecycle, CTCP handling, port allocation, console broadcast) and `DCCSession` (per-connection readline loop, command routing, idle timer).
 
 #### 2a: Helpers and types (top of file)
 
@@ -67,7 +67,7 @@ Users with sufficient flags (default `+m`) can `/dcc chat hexbot` from their IRC
 - [x] `private openSession(user, ctx, socket)` — creates `DCCSession`, adds to sessions, announces join
 - [x] `broadcast(fromHandle, message)` — sends to all sessions except sender
 - [x] `announce(message)` — sends to all sessions
-- [x] `getSessionList()` — returns array for `.botnet` command
+- [x] `getSessionList()` — returns array for `.console` command
 - [x] `private allocatePort(): number | null`
 - [x] `closeAll(reason?)` — calls `session.close()` on all sessions
 
@@ -75,7 +75,7 @@ Users with sufficient flags (default `+m`) can `/dcc chat hexbot` from their IRC
 
 - [x] Constructor with all required fields
 - [x] `start()` — readline interface, banner, idle timer, line/close/error handlers
-- [x] `private onLine(line)` — idle reset, .quit/.exit, .botnet/.who, command routing, party line broadcast, prompt
+- [x] `private onLine(line)` — idle reset, .quit/.exit, .console/.who, command routing, console broadcast, prompt
 - [x] `writeLine(line)` — writes `line + '\r\n'`; no-op if socket destroyed
 - [x] `private resetIdle()` — clears and restarts idle timer
 - [x] `close(reason?)` — clears timer, destroys socket, removes from sessions, announces leave
@@ -178,7 +178,7 @@ None. DCC sessions are ephemeral (in-memory only). No persistence required.
 
 ## Decisions
 
-1. **`.botnet` / `.who` scope**: DCC-only. Handled inside `DCCSession` before CommandHandler routing. Not registered on `CommandHandler` — the REPL is a development convenience, not a production admin interface; DCC is the real remote session.
+1. **`.console` / `.who` scope**: DCC-only. Handled inside `DCCSession` before CommandHandler routing. Not registered on `CommandHandler` — the REPL is a development convenience, not a production admin interface; DCC is the real remote session.
 2. **IPv6**: Out of scope. IPv4-only (decimal integer encoding). IPv6 passive DCC uses a hex string format and can be a follow-up.
-3. **Bot-to-bot botnet**: Not in scope. "Botnet" here means the party line (human DCC sessions). True Eggdrop-style bot linking is a separate future feature.
+3. **Bot-to-bot linking**: Not in scope. See `docs/plans/bot-linking.md` for the full Eggdrop-style hub/leaf botnet plan.
 4. **Port forwarding docs**: Include a firewall callout in `docs/DCC.md` (`ufw allow 50000:50010/tcp`).

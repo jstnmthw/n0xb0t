@@ -6,19 +6,19 @@ Channel operator tools: auto-op/halfop/voice on join, mode enforcement, timed ba
 
 All commands require the caller to have `+o` (op) flag in the channel.
 
-| Command     | Usage                         | Description                                   |
-| ----------- | ----------------------------- | --------------------------------------------- |
-| `!op`       | `!op [nick]`                  | Op a nick (or yourself if omitted)            |
-| `!deop`     | `!deop [nick]`                | Deop a nick (or yourself if omitted)          |
-| `!halfop`   | `!halfop [nick]`              | Halfop a nick (or yourself if omitted)        |
-| `!dehalfop` | `!dehalfop [nick]`            | Dehalfop a nick (or yourself if omitted)      |
-| `!voice`    | `!voice [nick]`               | Voice a nick (or yourself if omitted)         |
-| `!devoice`  | `!devoice [nick]`             | Devoice a nick (or yourself if omitted)       |
-| `!kick`     | `!kick <nick> [reason]`       | Kick a nick with an optional reason           |
-| `!ban`      | `!ban <nick\|mask> [minutes]` | Ban a nick or explicit mask, optionally timed |
-| `!unban`    | `!unban <mask>`               | Remove a ban by exact mask                    |
-| `!kickban`  | `!kickban <nick> [reason]`    | Ban and kick in one step                      |
-| `!bans`     | `!bans [channel]`             | List tracked bans and their expiry            |
+| Command     | Usage                         | Description                                     |
+| ----------- | ----------------------------- | ----------------------------------------------- |
+| `!op`       | `!op [nick]`                  | Op a nick (or yourself if omitted)              |
+| `!deop`     | `!deop [nick]`                | Deop a nick (or yourself if omitted)            |
+| `!halfop`   | `!halfop [nick]`              | Halfop a nick (or yourself if omitted)          |
+| `!dehalfop` | `!dehalfop [nick]`            | Dehalfop a nick (or yourself if omitted)        |
+| `!voice`    | `!voice [nick]`               | Voice a nick (or yourself if omitted)           |
+| `!devoice`  | `!devoice [nick]`             | Devoice a nick (or yourself if omitted)         |
+| `!kick`     | `!kick <nick> [reason]`       | Kick a nick with an optional reason             |
+| `!ban`      | `!ban <nick\|mask> [minutes]` | Ban a nick or explicit mask, optionally timed   |
+| `!unban`    | `!unban <nick\|mask>`         | Remove a ban by nick (if present) or exact mask |
+| `!kickban`  | `!kickban <nick> [reason]`    | Ban and kick in one step                        |
+| `!bans`     | `!bans [channel]`             | List tracked bans and their expiry              |
 
 ## Auto-op, auto-halfop, and auto-voice
 
@@ -103,5 +103,5 @@ Example `config/plugins.json` entry:
 
 - All commands silently fail (or reply with an error) if the bot does not currently hold ops in the channel.
 - `!ban` by nick requires the target to be present in the channel so their hostmask can be resolved. For absent users, pass an explicit mask: `!ban *!*@1.2.3.4`.
-- `!unban` requires the exact mask stored by chanmod. Use `!bans` to list tracked masks.
+- `!unban <nick>` works if the target is still in the channel — chanmod derives candidate masks from their hostmask and removes whichever one matches a stored record (or tries all three if no record is found). For absent users, provide an explicit mask: `!unban *!*@1.2.3.4`. Use `!bans` to list stored masks.
 - Timed bans are only lifted in channels where the bot has ops at the time the timer fires. Bans in channels the bot has left, or where it has lost ops, will not be lifted until it regains them.

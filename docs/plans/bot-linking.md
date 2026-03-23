@@ -2,7 +2,7 @@
 
 ## Summary
 
-This feature implements true Eggdrop-style bot-to-bot linking: a TCP link protocol where multiple hexbot instances connect to each other, share channel/user/permission state, relay privileged commands across the network, and form a hub-and-leaf topology. This is entirely separate from the existing DCC CHAT party line feature.
+This feature implements true Eggdrop-style bot-to-bot linking: a TCP link protocol where multiple hexbot instances connect to each other, share channel/user/permission state, relay privileged commands across the network, and form a hub-and-leaf topology. This is entirely separate from the existing DCC CHAT console feature.
 
 ---
 
@@ -12,22 +12,22 @@ The word "botnet" has been used in two distinct senses in Eggdrop's tradition an
 
 ### What to call each feature
 
-| Feature                                              | Current name in code                            | Correct name              | Rationale                                                                                                                                                                                        |
-| ---------------------------------------------------- | ----------------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Human DCC CHAT admin sessions with shared party line | "botnet" (in messages, comments, command names) | **party line**            | The party line is the human multi-user chat channel. Eggdrop itself calls this the party line. The word "botnet" in Eggdrop referred to the bot-to-bot link network, not the human session chat. |
-| Bot-to-bot TCP link protocol (this feature)          | not yet implemented                             | **bot link** / **botnet** | The correct Eggdrop term. The bot-to-bot link network is the botnet. Linked bots are "linked bots" or "bot links".                                                                               |
+| Feature                                           | Current name in code                            | Correct name              | Rationale                                                                                                       |
+| ------------------------------------------------- | ----------------------------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Human DCC CHAT admin sessions with shared console | "botnet" (in messages, comments, command names) | **console**               | A management-forward name that emphasises bot control over chat. The `.console` command lists connected admins. |
+| Bot-to-bot TCP link protocol (this feature)       | not yet implemented                             | **bot link** / **botnet** | The bot-to-bot link network. Linked bots are "linked bots" or "bot links".                                      |
 
 ### Rename summary for existing code
 
-The following specific strings in `src/core/dcc.ts` refer to the party line incorrectly as "botnet" and need to be changed to "party line" before or alongside this feature's implementation:
+The following strings in `src/core/dcc.ts` referred to the console incorrectly as "botnet" and have been renamed to "console":
 
-- `*** Botnet: ${botnets}` → `*** Party line: ${connected}`
-- `.botnet` command → `.partyline` (keep `.who` as alias)
-- `Botnet (${list.length}):` → `Party line (${list.length}):`
-- `has left the botnet` → `has left the party line`
-- `has joined the botnet` → `has joined the party line`
+- `*** Botnet: ${botnets}` → `*** Console: ${connected}` ✓
+- `.botnet` command → `.console` (`.who` alias kept) ✓
+- `Botnet (${list.length}):` → `Console (${list.length}):` ✓
+- `has left the botnet` → `has left the console` ✓
+- `has joined the botnet` → `has joined the console` ✓
 
-`DESIGN.md` section 2.15 heading "DCC CHAT / Botnet" → "DCC CHAT / Party Line". `docs/DCC.md` uses "botnet" throughout for the party line — every occurrence should become "party line".
+`DESIGN.md`, `docs/DCC.md`, and `src/types.ts` have all been updated. **Phase 1 is complete.**
 
 ---
 
@@ -35,7 +35,7 @@ The following specific strings in `src/core/dcc.ts` refer to the party line inco
 
 - **Alignment**: Strong. DESIGN.md section 2.12 anticipates multiple transports feeding the same parser. The `CommandHandler` is transport-agnostic. Bot linking is listed as post-MVP scope.
 - **Dependencies**: All present — `CommandHandler`, `Permissions`, `ChannelState`, `BotEventBus`, `DCCManager.announce()`, `sanitize()`, `net` module (Node built-in). No new npm dependencies.
-- **Blockers**: None. The party-line rename in Phase 1 is cosmetic only and does not block Phase 2+.
+- **Blockers**: None. The console rename in Phase 1 is cosmetic only and does not block Phase 2+.
 - **Complexity**: L — the protocol and sync layers are new; command relay adds moderate complexity; integration with existing modules is well-defined.
 - **Risk areas**:
   - Permission sync conflict if a leaf mutates its own DB independently — mitigated by hub-authoritative design.
@@ -59,16 +59,16 @@ The following specific strings in `src/core/dcc.ts` refer to the party line inco
 
 ## Phases
 
-### Phase 1: Rename party line references
+### Phase 1: Rename console references ✅ Complete
 
 **Goal:** Clean up the "botnet" naming before adding the real botnet feature so there is no confusion.
 
-- [ ] `src/core/dcc.ts` — rename `.botnet` command to `.partyline`; update all user-visible strings from "botnet" to "party line"
-- [ ] `src/types.ts` — update `DccConfig` JSDoc comment from "DCC CHAT / botnet settings" to "DCC CHAT / party line settings"
-- [ ] `DESIGN.md` — update section 2.15 title and body (replace all "botnet" in party-line context)
-- [ ] `docs/DCC.md` — replace all "botnet" occurrences with "party line"
-- [ ] `docs/plans/dcc-botnet.md` — update decision #3 to point to this plan
-- [ ] **Verify**: `pnpm exec tsc --noEmit` passes; existing DCC tests still pass.
+- [x] `src/core/dcc.ts` — rename `.botnet` command to `.console`; update all user-visible strings from "botnet" to "console"
+- [x] `src/types.ts` — update `DccConfig` JSDoc comment from "DCC CHAT / botnet settings" to "DCC CHAT / console settings"
+- [x] `DESIGN.md` — replace all "botnet" in console context
+- [x] `docs/DCC.md` — replace all "botnet" occurrences with "console"
+- [x] `docs/plans/dcc-botnet.md` — update decision #3 to point to this plan
+- [x] **Verify**: `pnpm exec tsc --noEmit` passes; existing DCC tests still pass.
 
 ---
 
@@ -161,13 +161,13 @@ Three classes in one file, following the `DCCManager`/`DCCSession` pattern from 
 
 **Botlink commands:**
 
-| Command                                 | Flags | Description                                                 |
-| --------------------------------------- | ----- | ----------------------------------------------------------- |
-| `.botlink status`                       | `m`   | Show hub/leaf connection status and linked bot list         |
-| `.botlink disconnect <botname>`         | `n`   | (Hub only) Disconnect a specific leaf                       |
-| `.botlink reconnect`                    | `m`   | (Leaf only) Force reconnect to hub                          |
-| `.bsay <botname\|*> <target> <message>` | `m`   | Send a message via another (or all) linked bots             |
-| `.bannounce <message>`                  | `m`   | Broadcast to all party line sessions across all linked bots |
+| Command                                 | Flags | Description                                              |
+| --------------------------------------- | ----- | -------------------------------------------------------- |
+| `.botlink status`                       | `m`   | Show hub/leaf connection status and linked bot list      |
+| `.botlink disconnect <botname>`         | `n`   | (Hub only) Disconnect a specific leaf                    |
+| `.botlink reconnect`                    | `m`   | (Leaf only) Force reconnect to hub                       |
+| `.bsay <botname\|*> <target> <message>` | `m`   | Send a message via another (or all) linked bots          |
+| `.bannounce <message>`                  | `m`   | Broadcast to all console sessions across all linked bots |
 
 ---
 
@@ -374,5 +374,5 @@ None. Bot link sessions and topology are ephemeral (in-memory only). Permission 
 4. **No automatic cross-bot ban enforcement** — link layer syncs awareness only. A plugin handles enforcement. Keeps link scope clean.
 5. **Plaintext TCP initially, TLS later** — avoids certificate management complexity. Document: use on private network or VPN.
 6. **No leaf-to-leaf direct connections** — all traffic routes through hub. Simpler topology.
-7. **Party-line announce relay** — `ANNOUNCE` frames carry party-line messages across bots; receiving bot calls `DCCManager.announce()`. Preserves the Eggdrop party-line-across-botnet feel.
-8. **`.botnet` → `.partyline` rename** — done in Phase 1 before any bot-link code lands, so the two features are never confused in the codebase.
+7. **Console announce relay** — `ANNOUNCE` frames carry console messages across bots; receiving bot calls `DCCManager.announce()`. Keeps the shared admin session feel across linked bots.
+8. **`.botnet` → `.console` rename** — completed in Phase 1 before any bot-link code lands, so the two features are never confused in the codebase.
