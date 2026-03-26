@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { themeNames } from '../../plugins/topic/themes';
 import { type MockBot, createMockBot } from '../helpers/mock-bot';
@@ -18,8 +18,16 @@ function simulatePrivmsg(
 }
 
 async function tick(ms = 20): Promise<void> {
-  await new Promise<void>((r) => setTimeout(r, ms));
+  await new Promise<void>((r) => setImmediate(r));
+  await vi.advanceTimersByTimeAsync(ms);
 }
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('topic plugin', () => {
   let bot: MockBot;

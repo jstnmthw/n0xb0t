@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { Permissions } from '../../src/core/permissions';
 import { BotDatabase } from '../../src/database';
@@ -49,7 +49,7 @@ describe('seen plugin', () => {
   let loader: PluginLoader;
   let db: BotDatabase;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     db = new BotDatabase(':memory:');
     db.open();
     dispatcher = new EventDispatcher();
@@ -69,7 +69,7 @@ describe('seen plugin', () => {
     expect(result.status).toBe('ok');
   });
 
-  afterEach(async () => {
+  afterAll(async () => {
     if (loader.isLoaded('seen')) {
       await loader.unload('seen');
     }

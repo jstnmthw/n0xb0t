@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { type MockBot, createMockBot } from '../helpers/mock-bot';
 
@@ -51,9 +51,11 @@ async function flush(): Promise<void> {
   await Promise.resolve();
 }
 
-/** Wait for real timers (enforcement delays, async handlers). */
+/** Advance fake timers (enforcement delays, async handlers). */
 async function tick(ms = 20): Promise<void> {
-  await new Promise<void>((r) => setTimeout(r, ms));
+  // Drain async event handler chain before advancing fake timers
+  await new Promise<void>((r) => setImmediate(r));
+  await vi.advanceTimersByTimeAsync(ms);
 }
 
 /** Add a user to channel-state so getUserHostmask works. */
@@ -81,6 +83,14 @@ function giveBotOps(bot: MockBot, channel: string): void {
     modes: [{ mode: '+o', param: nick }],
   });
 }
+
+// Use fake timers for all tests so enforcement delays fire instantly
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 // ---------------------------------------------------------------------------
 // Auto-op tests
