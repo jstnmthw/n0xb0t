@@ -4,7 +4,7 @@ Modular IRC bot written in TypeScript with multi-network bind, hot-reloadable pl
 
 ## Quick start
 
-Requires Node.js 20+ and pnpm.
+Requires Node.js 24+ and pnpm.
 
 ```bash
 pnpm install

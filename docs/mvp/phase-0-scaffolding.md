@@ -26,7 +26,7 @@ A clean, properly structured project that any developer can clone, run `pnpm ins
     - `"dev": "tsx src/index.ts --repl"`
     - `"test": "vitest run"`
     - `"test:watch": "vitest"`
-  - `"engines": { "node": ">=20.0.0" }`
+  - `"engines": { "node": ">=24.0.0" }`
   - `"license": "GPL-2.0"`
 - [x] Install production dependencies: `pnpm add irc-framework better-sqlite3`
 - [x] Install dev dependencies: `pnpm add -D typescript tsx vitest @types/better-sqlite3 @types/node`

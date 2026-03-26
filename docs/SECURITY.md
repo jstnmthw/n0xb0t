@@ -104,7 +104,22 @@ When a user joins a channel:
 - The `-` flag (no requirement) is the only case where flag checking is skipped entirely
 - Owner flag (`n`) implies all other flags — this is intentional but means owner accounts are high-value targets. Limit `n` to trusted, verified hostmasks only.
 
-### 3.4 REPL context
+### 3.4 DCC CHAT connection race
+
+DCC CHAT uses a passive handshake: the bot opens a TCP listener and tells the user which port to connect to via CTCP. The first TCP connection to that port is accepted as the session, regardless of source IP. An attacker who can observe the CTCP exchange and reach the bot's IP could race to connect before the legitimate user, obtaining a session with that user's permissions.
+
+This is an inherent limitation of the DCC protocol — the token mechanism correlates the CTCP offer but does not authenticate the TCP connection.
+
+**Mitigations in place:**
+
+- The listening port is open for only 30 seconds before timing out
+- The listener accepts exactly one connection, then closes
+- Permission flags and (optionally) NickServ verification are checked before the port is offered
+- Session limits cap the total number of concurrent DCC sessions
+
+**Rule:** Administrators should understand this risk before enabling `dcc.enabled` in config. DCC CHAT is best used on networks where the bot's IP is not widely known, or where the CTCP exchange happens via private message rather than a public channel.
+
+### 3.5 REPL context
 
 Commands from the REPL run with implicit owner privileges — the person at the terminal has physical access. However:
 

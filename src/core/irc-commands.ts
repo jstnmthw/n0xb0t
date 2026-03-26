@@ -152,17 +152,18 @@ export class IRCCommands {
     if (this.client.mode) {
       this.client.mode(channel, mode, param);
     } else {
-      this.client.raw(`MODE ${sanitize(channel)} ${mode} ${sanitize(param)}`);
+      this.client.raw(`MODE ${sanitize(channel)} ${sanitize(mode)} ${sanitize(param)}`);
     }
   }
 
   private sendModeRaw(channel: string, modeString: string, params: string[]): void {
     const safeChannel = sanitize(channel);
+    const safeModes = sanitize(modeString);
     const safeParams = params.map((p) => sanitize(p));
     const line =
       safeParams.length > 0
-        ? `MODE ${safeChannel} ${modeString} ${safeParams.join(' ')}`
-        : `MODE ${safeChannel} ${modeString}`;
+        ? `MODE ${safeChannel} ${safeModes} ${safeParams.join(' ')}`
+        : `MODE ${safeChannel} ${safeModes}`;
     this.client.raw(line);
   }
 

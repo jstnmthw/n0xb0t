@@ -139,7 +139,7 @@ function getUserFlags(channel: string, nick: string): string | null {
   if (!user) return null;
 
   const globalFlags = user.global;
-  const channelFlags = user.channels[channel] ?? '';
+  const channelFlags = user.channels[api.ircLower(channel)] ?? '';
   return globalFlags + channelFlags;
 }
 

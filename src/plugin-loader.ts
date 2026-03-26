@@ -513,8 +513,7 @@ export class PluginLoader {
           sasl: this.botConfig.services.sasl,
           // password intentionally omitted
         }),
-        database: this.botConfig.database,
-        pluginDir: this.botConfig.pluginDir,
+        // database and pluginDir intentionally omitted — plugins don't need filesystem paths
         logging: Object.freeze({ ...this.botConfig.logging }),
       }),
 
