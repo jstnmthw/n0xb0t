@@ -1,7 +1,7 @@
 // hexbot — Plugin loader
 // Discovers, loads, unloads, and hot-reloads plugins. Each plugin gets a scoped API.
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import type { ChannelState } from './core/channel-state';
@@ -125,8 +125,32 @@ export class PluginLoader {
     this.getServerSupports = deps.getServerSupports ?? (() => ({}));
   }
 
+  /** Delete any orphaned .reload-*.ts temp files left by a previous crashed process. */
+  cleanupOrphanedTempFiles(): void {
+    try {
+      const entries = readdirSync(this.pluginDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const pluginDir = join(this.pluginDir, entry.name);
+        try {
+          for (const file of readdirSync(pluginDir)) {
+            if (/^\.reload-\d+-[^/]+\.ts$/.test(file)) {
+              unlinkSync(join(pluginDir, file));
+              this.logger?.debug(`Cleaned orphaned temp file: ${entry.name}/${file}`);
+            }
+          }
+        } catch {
+          /* plugin dir may not be readable */
+        }
+      }
+    } catch {
+      /* plugin dir may not exist yet */
+    }
+  }
+
   /** Load all enabled plugins from the plugins config. */
   async loadAll(pluginsConfigPath?: string): Promise<LoadResult[]> {
+    this.cleanupOrphanedTempFiles();
     const cfgPath = pluginsConfigPath ?? resolve('./config/plugins.json');
     const pluginsConfig = this.readPluginsConfig(cfgPath);
 
@@ -600,44 +624,86 @@ export class PluginLoader {
   /** Import a plugin module with cache busting for all local dependencies. */
   private async importWithCacheBust(absPath: string): Promise<Record<string, unknown>> {
     const ts = Date.now();
-    const source = readFileSync(absPath, 'utf-8');
-    const rewritten = this.rewriteLocalImports(source, ts);
+    const dir = dirname(absPath);
 
-    if (rewritten === source) {
-      // No local imports to bust — simple cache-bust on the entry file
+    // Discover all local .ts files reachable from this plugin entry
+    const allFiles = new Map<string, string>(); // abs path -> source
+    this.collectLocalModules(absPath, dir, allFiles);
+
+    if (allFiles.size === 1) {
+      // Entry-only plugin (no local value imports) — simple query-string cache-bust
       const fileUrl = pathToFileURL(absPath).href + `?t=${ts}`;
       return (await import(fileUrl)) as Record<string, unknown>;
     }
 
-    // Write temp file in the same directory so relative paths still resolve
-    const dir = dirname(absPath);
-    const tmpPath = join(dir, `.reload-${ts}.ts`);
+    // Multi-file plugin: create uniquely-named temp copies so Node treats each
+    // as a new module, bypassing its module cache.
+    // Map: original basename (no ext) -> temp basename (no ext)
+    const nameRemap = new Map<string, string>();
+    for (const origPath of allFiles.keys()) {
+      const base = basename(origPath, '.ts');
+      nameRemap.set(base, `.reload-${ts}-${base}`);
+    }
+
+    const tmpFiles: string[] = [];
+    let entryTmpPath = '';
     try {
-      writeFileSync(tmpPath, rewritten, 'utf-8');
-      const fileUrl = pathToFileURL(tmpPath).href + `?t=${ts}`;
+      for (const [origPath, source] of allFiles) {
+        const base = basename(origPath, '.ts');
+        const tmpPath = join(dir, `${nameRemap.get(base)!}.ts`);
+
+        // Rewrite same-directory imports to point to their corresponding temp files
+        const rewritten = source.replace(
+          /(from\s+['"])(\.\/[^?'"]+)(['"])/g,
+          (match, pre: string, spec: string, post: string) => {
+            const specBase = basename(spec.replace(/\.(ts|js)$/, ''));
+            const remapped = nameRemap.get(specBase);
+            return remapped ? `${pre}./${remapped}${post}` : match;
+          },
+        );
+
+        writeFileSync(tmpPath, rewritten, 'utf-8');
+        tmpFiles.push(tmpPath);
+        if (origPath === absPath) entryTmpPath = tmpPath;
+      }
+
+      const fileUrl = pathToFileURL(entryTmpPath).href;
       return (await import(fileUrl)) as Record<string, unknown>;
     } finally {
-      try {
-        unlinkSync(tmpPath);
-      } catch {
-        /* ignore cleanup errors */
+      for (const f of tmpFiles) {
+        try {
+          unlinkSync(f);
+        } catch {
+          /* ignore cleanup errors */
+        }
       }
     }
   }
 
-  /** Rewrite relative import specifiers to add cache-busting query strings. */
-  private rewriteLocalImports(source: string, timestamp: number): string {
-    // Static: from './foo' or from '../foo'
-    let result = source.replace(
-      /(from\s+['"])(\.\.?\/[^?'"]+)(['"])/g,
-      (_, pre: string, spec: string, post: string) => `${pre}${spec}?t=${timestamp}${post}`,
-    );
-    // Dynamic: import('./foo.js')
-    result = result.replace(
-      /(import\(\s*['"])(\.\.?\/[^?'"]+)(['"])/g,
-      (_, pre: string, spec: string, post: string) => `${pre}${spec}?t=${timestamp}${post}`,
-    );
-    return result;
+  /** Recursively collect all local .ts module files reachable from a plugin entry. */
+  private collectLocalModules(absPath: string, pluginDir: string, seen: Map<string, string>): void {
+    if (seen.has(absPath)) return;
+
+    let source: string;
+    try {
+      source = readFileSync(absPath, 'utf-8');
+    } catch {
+      return;
+    }
+
+    seen.set(absPath, source);
+
+    // Find all static import specifiers (including type-only; they're erased at runtime)
+    const importRe = /from\s+['"](\.[^?'"]+)['"]/g;
+    let m: RegExpExecArray | null;
+    while ((m = importRe.exec(source)) !== null) {
+      const spec = m[1];
+      if (!spec.startsWith('./')) continue; // skip parent-dir imports (e.g. ../../src/types)
+      const resolved = resolve(join(dirname(absPath), spec.replace(/\.(ts|js)$/, '') + '.ts'));
+      if (resolved.startsWith(pluginDir + '/') && existsSync(resolved)) {
+        this.collectLocalModules(resolved, pluginDir, seen);
+      }
+    }
   }
 
   /** Infer a plugin name from its file path. */

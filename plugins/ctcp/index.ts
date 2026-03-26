@@ -1,6 +1,6 @@
 // hexbot — ctcp plugin
 // Handles CTCP VERSION, PING, and TIME requests with fixed responses.
-// Responses are not user-configurable — like Eggdrop's built-in CTCP handling.
+// Responses are not user-configurable
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 

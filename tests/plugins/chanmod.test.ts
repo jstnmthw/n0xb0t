@@ -1022,3 +1022,410 @@ describe('chanmod plugin — channel mode enforcement', () => {
     ).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Protection: rejoin on kick + revenge
+// ---------------------------------------------------------------------------
+
+describe('chanmod plugin — rejoin on kick', () => {
+  let bot: MockBot;
+
+  beforeEach(async () => {
+    bot = createMockBot({ botNick: 'hexbot' });
+    giveBotOps(bot, '#test');
+    const result = await bot.pluginLoader.load(PLUGIN_PATH, {
+      chanmod: {
+        enabled: true,
+        config: {
+          rejoin_on_kick: true,
+          rejoin_delay_ms: 10,
+          max_rejoin_attempts: 3,
+          rejoin_attempt_window_ms: 300_000,
+          revenge_on_kick: false,
+        },
+      },
+    });
+    expect(result.status).toBe('ok');
+  });
+
+  afterEach(() => {
+    bot.cleanup();
+  });
+
+  it('rejoins after being kicked', async () => {
+    bot.client.simulateEvent('kick', {
+      nick: 'Kicker',
+      channel: '#test',
+      kicked: 'hexbot',
+      message: 'bye',
+    });
+    await tick(20);
+    expect(
+      bot.client.messages.find((m) => m.type === 'join' && m.target === '#test'),
+    ).toBeDefined();
+  });
+
+  it('does not rejoin when a different user is kicked', async () => {
+    bot.client.simulateEvent('kick', {
+      nick: 'Kicker',
+      channel: '#test',
+      kicked: 'Alice',
+      message: '',
+    });
+    await tick(20);
+    expect(bot.client.messages.find((m) => m.type === 'join')).toBeUndefined();
+  });
+
+  it('suppresses rejoin after max_rejoin_attempts in window', async () => {
+    for (let i = 0; i < 3; i++) {
+      bot.client.simulateEvent('kick', {
+        nick: 'Kicker',
+        channel: '#test',
+        kicked: 'hexbot',
+        message: '',
+      });
+      await tick(20);
+    }
+    // 4th kick — should be suppressed
+    bot.client.clearMessages();
+    bot.client.simulateEvent('kick', {
+      nick: 'Kicker',
+      channel: '#test',
+      kicked: 'hexbot',
+      message: '',
+    });
+    await tick(20);
+    expect(bot.client.messages.find((m) => m.type === 'join')).toBeUndefined();
+  });
+
+  it('does not rejoin when rejoin_on_kick is false', async () => {
+    bot.cleanup();
+    bot = createMockBot({ botNick: 'hexbot' });
+    const result = await bot.pluginLoader.load(PLUGIN_PATH, {
+      chanmod: { enabled: true, config: { rejoin_on_kick: false } },
+    });
+    expect(result.status).toBe('ok');
+    bot.client.simulateEvent('kick', {
+      nick: 'Kicker',
+      channel: '#test',
+      kicked: 'hexbot',
+      message: '',
+    });
+    await tick(20);
+    expect(bot.client.messages.find((m) => m.type === 'join')).toBeUndefined();
+  });
+});
+
+describe('chanmod plugin — revenge on kick', () => {
+  let bot: MockBot;
+
+  beforeEach(async () => {
+    bot = createMockBot({ botNick: 'hexbot' });
+    giveBotOps(bot, '#test');
+    addToChannel(bot, 'Kicker', 'kicker', 'kicker.host', '#test');
+    const result = await bot.pluginLoader.load(PLUGIN_PATH, {
+      chanmod: {
+        enabled: true,
+        config: {
+          rejoin_on_kick: true,
+          rejoin_delay_ms: 10,
+          revenge_on_kick: true,
+          revenge_action: 'deop',
+          revenge_delay_ms: 10,
+          revenge_exempt_flags: 'nm',
+          max_rejoin_attempts: 3,
+          rejoin_attempt_window_ms: 300_000,
+        },
+      },
+    });
+    expect(result.status).toBe('ok');
+  });
+
+  afterEach(() => {
+    bot.cleanup();
+  });
+
+  it('deops kicker after rejoin when revenge_action is "deop"', async () => {
+    addToChannel(bot, 'Kicker', 'kicker', 'kicker.host', '#test');
+    giveBotOps(bot, '#test');
+    bot.client.simulateEvent('kick', {
+      nick: 'Kicker',
+      channel: '#test',
+      kicked: 'hexbot',
+      message: 'bye',
+    });
+    // Fire rejoin timer
+    await tick(10);
+    // Simulate bot rejoining and getting ops (as ChanServ would provide in real IRC)
+    giveBotOps(bot, '#test');
+    // Fire revenge timer
+    await tick(10);
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'mode' && m.message === '-o' && m.args?.includes('Kicker'),
+      ),
+    ).toBeDefined();
+  });
+
+  it('kicks kicker when revenge_action is "kick"', async () => {
+    bot.cleanup();
+    bot = createMockBot({ botNick: 'hexbot' });
+    giveBotOps(bot, '#test');
+    addToChannel(bot, 'Kicker', 'kicker', 'kicker.host', '#test');
+    const result = await bot.pluginLoader.load(PLUGIN_PATH, {
+      chanmod: {
+        enabled: true,
+        config: {
+          rejoin_on_kick: true,
+          rejoin_delay_ms: 10,
+          revenge_on_kick: true,
+          revenge_action: 'kick',
+          revenge_delay_ms: 10,
+          revenge_exempt_flags: '',
+          max_rejoin_attempts: 3,
+          rejoin_attempt_window_ms: 300_000,
+          revenge_kick_reason: "Don't kick me.",
+        },
+      },
+    });
+    expect(result.status).toBe('ok');
+    addToChannel(bot, 'Kicker', 'kicker', 'kicker.host', '#test');
+    giveBotOps(bot, '#test');
+    bot.client.simulateEvent('kick', {
+      nick: 'Kicker',
+      channel: '#test',
+      kicked: 'hexbot',
+      message: 'bye',
+    });
+    await tick(10);
+    // Simulate bot rejoining and getting ops
+    giveBotOps(bot, '#test');
+    await tick(10);
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'raw' && m.message?.startsWith('KICK') && m.message.includes('Kicker'),
+      ),
+    ).toBeDefined();
+  });
+
+  it('skips revenge when kicker has exempt flag', async () => {
+    bot.permissions.addUser('Kicker', '*!kicker@kicker.host', 'n', 'test');
+    addToChannel(bot, 'Kicker', 'kicker', 'kicker.host', '#test');
+    giveBotOps(bot, '#test');
+    bot.client.simulateEvent('kick', {
+      nick: 'Kicker',
+      channel: '#test',
+      kicked: 'hexbot',
+      message: '',
+    });
+    await tick(10);
+    giveBotOps(bot, '#test');
+    await tick(10);
+    // Should have rejoined but NOT deopped
+    expect(bot.client.messages.find((m) => m.type === 'join')).toBeDefined();
+    expect(
+      bot.client.messages.find((m) => m.type === 'mode' && m.message === '-o'),
+    ).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bitch mode
+// ---------------------------------------------------------------------------
+
+describe('chanmod plugin — bitch mode', () => {
+  let bot: MockBot;
+
+  beforeEach(async () => {
+    bot = createMockBot({ botNick: 'hexbot' });
+    giveBotOps(bot, '#test');
+    const result = await bot.pluginLoader.load(PLUGIN_PATH, {
+      chanmod: {
+        enabled: true,
+        config: { bitch: true, enforce_delay_ms: 5, op_flags: ['o', 'n', 'm'] },
+      },
+    });
+    expect(result.status).toBe('ok');
+  });
+
+  afterEach(() => {
+    bot.cleanup();
+  });
+
+  it('deops a user who gains +o without op flags', async () => {
+    addToChannel(bot, 'Intruder', 'int', 'int.host', '#test');
+    giveBotOps(bot, '#test');
+    simulateMode(bot, 'SomeOp', '#test', '+o', 'Intruder');
+    await tick(20);
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'mode' && m.message === '-o' && m.args?.includes('Intruder'),
+      ),
+    ).toBeDefined();
+  });
+
+  it('does NOT deop a user who gains +o with op flags', async () => {
+    bot.permissions.addUser('trusted', '*!trusted@trusted.host', 'o', 'test');
+    addToChannel(bot, 'Trusted', 'trusted', 'trusted.host', '#test');
+    giveBotOps(bot, '#test');
+    simulateMode(bot, 'SomeOp', '#test', '+o', 'Trusted');
+    await tick(20);
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'mode' && m.message === '-o' && m.args?.includes('Trusted'),
+      ),
+    ).toBeUndefined();
+  });
+
+  it('does NOT deop when the setter is a nodesynch nick', async () => {
+    addToChannel(bot, 'Intruder', 'int', 'int.host', '#test');
+    giveBotOps(bot, '#test');
+    simulateMode(bot, 'ChanServ', '#test', '+o', 'Intruder');
+    await tick(20);
+    expect(
+      bot.client.messages.find((m) => m.type === 'mode' && m.message === '-o'),
+    ).toBeUndefined();
+  });
+
+  it('does NOT deop the bot itself', async () => {
+    giveBotOps(bot, '#test');
+    simulateMode(bot, 'SomeOp', '#test', '+o', 'hexbot');
+    await tick(20);
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'mode' && m.message === '-o' && m.args?.includes('hexbot'),
+      ),
+    ).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Punish deop
+// ---------------------------------------------------------------------------
+
+describe('chanmod plugin — punish deop', () => {
+  let bot: MockBot;
+
+  beforeEach(async () => {
+    bot = createMockBot({ botNick: 'hexbot' });
+    giveBotOps(bot, '#test');
+    const result = await bot.pluginLoader.load(PLUGIN_PATH, {
+      chanmod: {
+        enabled: true,
+        config: {
+          enforce_modes: true,
+          punish_deop: true,
+          punish_action: 'kick',
+          punish_kick_reason: "Don't deop my friends.",
+          op_flags: ['o', 'n', 'm'],
+          enforce_delay_ms: 5,
+        },
+      },
+    });
+    expect(result.status).toBe('ok');
+  });
+
+  afterEach(() => {
+    bot.cleanup();
+  });
+
+  it('kicks setter when they deop a flagged op', async () => {
+    bot.permissions.addUser('alice', '*!alice@alice.host', 'o', 'test');
+    addToChannel(bot, 'Alice', 'alice', 'alice.host', '#test');
+    addToChannel(bot, 'Badguy', 'bad', 'bad.host', '#test');
+    giveBotOps(bot, '#test');
+    simulateMode(bot, 'Badguy', '#test', '-o', 'Alice');
+    await tick(20);
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'raw' && m.message?.startsWith('KICK') && m.message.includes('Badguy'),
+      ),
+    ).toBeDefined();
+  });
+
+  it('does NOT kick setter when they have op flags', async () => {
+    bot.permissions.addUser('alice', '*!alice@alice.host', 'o', 'test');
+    bot.permissions.addUser('goodop', '*!goodop@goodop.host', 'o', 'test');
+    addToChannel(bot, 'Alice', 'alice', 'alice.host', '#test');
+    addToChannel(bot, 'GoodOp', 'goodop', 'goodop.host', '#test');
+    giveBotOps(bot, '#test');
+    simulateMode(bot, 'GoodOp', '#test', '-o', 'Alice');
+    await tick(20);
+    // No kick for GoodOp — they're authorized
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'raw' && m.message?.startsWith('KICK') && m.message.includes('GoodOp'),
+      ),
+    ).toBeUndefined();
+  });
+
+  it('does NOT punish if target had no op flags', async () => {
+    // Alice has no flags — deop of an unflagged person should not trigger punishment
+    addToChannel(bot, 'Alice', 'alice', 'alice.host', '#test');
+    addToChannel(bot, 'Badguy', 'bad', 'bad.host', '#test');
+    giveBotOps(bot, '#test');
+    simulateMode(bot, 'Badguy', '#test', '-o', 'Alice');
+    await tick(20);
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'raw' && m.message?.startsWith('KICK') && m.message.includes('Badguy'),
+      ),
+    ).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Enforcebans
+// ---------------------------------------------------------------------------
+
+describe('chanmod plugin — enforcebans', () => {
+  let bot: MockBot;
+
+  beforeEach(async () => {
+    bot = createMockBot({ botNick: 'hexbot' });
+    giveBotOps(bot, '#test');
+    const result = await bot.pluginLoader.load(PLUGIN_PATH, {
+      chanmod: { enabled: true, config: { enforcebans: true } },
+    });
+    expect(result.status).toBe('ok');
+  });
+
+  afterEach(() => {
+    bot.cleanup();
+  });
+
+  it('kicks a user whose hostmask matches a new ban mask', async () => {
+    addToChannel(bot, 'Spammer', 'spam', 'evil.host', '#test');
+    giveBotOps(bot, '#test');
+    simulateMode(bot, 'Admin', '#test', '+b', '*!*@evil.host');
+    await flush();
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'raw' && m.message?.startsWith('KICK') && m.message.includes('Spammer'),
+      ),
+    ).toBeDefined();
+  });
+
+  it('does not kick a user whose hostmask does not match', async () => {
+    addToChannel(bot, 'Innocent', 'good', 'good.host', '#test');
+    giveBotOps(bot, '#test');
+    simulateMode(bot, 'Admin', '#test', '+b', '*!*@evil.host');
+    await flush();
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'raw' && m.message?.startsWith('KICK') && m.message.includes('Innocent'),
+      ),
+    ).toBeUndefined();
+  });
+
+  it('does not kick the bot itself even if it matches', async () => {
+    giveBotOps(bot, '#test');
+    simulateMode(bot, 'Admin', '#test', '+b', '*!*@*');
+    await flush();
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'raw' && m.message?.startsWith('KICK') && m.message.includes('hexbot'),
+      ),
+    ).toBeUndefined();
+  });
+});

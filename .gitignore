@@ -34,6 +34,9 @@ Thumbs.db
 .env
 .env.*
 
+# Plugin hot-reload temp files (created transiently during .reload; deleted after import)
+.reload-*.ts
+
 # Logs
 *.log
 
