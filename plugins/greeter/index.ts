@@ -8,7 +8,7 @@ function stripFormatting(s: string): string {
 }
 
 export const name = 'greeter';
-export const version = '2.0.0';
+export const version = '2.1.0';
 export const description = 'Greets users when they join; lets registered users set a custom greet';
 
 /** Flag hierarchy order: n > m > o > v (lower index = higher privilege). */
@@ -47,6 +47,8 @@ export function init(api: PluginAPI): void {
   const message = (api.config.message as string) ?? 'Welcome to {channel}, {nick}!';
   const allowCustom = (api.config.allow_custom as boolean) ?? false;
   const minFlag = (api.config.min_flag as string) ?? 'v';
+  const delivery = (api.config.delivery as string) ?? 'say';
+  const joinNotice = (api.config.join_notice as string) ?? '';
   const irc = api.botConfig.irc as Record<string, unknown> | undefined;
   botNick = (irc?.nick as string) ?? '';
 
@@ -65,11 +67,23 @@ export function init(api: PluginAPI): void {
       }
     }
 
-    ctx.reply(
-      greeting
+    const text = greeting
+      .replace(/\{channel\}/g, ctx.channel ?? '')
+      .replace(/\{nick\}/g, stripFormatting(ctx.nick));
+
+    if (delivery === 'channel_notice' && ctx.channel) {
+      api.notice(ctx.channel, text);
+    } else {
+      ctx.reply(text); // 'say' — PRIVMSG to channel (default)
+    }
+
+    if (joinNotice) {
+      const noticeText = joinNotice
+        .replace(/[\r\n]/g, '')
         .replace(/\{channel\}/g, ctx.channel ?? '')
-        .replace(/\{nick\}/g, stripFormatting(ctx.nick)),
-    );
+        .replace(/\{nick\}/g, stripFormatting(ctx.nick));
+      api.notice(ctx.nick, noticeText);
+    }
   });
 
   // --- !greet command ---

@@ -38,8 +38,42 @@ In `config/plugins.json`:
 | Key            | Type    | Default                         | Description                                                |
 | -------------- | ------- | ------------------------------- | ---------------------------------------------------------- |
 | `message`      | string  | `Welcome to {channel}, {nick}!` | Default greeting template. Supports `{channel}`, `{nick}`. |
+| `delivery`     | string  | `"say"`                         | How the public greeting is sent (see below).               |
+| `join_notice`  | string  | `""`                            | Optional private NOTICE to the joining user (empty = off). |
 | `allow_custom` | boolean | `false`                         | Enable user-settable custom greets.                        |
 | `min_flag`     | string  | `"v"`                           | Minimum bot flag required to set/remove a greet.           |
+
+### Delivery modes
+
+`delivery` controls the public channel greeting visible to everyone:
+
+| Value              | IRC call           | How clients show it               |
+| ------------------ | ------------------ | --------------------------------- |
+| `"say"` (default)  | `PRIVMSG #channel` | `<Bot> Welcome, nick!`            |
+| `"channel_notice"` | `NOTICE #channel`  | `-Bot- [#channel] Welcome, nick!` |
+
+### Private join notice
+
+`join_notice` is independent of `delivery` — when non-empty, the bot also sends a `NOTICE` directly to the joining user. Nobody else in the channel sees it. Supports `{channel}` and `{nick}` substitutions.
+
+```json
+{
+  "greeter": {
+    "enabled": true,
+    "config": {
+      "delivery": "channel_notice",
+      "join_notice": "Hi {nick}! Type !help to see available commands."
+    }
+  }
+}
+```
+
+Result when alice joins `#lobby`:
+
+```
+-Bot- [#lobby] Welcome to #lobby, alice!          (visible to everyone)
+-Bot- Hi alice! Type !help to see available commands.  (private to alice)
+```
 
 ### `min_flag` values
 

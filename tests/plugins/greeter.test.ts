@@ -68,7 +68,13 @@ describe('greeter plugin', () => {
     db?.close();
   });
 
-  async function loadGreeter(pluginsConfig?: PluginsConfig): Promise<void> {
+  async function loadGreeter(
+    pluginsConfig?: PluginsConfig,
+    ircClient: {
+      notice(target: string, message: string): void;
+      say(target: string, message: string): void;
+    } | null = null,
+  ): Promise<void> {
     db = new BotDatabase(':memory:');
     db.open();
     dispatcher = new EventDispatcher();
@@ -82,7 +88,7 @@ describe('greeter plugin', () => {
       db,
       permissions,
       botConfig: MINIMAL_BOT_CONFIG,
-      ircClient: null,
+      ircClient: ircClient ? { ...ircClient, action: vi.fn(), ctcpResponse: vi.fn() } : null,
     });
 
     const result = await loader.load(resolve('./plugins/greeter/index.ts'), pluginsConfig);
@@ -344,6 +350,147 @@ describe('greeter plugin', () => {
       expect(ctx.replyPrivate).toHaveBeenCalledWith(
         'Usage: !greet | !greet set <message> | !greet del',
       );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // delivery modes
+  // ---------------------------------------------------------------------------
+
+  describe('delivery modes', () => {
+    it('delivery: "say" (default) calls ctx.reply, not api.notice', async () => {
+      const mockIrc = { notice: vi.fn(), say: vi.fn() };
+      await loadGreeter({ greeter: { enabled: true, config: { delivery: 'say' } } }, mockIrc);
+
+      const ctx = makeJoinCtx('alice', '#test');
+      await dispatcher.dispatch('join', ctx);
+
+      expect(ctx.reply).toHaveBeenCalledWith('Welcome to #test, alice!');
+      expect(mockIrc.notice).not.toHaveBeenCalled();
+    });
+
+    it('delivery: "channel_notice" sends NOTICE to channel, not ctx.reply', async () => {
+      const mockIrc = { notice: vi.fn(), say: vi.fn() };
+      await loadGreeter(
+        { greeter: { enabled: true, config: { delivery: 'channel_notice' } } },
+        mockIrc,
+      );
+
+      const ctx = makeJoinCtx('alice', '#test');
+      await dispatcher.dispatch('join', ctx);
+
+      expect(ctx.reply).not.toHaveBeenCalled();
+      expect(mockIrc.notice).toHaveBeenCalledWith('#test', 'Welcome to #test, alice!');
+    });
+
+    it('delivery: "channel_notice" falls back to ctx.reply when channel is null', async () => {
+      const mockIrc = { notice: vi.fn(), say: vi.fn() };
+      await loadGreeter(
+        { greeter: { enabled: true, config: { delivery: 'channel_notice' } } },
+        mockIrc,
+      );
+
+      const ctx: HandlerContext = {
+        nick: 'alice',
+        ident: 'user',
+        hostname: 'host.com',
+        channel: null as unknown as string,
+        text: '',
+        command: 'JOIN',
+        args: '',
+        reply: vi.fn(),
+        replyPrivate: vi.fn(),
+      };
+      await dispatcher.dispatch('join', ctx);
+
+      expect(ctx.reply).toHaveBeenCalledWith('Welcome to , alice!');
+      expect(mockIrc.notice).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // join_notice — private notice to joining user
+  // ---------------------------------------------------------------------------
+
+  describe('join_notice', () => {
+    it('sends no notice when join_notice is empty (default)', async () => {
+      const mockIrc = { notice: vi.fn(), say: vi.fn() };
+      await loadGreeter(undefined, mockIrc);
+
+      const ctx = makeJoinCtx('alice', '#test');
+      await dispatcher.dispatch('join', ctx);
+
+      expect(mockIrc.notice).not.toHaveBeenCalled();
+    });
+
+    it('sends NOTICE to joining nick when join_notice is set', async () => {
+      const mockIrc = { notice: vi.fn(), say: vi.fn() };
+      await loadGreeter(
+        { greeter: { enabled: true, config: { join_notice: 'Hi! Try !help for commands.' } } },
+        mockIrc,
+      );
+
+      const ctx = makeJoinCtx('alice', '#test');
+      await dispatcher.dispatch('join', ctx);
+
+      expect(mockIrc.notice).toHaveBeenCalledWith('alice', 'Hi! Try !help for commands.');
+    });
+
+    it('applies {channel} and {nick} substitutions to join_notice', async () => {
+      const mockIrc = { notice: vi.fn(), say: vi.fn() };
+      await loadGreeter(
+        {
+          greeter: {
+            enabled: true,
+            config: { join_notice: 'Hi {nick}, welcome to {channel}!' },
+          },
+        },
+        mockIrc,
+      );
+
+      const ctx = makeJoinCtx('alice', '#lobby');
+      await dispatcher.dispatch('join', ctx);
+
+      expect(mockIrc.notice).toHaveBeenCalledWith('alice', 'Hi alice, welcome to #lobby!');
+    });
+
+    it('strips \\r and \\n from join_notice before sending', async () => {
+      const mockIrc = { notice: vi.fn(), say: vi.fn() };
+      await loadGreeter(
+        { greeter: { enabled: true, config: { join_notice: 'Hello\r\nworld' } } },
+        mockIrc,
+      );
+
+      const ctx = makeJoinCtx('alice', '#test');
+      await dispatcher.dispatch('join', ctx);
+
+      expect(mockIrc.notice).toHaveBeenCalledWith('alice', 'Helloworld');
+    });
+
+    it('fires both public greeting and join_notice simultaneously', async () => {
+      const mockIrc = { notice: vi.fn(), say: vi.fn() };
+      await loadGreeter(
+        {
+          greeter: {
+            enabled: true,
+            config: {
+              delivery: 'channel_notice',
+              join_notice: 'Hi {nick}! Type !help.',
+            },
+          },
+        },
+        mockIrc,
+      );
+
+      const ctx = makeJoinCtx('alice', '#test');
+      await dispatcher.dispatch('join', ctx);
+
+      // Public: channel notice
+      expect(mockIrc.notice).toHaveBeenCalledWith('#test', 'Welcome to #test, alice!');
+      // Private: join notice to nick
+      expect(mockIrc.notice).toHaveBeenCalledWith('alice', 'Hi alice! Type !help.');
+      expect(mockIrc.notice).toHaveBeenCalledTimes(2);
+      expect(ctx.reply).not.toHaveBeenCalled();
     });
   });
 
