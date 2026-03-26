@@ -4,7 +4,7 @@ import {
   type CommandContext,
   CommandHandler,
   type CommandPermissionsProvider,
-} from '../src/command-handler.js';
+} from '../src/command-handler';
 
 /** Helper: create a minimal CommandContext. */
 function makeCtx(overrides: Partial<CommandContext> = {}): CommandContext {

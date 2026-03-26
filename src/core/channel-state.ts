@@ -1,9 +1,9 @@
 // hexbot — Channel state tracking
 // Tracks who is in each channel, their modes, and hostmasks.
 // Updated in real time from IRC events.
-import type { BotEventBus } from '../event-bus.js';
-import type { Logger } from '../logger.js';
-import { type Casemapping, ircLower } from '../utils/wildcard.js';
+import type { BotEventBus } from '../event-bus';
+import type { Logger } from '../logger';
+import { type Casemapping, ircLower } from '../utils/wildcard';
 
 // ---------------------------------------------------------------------------
 // Types

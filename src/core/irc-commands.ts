@@ -1,8 +1,8 @@
 // hexbot — IRC commands core module
 // Convenience wrappers for common IRC operations with mod action logging.
-import type { BotDatabase } from '../database.js';
-import type { Logger } from '../logger.js';
-import { sanitize } from '../utils/sanitize.js';
+import type { BotDatabase } from '../database';
+import type { Logger } from '../logger';
+import { sanitize } from '../utils/sanitize';
 
 // ---------------------------------------------------------------------------
 // Types

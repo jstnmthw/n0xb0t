@@ -1,8 +1,8 @@
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { themeNames } from '../../plugins/topic/themes.js';
-import { type MockBot, createMockBot } from '../helpers/mock-bot.js';
+import { themeNames } from '../../plugins/topic/themes';
+import { type MockBot, createMockBot } from '../helpers/mock-bot';
 
 const PLUGIN_PATH = resolve('./plugins/topic/index.ts');
 

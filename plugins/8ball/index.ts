@@ -1,6 +1,6 @@
 // 8ball — Magic 8-Ball plugin
 // Responds to !8ball <question> with a random answer.
-import type { HandlerContext, PluginAPI } from '../../src/types.js';
+import type { HandlerContext, PluginAPI } from '../../src/types';
 
 export const name = '8ball';
 export const version = '1.0.0';

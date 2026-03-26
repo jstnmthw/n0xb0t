@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { IRCCommands } from '../../src/core/irc-commands.js';
-import type { IRCCommandsClient } from '../../src/core/irc-commands.js';
-import { BotDatabase } from '../../src/database.js';
-import { Logger } from '../../src/logger.js';
+import { IRCCommands } from '../../src/core/irc-commands';
+import type { IRCCommandsClient } from '../../src/core/irc-commands';
+import { BotDatabase } from '../../src/database';
+import { Logger } from '../../src/logger';
 
 // ---------------------------------------------------------------------------
 // Mock IRC client

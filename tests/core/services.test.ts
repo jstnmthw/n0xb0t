@@ -1,9 +1,9 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { Services } from '../../src/core/services.js';
-import { BotEventBus } from '../../src/event-bus.js';
-import type { IdentityConfig, ServicesConfig } from '../../src/types.js';
+import { Services } from '../../src/core/services';
+import { BotEventBus } from '../../src/event-bus';
+import type { IdentityConfig, ServicesConfig } from '../../src/types';
 
 // ---------------------------------------------------------------------------
 // Mock IRC client

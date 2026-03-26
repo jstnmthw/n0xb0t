@@ -1,7 +1,7 @@
 // flood — Inbound flood protection plugin.
 // Detects message floods, join/part spam, and nick-change spam.
 // Escalating responses: warn → kick → tempban (configurable).
-import type { HandlerContext, PluginAPI } from '../../src/types.js';
+import type { HandlerContext, PluginAPI } from '../../src/types';
 
 export const name = 'flood';
 export const version = '1.0.0';

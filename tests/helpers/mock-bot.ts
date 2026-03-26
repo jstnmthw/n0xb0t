@@ -1,22 +1,22 @@
 // hexbot — Mock bot helper for testing
 // Creates a Bot-like object with real modules but a mock IRC client.
-import { CommandHandler } from '../../src/command-handler.js';
-import { ChannelState } from '../../src/core/channel-state.js';
-import { registerDispatcherCommands } from '../../src/core/commands/dispatcher-commands.js';
-import { registerIRCAdminCommands } from '../../src/core/commands/irc-commands-admin.js';
-import { registerPermissionCommands } from '../../src/core/commands/permission-commands.js';
-import { registerPluginCommands } from '../../src/core/commands/plugin-commands.js';
-import { IRCCommands } from '../../src/core/irc-commands.js';
-import { Permissions } from '../../src/core/permissions.js';
-import { Services } from '../../src/core/services.js';
-import { BotDatabase } from '../../src/database.js';
-import { EventDispatcher } from '../../src/dispatcher.js';
-import { BotEventBus } from '../../src/event-bus.js';
-import { IRCBridge } from '../../src/irc-bridge.js';
-import { type Logger, createLogger } from '../../src/logger.js';
-import { PluginLoader } from '../../src/plugin-loader.js';
-import type { BotConfig } from '../../src/types.js';
-import { MockIRCClient } from './mock-irc.js';
+import { CommandHandler } from '../../src/command-handler';
+import { ChannelState } from '../../src/core/channel-state';
+import { registerDispatcherCommands } from '../../src/core/commands/dispatcher-commands';
+import { registerIRCAdminCommands } from '../../src/core/commands/irc-commands-admin';
+import { registerPermissionCommands } from '../../src/core/commands/permission-commands';
+import { registerPluginCommands } from '../../src/core/commands/plugin-commands';
+import { IRCCommands } from '../../src/core/irc-commands';
+import { Permissions } from '../../src/core/permissions';
+import { Services } from '../../src/core/services';
+import { BotDatabase } from '../../src/database';
+import { EventDispatcher } from '../../src/dispatcher';
+import { BotEventBus } from '../../src/event-bus';
+import { IRCBridge } from '../../src/irc-bridge';
+import { type Logger, createLogger } from '../../src/logger';
+import { PluginLoader } from '../../src/plugin-loader';
+import type { BotConfig } from '../../src/types';
+import { MockIRCClient } from './mock-irc';
 
 export interface MockBot {
   client: MockIRCClient;

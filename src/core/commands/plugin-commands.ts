@@ -1,7 +1,7 @@
 // hexbot — Plugin management commands
 // .plugins, .load, .unload, .reload
-import type { CommandHandler } from '../../command-handler.js';
-import type { PluginLoader } from '../../plugin-loader.js';
+import type { CommandHandler } from '../../command-handler';
+import type { PluginLoader } from '../../plugin-loader';
 
 export function registerPluginCommands(
   handler: CommandHandler,

@@ -3,17 +3,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ChannelState } from '../src/core/channel-state.js';
-import { IRCCommands } from '../src/core/irc-commands.js';
-import { Permissions } from '../src/core/permissions.js';
-import { Services } from '../src/core/services.js';
-import { BotDatabase } from '../src/database.js';
-import { EventDispatcher } from '../src/dispatcher.js';
-import { BotEventBus } from '../src/event-bus.js';
-import { Logger } from '../src/logger.js';
-import { PluginLoader } from '../src/plugin-loader.js';
-import type { PluginLoaderDeps } from '../src/plugin-loader.js';
-import type { BotConfig, PluginAPI } from '../src/types.js';
+import { ChannelState } from '../src/core/channel-state';
+import { IRCCommands } from '../src/core/irc-commands';
+import { Permissions } from '../src/core/permissions';
+import { Services } from '../src/core/services';
+import { BotDatabase } from '../src/database';
+import { EventDispatcher } from '../src/dispatcher';
+import { BotEventBus } from '../src/event-bus';
+import { Logger } from '../src/logger';
+import { PluginLoader } from '../src/plugin-loader';
+import type { PluginLoaderDeps } from '../src/plugin-loader';
+import type { BotConfig, PluginAPI } from '../src/types';
 
 // ---------------------------------------------------------------------------
 // Helpers

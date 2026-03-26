@@ -12,13 +12,13 @@ import { createServer } from 'node:net';
 import type { Server as NetServer, Socket } from 'node:net';
 import { createInterface as createReadline } from 'node:readline';
 
-import type { CommandHandler } from '../command-handler.js';
-import type { EventDispatcher } from '../dispatcher.js';
-import type { Logger } from '../logger.js';
-import type { DccConfig, HandlerContext, UserRecord } from '../types.js';
-import { type Casemapping, ircLower } from '../utils/wildcard.js';
-import type { Permissions } from './permissions.js';
-import type { Services } from './services.js';
+import type { CommandHandler } from '../command-handler';
+import type { EventDispatcher } from '../dispatcher';
+import type { Logger } from '../logger';
+import type { DccConfig, HandlerContext, UserRecord } from '../types';
+import { type Casemapping, ircLower } from '../utils/wildcard';
+import type { Permissions } from './permissions';
+import type { Services } from './services';
 
 // ---------------------------------------------------------------------------
 // Types

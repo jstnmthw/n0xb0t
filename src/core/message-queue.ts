@@ -2,7 +2,7 @@
 // Token-bucket rate limiter for outgoing IRC messages. Sits between
 // the bot's say/notice/action methods and the IRC client to prevent
 // excess-flood disconnects.
-import type { Logger } from '../logger.js';
+import type { Logger } from '../logger';
 
 // ---------------------------------------------------------------------------
 // Types

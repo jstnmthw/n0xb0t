@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { MessageQueue } from '../../src/core/message-queue.js';
+import { MessageQueue } from '../../src/core/message-queue';
 
 describe('MessageQueue', () => {
   beforeEach(() => {

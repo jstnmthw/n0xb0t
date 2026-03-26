@@ -6,9 +6,9 @@ import {
   ipToDecimal,
   isPassiveDcc,
   parseDccChatPayload,
-} from '../../src/core/dcc.js';
-import type { DCCIRCClient } from '../../src/core/dcc.js';
-import type { DccConfig, HandlerContext, UserRecord } from '../../src/types.js';
+} from '../../src/core/dcc';
+import type { DCCIRCClient } from '../../src/core/dcc';
+import type { DccConfig, HandlerContext, UserRecord } from '../../src/types';
 
 // ---------------------------------------------------------------------------
 // Helpers — unit tests

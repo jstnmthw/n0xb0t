@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildSocksOptions } from '../src/bot.js';
-import type { ProxyConfig } from '../src/types.js';
+import { buildSocksOptions } from '../src/bot';
+import type { ProxyConfig } from '../src/types';
 
 describe('buildSocksOptions', () => {
   it('produces host and port without auth fields when credentials are omitted', () => {

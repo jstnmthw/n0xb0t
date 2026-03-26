@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { type MockBot, createMockBot } from '../helpers/mock-bot.js';
+import { type MockBot, createMockBot } from '../helpers/mock-bot';
 
 // ---------------------------------------------------------------------------
 // Helpers

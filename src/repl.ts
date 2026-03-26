@@ -3,8 +3,8 @@
 // Commands are routed through the same CommandHandler used by IRC.
 import { type Interface as ReadlineInterface, createInterface } from 'node:readline';
 
-import type { Bot } from './bot.js';
-import type { Logger } from './logger.js';
+import type { Bot } from './bot';
+import type { Logger } from './logger';
 
 // ---------------------------------------------------------------------------
 // BotREPL

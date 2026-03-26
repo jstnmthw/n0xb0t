@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { HandlerContext } from '../src/types.js';
-import { type MockBot, createMockBot } from './helpers/mock-bot.js';
+import type { HandlerContext } from '../src/types';
+import { type MockBot, createMockBot } from './helpers/mock-bot';
 
 describe('Bot (mock)', () => {
   let bot: MockBot;

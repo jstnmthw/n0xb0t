@@ -1,12 +1,12 @@
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { Permissions } from '../../src/core/permissions.js';
-import { BotDatabase } from '../../src/database.js';
-import { EventDispatcher } from '../../src/dispatcher.js';
-import { BotEventBus } from '../../src/event-bus.js';
-import { PluginLoader } from '../../src/plugin-loader.js';
-import type { BotConfig, HandlerContext } from '../../src/types.js';
+import { Permissions } from '../../src/core/permissions';
+import { BotDatabase } from '../../src/database';
+import { EventDispatcher } from '../../src/dispatcher';
+import { BotEventBus } from '../../src/event-bus';
+import { PluginLoader } from '../../src/plugin-loader';
+import type { BotConfig, HandlerContext } from '../../src/types';
 
 const MINIMAL_BOT_CONFIG: BotConfig = {
   irc: {

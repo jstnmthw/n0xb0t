@@ -3,7 +3,7 @@
 import Database from 'better-sqlite3';
 import type { Database as DatabaseType, Statement } from 'better-sqlite3';
 
-import type { Logger } from './logger.js';
+import type { Logger } from './logger';
 
 // ---------------------------------------------------------------------------
 // Types

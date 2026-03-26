@@ -1,7 +1,7 @@
 // hexbot — Dispatcher inspection commands
 // Registers .binds with the command handler.
-import type { CommandHandler } from '../../command-handler.js';
-import type { EventDispatcher } from '../../dispatcher.js';
+import type { CommandHandler } from '../../command-handler';
+import type { EventDispatcher } from '../../dispatcher';
 
 /**
  * Register dispatcher inspection commands on the given command handler.

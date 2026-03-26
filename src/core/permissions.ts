@@ -1,9 +1,9 @@
 // hexbot — Permissions system
 // Hostmask-based identity, n/m/o/v flags with per-channel overrides.
-import type { BotDatabase } from '../database.js';
-import type { Logger } from '../logger.js';
-import type { HandlerContext, UserRecord } from '../types.js';
-import { type Casemapping, ircLower, wildcardMatch } from '../utils/wildcard.js';
+import type { BotDatabase } from '../database';
+import type { Logger } from '../logger';
+import type { HandlerContext, UserRecord } from '../types';
+import { type Casemapping, ircLower, wildcardMatch } from '../utils/wildcard';
 
 // ---------------------------------------------------------------------------
 // Constants

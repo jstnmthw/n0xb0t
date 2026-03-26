@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { EventDispatcher } from '../src/dispatcher.js';
-import { BotEventBus } from '../src/event-bus.js';
-import { IRCBridge } from '../src/irc-bridge.js';
-import { Logger, createLogger } from '../src/logger.js';
-import type { HandlerContext } from '../src/types.js';
-import { MockIRCClient } from './helpers/mock-irc.js';
+import { EventDispatcher } from '../src/dispatcher';
+import { BotEventBus } from '../src/event-bus';
+import { IRCBridge } from '../src/irc-bridge';
+import { Logger, createLogger } from '../src/logger';
+import type { HandlerContext } from '../src/types';
+import { MockIRCClient } from './helpers/mock-irc';
 
 describe('IRCBridge', () => {
   let client: MockIRCClient;

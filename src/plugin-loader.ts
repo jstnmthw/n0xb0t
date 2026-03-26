@@ -4,15 +4,15 @@ import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import type { ChannelState } from './core/channel-state.js';
-import type { IRCCommands } from './core/irc-commands.js';
-import type { MessageQueue } from './core/message-queue.js';
-import type { Permissions } from './core/permissions.js';
-import type { Services } from './core/services.js';
-import type { BotDatabase } from './database.js';
-import type { EventDispatcher } from './dispatcher.js';
-import type { BotEventBus } from './event-bus.js';
-import type { Logger } from './logger.js';
+import type { ChannelState } from './core/channel-state';
+import type { IRCCommands } from './core/irc-commands';
+import type { MessageQueue } from './core/message-queue';
+import type { Permissions } from './core/permissions';
+import type { Services } from './core/services';
+import type { BotDatabase } from './database';
+import type { EventDispatcher } from './dispatcher';
+import type { BotEventBus } from './event-bus';
+import type { Logger } from './logger';
 import type {
   BindHandler,
   BindType,
@@ -24,9 +24,9 @@ import type {
   PluginPermissions,
   PluginServices,
   PluginsConfig,
-} from './types.js';
-import { sanitize } from './utils/sanitize.js';
-import { ircLower } from './utils/wildcard.js';
+} from './types';
+import { sanitize } from './utils/sanitize';
+import { ircLower } from './utils/wildcard';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -628,7 +628,7 @@ export class PluginLoader {
 
   /** Rewrite relative import specifiers to add cache-busting query strings. */
   private rewriteLocalImports(source: string, timestamp: number): string {
-    // Static: from './foo.js' or from '../foo.js'
+    // Static: from './foo' or from '../foo'
     let result = source.replace(
       /(from\s+['"])(\.\.?\/[^?'"]+)(['"])/g,
       (_, pre: string, spec: string, post: string) => `${pre}${spec}?t=${timestamp}${post}`,

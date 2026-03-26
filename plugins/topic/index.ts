@@ -1,7 +1,7 @@
 // topic — IRC topic creator with color-coded themes
 // Sets channel topics using pre-built color theme borders.
-import type { HandlerContext, PluginAPI } from '../../src/types.js';
-import { themeNames, themes } from './themes.js';
+import type { HandlerContext, PluginAPI } from '../../src/types';
+import { themeNames, themes } from './themes';
 
 export const name = 'topic';
 export const version = '1.0.0';

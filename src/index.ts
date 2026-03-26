@@ -1,7 +1,7 @@
 // hexbot — Entry point
 // Parses CLI args, starts the bot, optionally starts the REPL.
-import { Bot } from './bot.js';
-import { BotREPL } from './repl.js';
+import { Bot } from './bot';
+import { BotREPL } from './repl';
 
 // ---------------------------------------------------------------------------
 // CLI argument parsing

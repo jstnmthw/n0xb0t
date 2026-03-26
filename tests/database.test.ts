@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { BotDatabase } from '../src/database.js';
+import { BotDatabase } from '../src/database';
 
 describe('BotDatabase', () => {
   let db: BotDatabase;

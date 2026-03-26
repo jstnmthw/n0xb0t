@@ -7,25 +7,25 @@ import { accessSync, constants as fsConstants, mkdirSync, readFileSync, statSync
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { CommandHandler } from './command-handler.js';
-import { ChannelState } from './core/channel-state.js';
-import { registerDispatcherCommands } from './core/commands/dispatcher-commands.js';
-import { registerIRCAdminCommands } from './core/commands/irc-commands-admin.js';
-import { registerPermissionCommands } from './core/commands/permission-commands.js';
-import { registerPluginCommands } from './core/commands/plugin-commands.js';
-import { DCCManager } from './core/dcc.js';
-import { IRCCommands } from './core/irc-commands.js';
-import { MessageQueue } from './core/message-queue.js';
-import { Permissions } from './core/permissions.js';
-import { Services } from './core/services.js';
-import { BotDatabase } from './database.js';
-import { EventDispatcher } from './dispatcher.js';
-import { BotEventBus } from './event-bus.js';
-import { IRCBridge } from './irc-bridge.js';
-import { type Logger, createLogger } from './logger.js';
-import { PluginLoader } from './plugin-loader.js';
-import type { Casemapping } from './types.js';
-import type { BotConfig, ProxyConfig } from './types.js';
+import { CommandHandler } from './command-handler';
+import { ChannelState } from './core/channel-state';
+import { registerDispatcherCommands } from './core/commands/dispatcher-commands';
+import { registerIRCAdminCommands } from './core/commands/irc-commands-admin';
+import { registerPermissionCommands } from './core/commands/permission-commands';
+import { registerPluginCommands } from './core/commands/plugin-commands';
+import { DCCManager } from './core/dcc';
+import { IRCCommands } from './core/irc-commands';
+import { MessageQueue } from './core/message-queue';
+import { Permissions } from './core/permissions';
+import { Services } from './core/services';
+import { BotDatabase } from './database';
+import { EventDispatcher } from './dispatcher';
+import { BotEventBus } from './event-bus';
+import { IRCBridge } from './irc-bridge';
+import { type Logger, createLogger } from './logger';
+import { PluginLoader } from './plugin-loader';
+import type { Casemapping } from './types';
+import type { BotConfig, ProxyConfig } from './types';
 
 // ---------------------------------------------------------------------------
 // Helpers

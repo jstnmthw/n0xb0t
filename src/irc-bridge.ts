@@ -1,13 +1,13 @@
 // hexbot — IRC bridge
 // Translates irc-framework events into dispatcher events.
 // This is the trust boundary — all IRC data entering the dispatcher passes through here.
-import type { MessageQueue } from './core/message-queue.js';
-import type { EventDispatcher } from './dispatcher.js';
-import type { BotEventBus } from './event-bus.js';
-import type { Logger } from './logger.js';
-import type { HandlerContext } from './types.js';
-import { sanitize } from './utils/sanitize.js';
-import { splitMessage } from './utils/split-message.js';
+import type { MessageQueue } from './core/message-queue';
+import type { EventDispatcher } from './dispatcher';
+import type { BotEventBus } from './event-bus';
+import type { Logger } from './logger';
+import type { HandlerContext } from './types';
+import { sanitize } from './utils/sanitize';
+import { splitMessage } from './utils/split-message';
 
 // ---------------------------------------------------------------------------
 // Types

@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import type { PluginAPI } from '../../src/types.js';
+import type { PluginAPI } from '../../src/types';
 
 export const name = 'ctcp';
 export const version = '1.0.0';

@@ -1,8 +1,8 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { ChannelState } from '../../src/core/channel-state.js';
-import { BotEventBus } from '../../src/event-bus.js';
+import { ChannelState } from '../../src/core/channel-state';
+import { BotEventBus } from '../../src/event-bus';
 
 // ---------------------------------------------------------------------------
 // Mock IRC client

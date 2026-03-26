@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { Permissions } from '../../src/core/permissions.js';
-import { BotDatabase } from '../../src/database.js';
-import { createLogger } from '../../src/logger.js';
+import { Permissions } from '../../src/core/permissions';
+import { BotDatabase } from '../../src/database';
+import { createLogger } from '../../src/logger';
 
 describe('Permissions', () => {
   let perms: Permissions;

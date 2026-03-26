@@ -2,7 +2,7 @@
 // Provides auto-op/halfop/voice on join, mode enforcement, timed bans, cycle recovery,
 // and manual moderation commands: !op, !deop, !halfop, !dehalfop, !voice, !devoice,
 // !kick, !ban, !unban, !kickban, !bans.
-import type { HandlerContext, PluginAPI } from '../../src/types.js';
+import type { HandlerContext, PluginAPI } from '../../src/types';
 
 export const name = 'chanmod';
 export const version = '2.1.0';

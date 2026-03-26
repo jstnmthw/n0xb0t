@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { type CommandContext, CommandHandler } from '../../../src/command-handler.js';
+import { type CommandContext, CommandHandler } from '../../../src/command-handler';
 import {
   type AdminBotInfo,
   type AdminIRCClient,
   registerIRCAdminCommands,
-} from '../../../src/core/commands/irc-commands-admin.js';
+} from '../../../src/core/commands/irc-commands-admin';
 
 /** Helper: create a minimal CommandContext. */
 function makeCtx(overrides: Partial<CommandContext> = {}): CommandContext {

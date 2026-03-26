@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { caseCompare, ircLower, wildcardMatch } from '../../src/utils/wildcard.js';
+import { caseCompare, ircLower, wildcardMatch } from '../../src/utils/wildcard';
 
 describe('wildcardMatch', () => {
   describe('exact match', () => {

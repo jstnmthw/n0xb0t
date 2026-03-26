@@ -1,6 +1,6 @@
 // seen — Last-seen tracking plugin
 // Tracks when users were last active in a channel and responds to !seen queries.
-import type { HandlerContext, PluginAPI } from '../../src/types.js';
+import type { HandlerContext, PluginAPI } from '../../src/types';
 
 export const name = 'seen';
 export const version = '1.1.0';

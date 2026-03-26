@@ -1,7 +1,7 @@
 // hexbot — Permission management commands
 // Registers .adduser, .deluser, .flags, .users with the command handler.
-import type { CommandHandler } from '../../command-handler.js';
-import type { Permissions } from '../permissions.js';
+import type { CommandHandler } from '../../command-handler';
+import type { Permissions } from '../permissions';
 
 /**
  * Register permission management commands on the given command handler.

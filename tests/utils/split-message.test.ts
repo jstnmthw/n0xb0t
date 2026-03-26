@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { splitMessage } from '../../src/utils/split-message.js';
+import { splitMessage } from '../../src/utils/split-message';
 
 describe('splitMessage', () => {
   describe('word-boundary splitting', () => {

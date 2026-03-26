@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { Permissions } from '../../src/core/permissions.js';
-import { EventDispatcher } from '../../src/dispatcher.js';
-import type { HandlerContext } from '../../src/types.js';
+import { Permissions } from '../../src/core/permissions';
+import { EventDispatcher } from '../../src/dispatcher';
+import type { HandlerContext } from '../../src/types';
 
 /** Helper: create a minimal HandlerContext for testing. */
 function makeCtx(overrides: Partial<HandlerContext> = {}): HandlerContext {
