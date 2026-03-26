@@ -1,1 +1,1 @@
-{ "message": "Welcome to {channel}, {nick}!" }
+{ "message": "Welcome to {channel}, {nick}!", "allow_custom": false, "min_flag": "v" }

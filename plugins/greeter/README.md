@@ -1,10 +1,22 @@
 # greeter
 
-Greets users when they join a channel with a customizable message.
+Greets users when they join a channel. Registered users can set a personal greeting
+that replaces the default message when they join.
 
 ## Usage
 
-Automatic — fires on every JOIN event. No commands.
+Automatic — fires on every JOIN event.
+
+Optional user commands (when `allow_custom: true`):
+
+| Command                | Description                    |
+| ---------------------- | ------------------------------ |
+| `!greet`               | Show your current custom greet |
+| `!greet set <message>` | Set your custom greet          |
+| `!greet del`           | Remove your custom greet       |
+
+Custom greet messages support the same `{channel}` and `{nick}` template substitutions
+as the default message.
 
 ## Config
 
@@ -16,13 +28,28 @@ In `config/plugins.json`:
     "enabled": true,
     "config": {
       "message": "Welcome to {channel}, {nick}!",
-      "botNick": "hexbot"
+      "allow_custom": true,
+      "min_flag": "v"
     }
   }
 }
 ```
 
-| Key       | Type   | Default                         | Description                                               |
-| --------- | ------ | ------------------------------- | --------------------------------------------------------- |
-| `message` | string | `Welcome to {channel}, {nick}!` | Greeting template. `{channel}` and `{nick}` are replaced. |
-| `botNick` | string | `""`                            | The bot's nick — the plugin won't greet itself.           |
+| Key            | Type    | Default                         | Description                                                |
+| -------------- | ------- | ------------------------------- | ---------------------------------------------------------- |
+| `message`      | string  | `Welcome to {channel}, {nick}!` | Default greeting template. Supports `{channel}`, `{nick}`. |
+| `allow_custom` | boolean | `false`                         | Enable user-settable custom greets.                        |
+| `min_flag`     | string  | `"v"`                           | Minimum bot flag required to set/remove a greet.           |
+
+### `min_flag` values
+
+Uses the `n > m > o > v` privilege hierarchy. Setting `"o"` means op or higher can set greets.
+
+| Value | Who can set a greet |
+| ----- | ------------------- |
+| `"n"` | Owner only          |
+| `"m"` | Master or higher    |
+| `"o"` | Op or higher        |
+| `"v"` | Voice or higher     |
+
+> Note: the bot's flag system (`n/m/o/v`) has no halfop level. "Above halfop" maps to `"o"`.
