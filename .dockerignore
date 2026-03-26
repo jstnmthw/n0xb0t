@@ -1,0 +1,10 @@
+node_modules
+dist
+data
+config/bot.json
+config/plugins.json
+coverage
+.claude
+.git
+*.log
+*.db

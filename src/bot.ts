@@ -3,7 +3,7 @@
 // pieces but delegates all real work to the individual modules.
 import chalk from 'chalk';
 import { Client as IrcClient } from 'irc-framework';
-import { accessSync, constants as fsConstants, readFileSync, statSync } from 'node:fs';
+import { accessSync, constants as fsConstants, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -88,6 +88,10 @@ export class Bot {
     // Create root logger from config level
     this.logger = createLogger(this.config.logging.level);
     this.botLogger = this.logger.child('bot');
+
+    // Ensure the database directory exists (e.g. data/)
+    const dbDir = dirname(resolve(this.config.database));
+    mkdirSync(dbDir, { recursive: true });
 
     this.db = new BotDatabase(this.config.database, this.logger);
     this.eventBus = new BotEventBus();

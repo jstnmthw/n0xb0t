@@ -13,11 +13,16 @@ import { BotEventBus } from '../src/event-bus.js';
 import { Logger } from '../src/logger.js';
 import { PluginLoader } from '../src/plugin-loader.js';
 import type { PluginLoaderDeps } from '../src/plugin-loader.js';
-import type { BotConfig } from '../src/types.js';
+import type { BotConfig, PluginAPI } from '../src/types.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Retrieve the PluginAPI stashed on globalThis by test plugins during init(). */
+function getTestPluginApi(): PluginAPI {
+  return (globalThis as Record<string, unknown>).__testPluginApi as PluginAPI;
+}
 
 function makeTempDir(): string {
   const dir = join(tmpdir(), `hexbot-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -164,6 +169,7 @@ describe('PluginLoader', () => {
 
   beforeEach(() => {
     tempDir = makeTempDir();
+    (globalThis as Record<string, unknown>).__testPluginApi = undefined;
   });
 
   afterEach(() => {
@@ -692,11 +698,9 @@ describe('PluginLoader', () => {
         export const name = 'null-irc';
         export const version = '1.0.0';
         export const description = '';
-        let savedApi;
         export function init(api) {
-          savedApi = api;
+          globalThis.__testPluginApi = api;
         }
-        export function getApi() { return savedApi; }
       `,
       );
 
@@ -704,9 +708,7 @@ describe('PluginLoader', () => {
       const { loader } = createLoader(tempDir);
       await loader.load(pluginPath);
 
-      // Import the module to call getApi()
-      const mod = await import(join(tempDir, 'null-irc', 'index.ts') + `?t=${Date.now()}`);
-      const api = mod.getApi();
+      const api = getTestPluginApi();
 
       // All IRC methods should be no-ops when ircClient is null
       expect(() => api.say('#test', 'hello')).not.toThrow();
@@ -725,17 +727,14 @@ describe('PluginLoader', () => {
         export const name = 'real-irc';
         export const version = '1.0.0';
         export const description = '';
-        let savedApi;
-        export function init(api) { savedApi = api; }
-        export function getApi() { return savedApi; }
+        export function init(api) { globalThis.__testPluginApi = api; }
       `,
       );
 
       const { loader, mockIrcClient } = createLoaderFull(tempDir);
       await loader.load(pluginPath);
 
-      const mod = await import(join(tempDir, 'real-irc', 'index.ts') + `?t=${Date.now()}`);
-      const api = mod.getApi();
+      const api = getTestPluginApi();
 
       api.say('#chan', 'hello');
       expect(mockIrcClient.say).toHaveBeenCalledWith('#chan', 'hello');
@@ -760,9 +759,7 @@ describe('PluginLoader', () => {
         export const name = 'null-cmds';
         export const version = '1.0.0';
         export const description = '';
-        let savedApi;
-        export function init(api) { savedApi = api; }
-        export function getApi() { return savedApi; }
+        export function init(api) { globalThis.__testPluginApi = api; }
       `,
       );
 
@@ -770,8 +767,7 @@ describe('PluginLoader', () => {
       const { loader } = createLoader(tempDir);
       await loader.load(pluginPath);
 
-      const mod = await import(join(tempDir, 'null-cmds', 'index.ts') + `?t=${Date.now()}`);
-      const api = mod.getApi();
+      const api = getTestPluginApi();
 
       expect(() => api.op('#test', 'nick')).not.toThrow();
       expect(() => api.deop('#test', 'nick')).not.toThrow();
@@ -793,9 +789,7 @@ describe('PluginLoader', () => {
         export const name = 'real-cmds';
         export const version = '1.0.0';
         export const description = '';
-        let savedApi;
-        export function init(api) { savedApi = api; }
-        export function getApi() { return savedApi; }
+        export function init(api) { globalThis.__testPluginApi = api; }
       `,
       );
 
@@ -810,8 +804,7 @@ describe('PluginLoader', () => {
       vi.spyOn(ircCommands, 'topic');
       await loader.load(pluginPath);
 
-      const mod = await import(join(tempDir, 'real-cmds', 'index.ts') + `?t=${Date.now()}`);
-      const api = mod.getApi();
+      const api = getTestPluginApi();
 
       api.op('#ch', 'nick');
       expect(ircCommands.op).toHaveBeenCalledWith('#ch', 'nick');
@@ -848,9 +841,7 @@ describe('PluginLoader', () => {
         export const name = 'null-chan';
         export const version = '1.0.0';
         export const description = '';
-        let savedApi;
-        export function init(api) { savedApi = api; }
-        export function getApi() { return savedApi; }
+        export function init(api) { globalThis.__testPluginApi = api; }
       `,
       );
 
@@ -858,8 +849,7 @@ describe('PluginLoader', () => {
       const { loader } = createLoader(tempDir);
       await loader.load(pluginPath);
 
-      const mod = await import(join(tempDir, 'null-chan', 'index.ts') + `?t=${Date.now()}`);
-      const api = mod.getApi();
+      const api = getTestPluginApi();
 
       expect(api.getChannel('#test')).toBeUndefined();
       expect(api.getUsers('#test')).toEqual([]);
@@ -876,9 +866,7 @@ describe('PluginLoader', () => {
         export const name = 'real-chan';
         export const version = '1.0.0';
         export const description = '';
-        let savedApi;
-        export function init(api) { savedApi = api; }
-        export function getApi() { return savedApi; }
+        export function init(api) { globalThis.__testPluginApi = api; }
       `,
       );
 
@@ -905,20 +893,19 @@ describe('PluginLoader', () => {
         });
       }
 
-      const mod = await import(join(tempDir, 'real-chan', 'index.ts') + `?t=${Date.now()}`);
-      const api = mod.getApi();
+      const api = getTestPluginApi();
 
       const ch = api.getChannel('#test');
       expect(ch).toBeDefined();
-      expect(ch.name).toBe('#test');
-      expect(ch.users.size).toBe(1);
-      const user = ch.users.get('testuser');
+      expect(ch!.name).toBe('#test');
+      expect(ch!.users.size).toBe(1);
+      const user = ch!.users.get('testuser');
       expect(user).toBeDefined();
-      expect(user.nick).toBe('testuser');
-      expect(user.ident).toBe('user');
-      expect(user.hostname).toBe('host.example.com');
-      expect(user.modes).toBe('');
-      expect(typeof user.joinedAt).toBe('number');
+      expect(user!.nick).toBe('testuser');
+      expect(user!.ident).toBe('user');
+      expect(user!.hostname).toBe('host.example.com');
+      expect(user!.modes).toBe('');
+      expect(typeof user!.joinedAt).toBe('number');
 
       const users = api.getUsers('#test');
       expect(users).toHaveLength(1);
@@ -936,17 +923,14 @@ describe('PluginLoader', () => {
         export const name = 'no-chan';
         export const version = '1.0.0';
         export const description = '';
-        let savedApi;
-        export function init(api) { savedApi = api; }
-        export function getApi() { return savedApi; }
+        export function init(api) { globalThis.__testPluginApi = api; }
       `,
       );
 
       const { loader } = createLoaderFull(tempDir);
       await loader.load(pluginPath);
 
-      const mod = await import(join(tempDir, 'no-chan', 'index.ts') + `?t=${Date.now()}`);
-      const api = mod.getApi();
+      const api = getTestPluginApi();
 
       expect(api.getChannel('#nonexistent')).toBeUndefined();
       expect(api.getUsers('#nonexistent')).toEqual([]);
@@ -963,9 +947,7 @@ describe('PluginLoader', () => {
         export const name = 'null-svc';
         export const version = '1.0.0';
         export const description = '';
-        let savedApi;
-        export function init(api) { savedApi = api; }
-        export function getApi() { return savedApi; }
+        export function init(api) { globalThis.__testPluginApi = api; }
       `,
       );
 
@@ -973,8 +955,7 @@ describe('PluginLoader', () => {
       const { loader } = createLoader(tempDir);
       await loader.load(pluginPath);
 
-      const mod = await import(join(tempDir, 'null-svc', 'index.ts') + `?t=${Date.now()}`);
-      const api = mod.getApi();
+      const api = getTestPluginApi();
 
       const result = await api.services.verifyUser('someone');
       expect(result).toEqual({ verified: false, account: null });
@@ -991,9 +972,7 @@ describe('PluginLoader', () => {
         export const name = 'null-log';
         export const version = '1.0.0';
         export const description = '';
-        let savedApi;
-        export function init(api) { savedApi = api; }
-        export function getApi() { return savedApi; }
+        export function init(api) { globalThis.__testPluginApi = api; }
       `,
       );
 
@@ -1001,8 +980,7 @@ describe('PluginLoader', () => {
       const { loader } = createLoader(tempDir);
       await loader.load(pluginPath);
 
-      const mod = await import(join(tempDir, 'null-log', 'index.ts') + `?t=${Date.now()}`);
-      const api = mod.getApi();
+      const api = getTestPluginApi();
 
       expect(() => api.log('test message')).not.toThrow();
       expect(() => api.error('error msg')).not.toThrow();
@@ -1018,17 +996,14 @@ describe('PluginLoader', () => {
         export const name = 'with-log';
         export const version = '1.0.0';
         export const description = '';
-        let savedApi;
-        export function init(api) { savedApi = api; }
-        export function getApi() { return savedApi; }
+        export function init(api) { globalThis.__testPluginApi = api; }
       `,
       );
 
       const { loader } = createLoaderFull(tempDir);
       await loader.load(pluginPath);
 
-      const mod = await import(join(tempDir, 'with-log', 'index.ts') + `?t=${Date.now()}`);
-      const api = mod.getApi();
+      const api = getTestPluginApi();
 
       // These should work without error (logger exists)
       expect(() => api.log('test')).not.toThrow();
@@ -1047,9 +1022,7 @@ describe('PluginLoader', () => {
         export const name = 'null-db';
         export const version = '1.0.0';
         export const description = '';
-        let savedApi;
-        export function init(api) { savedApi = api; }
-        export function getApi() { return savedApi; }
+        export function init(api) { globalThis.__testPluginApi = api; }
       `,
       );
 
@@ -1069,8 +1042,7 @@ describe('PluginLoader', () => {
 
       await loader.load(pluginPath);
 
-      const mod = await import(join(tempDir, 'null-db', 'index.ts') + `?t=${Date.now()}`);
-      const api = mod.getApi();
+      const api = getTestPluginApi();
 
       expect(api.db.get('key')).toBeUndefined();
       expect(() => api.db.set('key', 'val')).not.toThrow();
@@ -1089,9 +1061,7 @@ describe('PluginLoader', () => {
         export const name = 'no-config';
         export const version = '1.0.0';
         export const description = '';
-        let savedApi;
-        export function init(api) { savedApi = api; }
-        export function getApi() { return savedApi; }
+        export function init(api) { globalThis.__testPluginApi = api; }
       `,
       );
 
@@ -1102,8 +1072,7 @@ describe('PluginLoader', () => {
       const { loader } = createLoader(tempDir);
       await loader.load(pluginPath, pluginsConfig);
 
-      const mod = await import(join(tempDir, 'no-config', 'index.ts') + `?t=${Date.now()}`);
-      const api = mod.getApi();
+      const api = getTestPluginApi();
 
       expect(api.config.key1).toBe('val1');
     });
@@ -1121,9 +1090,7 @@ describe('PluginLoader', () => {
         export const name = 'bad-config';
         export const version = '1.0.0';
         export const description = '';
-        let savedApi;
-        export function init(api) { savedApi = api; }
-        export function getApi() { return savedApi; }
+        export function init(api) { globalThis.__testPluginApi = api; }
       `,
       );
 
@@ -1141,9 +1108,7 @@ describe('PluginLoader', () => {
         export const name = 'empty-cfg';
         export const version = '1.0.0';
         export const description = '';
-        let savedApi;
-        export function init(api) { savedApi = api; }
-        export function getApi() { return savedApi; }
+        export function init(api) { globalThis.__testPluginApi = api; }
       `,
       );
 
@@ -1151,8 +1116,7 @@ describe('PluginLoader', () => {
       // Load without pluginsConfig argument
       await loader.load(pluginPath);
 
-      const mod = await import(join(tempDir, 'empty-cfg', 'index.ts') + `?t=${Date.now()}`);
-      const api = mod.getApi();
+      const api = getTestPluginApi();
 
       // Config should be an empty (frozen) object
       expect(Object.keys(api.config)).toHaveLength(0);
@@ -1206,17 +1170,14 @@ describe('PluginLoader', () => {
         export const name = 'supports-test';
         export const version = '1.0.0';
         export const description = '';
-        let savedApi;
-        export function init(api) { savedApi = api; }
-        export function getApi() { return savedApi; }
+        export function init(api) { globalThis.__testPluginApi = api; }
       `,
       );
 
       const { loader } = createLoader(tempDir);
       await loader.load(pluginPath);
 
-      const mod = await import(join(tempDir, 'supports-test', 'index.ts') + `?t=${Date.now()}`);
-      const api = mod.getApi();
+      const api = getTestPluginApi();
 
       expect(api.getServerSupports()).toEqual({});
     });
@@ -1231,17 +1192,14 @@ describe('PluginLoader', () => {
         export const name = 'perm-test';
         export const version = '1.0.0';
         export const description = '';
-        let savedApi;
-        export function init(api) { savedApi = api; }
-        export function getApi() { return savedApi; }
+        export function init(api) { globalThis.__testPluginApi = api; }
       `,
       );
 
       const { loader } = createLoader(tempDir);
       await loader.load(pluginPath);
 
-      const mod = await import(join(tempDir, 'perm-test', 'index.ts') + `?t=${Date.now()}`);
-      const api = mod.getApi();
+      const api = getTestPluginApi();
 
       // Permissions API should be available and return null for unknown hostmask
       expect(api.permissions.findByHostmask('nobody!nobody@nowhere')).toBeNull();
@@ -1255,19 +1213,16 @@ describe('PluginLoader', () => {
         export const name = 'cfg-test';
         export const version = '1.0.0';
         export const description = '';
-        let savedApi;
-        export function init(api) { savedApi = api; }
-        export function getApi() { return savedApi; }
+        export function init(api) { globalThis.__testPluginApi = api; }
       `,
       );
 
       const { loader } = createLoader(tempDir);
       await loader.load(pluginPath);
 
-      const mod = await import(join(tempDir, 'cfg-test', 'index.ts') + `?t=${Date.now()}`);
-      const api = mod.getApi();
+      const api = getTestPluginApi();
 
-      expect(api.botConfig.irc.nick).toBe('test');
+      expect((api.botConfig.irc as Record<string, unknown>).nick).toBe('test');
       expect(api.botConfig.services).toBeDefined();
       expect((api.botConfig.services as Record<string, unknown>).password).toBeUndefined();
     });
@@ -1379,9 +1334,7 @@ describe('PluginLoader', () => {
         export const name = 'db-ops';
         export const version = '1.0.0';
         export const description = '';
-        let savedApi;
-        export function init(api) { savedApi = api; }
-        export function getApi() { return savedApi; }
+        export function init(api) { globalThis.__testPluginApi = api; }
       `,
       );
 
@@ -1390,8 +1343,7 @@ describe('PluginLoader', () => {
       const { loader } = createLoader(tempDir, db);
       await loader.load(pluginPath);
 
-      const mod = await import(join(tempDir, 'db-ops', 'index.ts') + `?t=${Date.now()}`);
-      const api = mod.getApi();
+      const api = getTestPluginApi();
 
       api.db.set('key1', 'val1');
       api.db.set('key2', 'val2');
@@ -1420,17 +1372,14 @@ describe('PluginLoader', () => {
         export const name = 'check-flags';
         export const version = '1.0.0';
         export const description = '';
-        let savedApi;
-        export function init(api) { savedApi = api; }
-        export function getApi() { return savedApi; }
+        export function init(api) { globalThis.__testPluginApi = api; }
       `,
       );
 
       const { loader } = createLoader(tempDir);
       await loader.load(pluginPath);
 
-      const mod = await import(join(tempDir, 'check-flags', 'index.ts') + `?t=${Date.now()}`);
-      const api = mod.getApi();
+      const api = getTestPluginApi();
 
       const ctx = {
         nick: 'nobody',
@@ -1459,9 +1408,7 @@ describe('PluginLoader', () => {
         export const name = 'real-svc';
         export const version = '1.0.0';
         export const description = '';
-        let savedApi;
-        export function init(api) { savedApi = api; }
-        export function getApi() { return savedApi; }
+        export function init(api) { globalThis.__testPluginApi = api; }
       `,
       );
 
@@ -1470,8 +1417,7 @@ describe('PluginLoader', () => {
 
       await loader.load(pluginPath);
 
-      const mod = await import(join(tempDir, 'real-svc', 'index.ts') + `?t=${Date.now()}`);
-      const api = mod.getApi();
+      const api = getTestPluginApi();
 
       const result = await api.services.verifyUser('someone');
       expect(result).toEqual({ verified: true, account: 'testacct' });

@@ -75,6 +75,21 @@ See [plugins/README.md](plugins/README.md) for the full plugin authoring guide, 
 - **DCC CHAT / party line** — users connect directly via DCC CHAT for an admin party-line session; configure via `dcc` in `bot.json` (see [docs/DCC.md](docs/DCC.md))
 - **IRC CASEMAPPING** — reads the server's `CASEMAPPING` ISUPPORT token and applies correct nick/channel folding (`rfc1459`, `strict-rfc1459`, or `ascii`) throughout all core modules and the plugin API (`api.ircLower()`)
 
+## Deploy with Docker
+
+```bash
+git clone <repo-url> && cd hexbot
+cp config/bot.example.json config/bot.json
+cp config/plugins.example.json config/plugins.json
+# Edit both files for your server, nick, and owner hostmask
+docker compose up -d
+docker compose logs -f
+```
+
+Plugins and config live on the host filesystem via bind mounts. Edit a plugin file and run `.reload <name>` in IRC to pick up changes — no rebuild needed.
+
+For non-Docker production use, `pnpm build` compiles to JS and `pnpm start:prod` runs the compiled output.
+
 ## Architecture
 
 See [DESIGN.md](DESIGN.md) for full architecture details.

@@ -20,7 +20,7 @@ Single distribution track: **clone the repo, configure, `docker compose up`**. D
 
 - [x] `src/index.ts` — SIGTERM/SIGINT handled
 - [x] `--config <path>` CLI flag working
-- [ ] `data/` directory auto-creation (currently fails if missing)
+- [x] `data/` directory auto-creation (currently fails if missing)
 
 ---
 
@@ -41,8 +41,8 @@ Single distribution track: **clone the repo, configure, `docker compose up`**. D
 
 **Goal:** The bot creates the `data/` directory on startup if it doesn't exist, so a fresh clone doesn't fail.
 
-- [ ] In `src/bot.ts` constructor, `mkdirSync(dirname(resolvedDbPath), { recursive: true })` before passing path to `BotDatabase`
-- [ ] **Verify:** Delete `data/`, run `pnpm start` — bot creates the directory and starts normally
+- [x] In `src/bot.ts` constructor, `mkdirSync(dirname(resolvedDbPath), { recursive: true })` before passing path to `BotDatabase`
+- [x] **Verify:** Delete `data/`, run `pnpm start` — bot creates the directory and starts normally
 
 ---
 
@@ -50,9 +50,9 @@ Single distribution track: **clone the repo, configure, `docker compose up`**. D
 
 **Goal:** Add `build` and `start:prod` for non-Docker production use.
 
-- [ ] Add `"build": "tsc"` to `package.json` scripts
-- [ ] Add `"start:prod": "node dist/src/index.js"` to `package.json` scripts
-- [ ] **Verify:** `pnpm build && pnpm start:prod --config config/bot.json` starts the bot
+- [x] Add `"build": "tsc"` to `package.json` scripts
+- [x] Add `"start:prod": "node dist/src/index.js"` to `package.json` scripts
+- [x] **Verify:** `pnpm build && pnpm start:prod --config config/bot.json` starts the bot
 
 ---
 
@@ -60,7 +60,7 @@ Single distribution track: **clone the repo, configure, `docker compose up`**. D
 
 **Goal:** `docker compose up` builds the image and starts the bot with mounted config, plugins, and data.
 
-- [ ] Create `.dockerignore`:
+- [x] Create `.dockerignore`:
 
   ```
   node_modules
@@ -75,7 +75,7 @@ Single distribution track: **clone the repo, configure, `docker compose up`**. D
   *.db
   ```
 
-- [ ] Create `Dockerfile`:
+- [x] Create `Dockerfile`:
 
   ```dockerfile
   FROM node:20-alpine
@@ -102,7 +102,7 @@ Single distribution track: **clone the repo, configure, `docker compose up`**. D
   - `plugins/`, `config/`, and `data/` are volume-mounted at runtime, not baked in.
   - `node_modules` is built inside the container, so `better-sqlite3` gets the correct native binary.
 
-- [ ] Create `docker-compose.yml`:
+- [x] Create `docker-compose.yml`:
 
   ```yaml
   services:
@@ -115,7 +115,7 @@ Single distribution track: **clone the repo, configure, `docker compose up`**. D
         - ./data:/app/data
   ```
 
-- [ ] **Verify:** `docker compose up --build` starts the bot. Editing a plugin on the host and running `.reload <plugin>` in IRC picks up changes.
+- [x] **Verify:** `docker compose up --build` starts the bot. Editing a plugin on the host and running `.reload <plugin>` in IRC picks up changes.
 
 ---
 
@@ -123,7 +123,7 @@ Single distribution track: **clone the repo, configure, `docker compose up`**. D
 
 **Goal:** CI runs lint, typecheck, and tests on every PR.
 
-- [ ] Create `.github/workflows/ci.yml`:
+- [x] Create `.github/workflows/ci.yml`:
   - Trigger: `push` to any branch, `pull_request` to `main`
   - Job `test`:
     - `actions/checkout`
@@ -134,7 +134,7 @@ Single distribution track: **clone the repo, configure, `docker compose up`**. D
     - `pnpm lint`
     - `pnpm test`
 
-- [ ] **Verify:** Push a branch, confirm CI runs and passes.
+- [x] **Verify:** Push a branch, confirm CI runs and passes.
 
 ---
 
@@ -142,15 +142,15 @@ Single distribution track: **clone the repo, configure, `docker compose up`**. D
 
 **Goal:** README documents the Docker quickstart.
 
-- [ ] Add "Deploy with Docker" section to `README.md`:
+- [x] Add "Deploy with Docker" section to `README.md`:
   1. Clone the repo
   2. `cp config/bot.example.json config/bot.json` — edit server, nick, owner
   3. `cp config/plugins.example.json config/plugins.json` — edit as needed
   4. `docker compose up -d`
   5. `docker compose logs -f`
-- [ ] Clarify that `pnpm start` = tsx (dev), `pnpm start:prod` = compiled JS (optional)
+- [x] Clarify that `pnpm start` = tsx (dev), `pnpm start:prod` = compiled JS (optional)
 
-- [ ] **Verify:** README renders cleanly on GitHub.
+- [x] **Verify:** README renders cleanly on GitHub.
 
 ---
 

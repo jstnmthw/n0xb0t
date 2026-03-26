@@ -1,12 +1,12 @@
 {
   "irc": {
-    "host": "irc.libera.chat",
+    "host": "irc.rizon.net",
     "port": 6697,
     "tls": true,
     "nick": "Hexbot",
     "username": "hexbot",
     "realname": "Hexbot IRC Bot",
-    "channels": ["#hexbot-test"]
+    "channels": ["#hexbot"]
   },
   "owner": {
     "handle": "admin",

@@ -1,0 +1,8 @@
+services:
+  hexbot:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - ./config:/app/config
+      - ./plugins:/app/plugins
+      - ./data:/app/data
