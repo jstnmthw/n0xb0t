@@ -68,7 +68,7 @@ hexbot/
     "tls": true,
     "nick": "hexbot",
     "username": "hexbot",
-    "realname": "hexbot IRC Framework",
+    "realname": "hexbot IRC Bot",
     "channels": ["#hexbot-test"]
   },
   "owner": {

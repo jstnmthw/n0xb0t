@@ -5,7 +5,7 @@
     "tls": true,
     "nick": "Hexbot",
     "username": "hexbot",
-    "realname": "Hexbot IRC Framework",
+    "realname": "Hexbot IRC Bot",
     "channels": ["#hexbot-test"]
   },
   "owner": {

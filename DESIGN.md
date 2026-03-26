@@ -313,7 +313,7 @@ Each plugin accesses its own namespace via `api.db`. Core modules use reserved n
     "tls": true,
     "nick": "hexbot",
     "username": "hexbot",
-    "realname": "hexbot IRC Framework",
+    "realname": "hexbot IRC Bot",
     "channels": ["#mychannel"]
   },
   "owner": {
