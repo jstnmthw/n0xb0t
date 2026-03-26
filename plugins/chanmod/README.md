@@ -1,6 +1,6 @@
 # chanmod
 
-Channel operator tools: auto-op/halfop/voice on join, mode enforcement, timed bans, and manual moderation commands.
+Channel operator tools: auto-op/halfop/voice on join, mode enforcement, timed bans, Eggdrop-style channel protection, and manual moderation commands.
 
 ## Commands
 
@@ -38,6 +38,44 @@ Modes applied by `!deop`, `!dehalfop`, and `!devoice` are marked intentional and
 
 With `enforce_channel_modes` set (e.g. `"nt"`), the bot re-applies those channel modes if they are ever removed. This is enforced at join and on any `-mode` change. Nicks in `nodesynch_nicks` (default: `["ChanServ"]`) are exempt.
 
+## Bitch mode
+
+With `bitch: true`, the bot strips `+o` and `+h` from anyone who receives them without the corresponding flag in `op_flags` or `halfop_flags`. This is a strict op-control mode: only users already in the permissions database may hold ops.
+
+Exemptions:
+
+- The bot itself is never stripped
+- Nicks in `nodesynch_nicks` (default: `["ChanServ"]`) are exempt as setters — ops granted by ChanServ are not reverted
+
+## Punish deop
+
+With `punish_deop: true`, the bot responds to unauthorized deops: when someone without op authority (`op_flags`) removes ops from a flagged user, the bot punishes the setter according to `punish_action`. This is independent of `enforce_modes` — both can be enabled together, causing the bot to simultaneously re-op the victim and kick the offender.
+
+- `punish_action: "kick"` (default) — kicks the setter
+- `punish_action: "kickban"` — bans then kicks the setter
+
+Rate-limited to 2 punishments per setter per 30 seconds to avoid escalation. Nicks in `nodesynch_nicks` are always exempt.
+
+## Enforcebans
+
+With `enforcebans: true`, the bot kicks any users already in the channel whose hostmask matches a newly-set ban mask. This mirrors Eggdrop's `+enforcebans` and ensures that setting `+b *!*@evil.host` actually removes the matching user rather than just preventing them from rejoining.
+
+The ban mask is tested against `nick!ident@hostname` using IRC-aware wildcard matching (`*` and `?`). The bot itself is never kicked.
+
+## Rejoin on kick
+
+With `rejoin_on_kick: true` (default), the bot rejoins any channel it is kicked from after `rejoin_delay_ms`. To prevent a kick loop, rejoins are rate-limited: if the bot is kicked more than `max_rejoin_attempts` times within `rejoin_attempt_window_ms`, it stops trying.
+
+## Revenge
+
+With `revenge_on_kick: true`, after rejoining the bot takes action against the user who kicked it. The action is taken `revenge_delay_ms` after the rejoin, giving time for ChanServ to restore ops first. Revenge is skipped if the kicker has left the channel, the bot has no ops, or the kicker has a flag in `revenge_exempt_flags` (default: `"nm"` — owners and masters).
+
+| `revenge_action` | Behavior                                    |
+| ---------------- | ------------------------------------------- |
+| `"deop"`         | Removes ops from the kicker (default)       |
+| `"kick"`         | Kicks the kicker with `revenge_kick_reason` |
+| `"kickban"`      | Bans (`*!*@host`) then kicks the kicker     |
+
 ## Timed bans
 
 `!ban` and `!kickban` store a ban record in the bot's database. Every 60 seconds, and on startup, chanmod lifts any expired bans in channels where it holds ops. Duration defaults to `default_ban_duration` (120 minutes). Pass `0` for a permanent ban.
@@ -62,38 +100,95 @@ Cloaked hosts (containing `/`) always use type 1 regardless of the setting.
 
 With `cycle_on_deop: true`, if the bot itself is deopped three times within 10 seconds in a channel (without invite-only mode set), it will part and rejoin after `cycle_delay_ms` to attempt to regain ops via ChanServ. This is a recovery mechanism for channels with auto-op services.
 
+## Eggdrop comparison
+
+| Eggdrop setting        | chanmod equivalent                                 | Default        |
+| ---------------------- | -------------------------------------------------- | -------------- |
+| `+protectops` (re-op)  | `enforce_modes`                                    | `false`        |
+| `+protectops` (punish) | `punish_deop`                                      | `false`        |
+| `+bitch`               | `bitch`                                            | `false`        |
+| `+enforcebans`         | `enforcebans`                                      | `false`        |
+| `+cycle`               | `cycle_on_deop`                                    | `false`        |
+| bot kick → rejoin      | `rejoin_on_kick`                                   | `true`         |
+| `+revengebot` mode 0   | `revenge_on_kick: true, revenge_action: "deop"`    | —              |
+| `+revengebot` mode 2   | `revenge_on_kick: true, revenge_action: "kick"`    | —              |
+| `+revengebot` mode 3   | `revenge_on_kick: true, revenge_action: "kickban"` | —              |
+| `+nodesynch`           | `nodesynch_nicks`                                  | `["ChanServ"]` |
+
 ## Config
 
-| Key                     | Type     | Default         | Description                                                              |
-| ----------------------- | -------- | --------------- | ------------------------------------------------------------------------ |
-| `auto_op`               | boolean  | `true`          | Auto-op/halfop/voice flagged users on join                               |
-| `op_flags`              | string[] | `["n","m","o"]` | Flags that grant auto-op                                                 |
-| `halfop_flags`          | string[] | `[]`            | Flags that grant auto-halfop (between op and voice; disabled by default) |
-| `voice_flags`           | string[] | `["v"]`         | Flags that grant auto-voice (when no op/halfop flag matches)             |
-| `enforce_modes`         | boolean  | `false`         | Re-op/halfop/voice flagged users if externally deopped/devoiced          |
-| `enforce_channel_modes` | string   | `""`            | Channel modes to enforce (e.g. `"nt"`)                                   |
-| `nodesynch_nicks`       | string[] | `["ChanServ"]`  | Nicks exempt from channel mode enforcement                               |
-| `enforce_delay_ms`      | number   | `500`           | Delay before re-applying a mode, in milliseconds                         |
-| `notify_on_fail`        | boolean  | `false`         | NOTICE the user if NickServ verification fails on join                   |
-| `default_kick_reason`   | string   | `"Requested"`   | Kick reason when none is given                                           |
-| `default_ban_duration`  | number   | `120`           | Default ban duration in minutes; `0` = permanent                         |
-| `default_ban_type`      | number   | `3`             | Ban mask style (1, 2, or 3 — see above)                                  |
-| `cycle_on_deop`         | boolean  | `false`         | Part and rejoin to recover ops after repeated deops                      |
-| `cycle_delay_ms`        | number   | `5000`          | Delay before cycling, in milliseconds                                    |
+### Auto-op / mode enforcement
 
-Example `config/plugins.json` entry:
+| Key                     | Type     | Default         | Description                                                     |
+| ----------------------- | -------- | --------------- | --------------------------------------------------------------- |
+| `auto_op`               | boolean  | `true`          | Auto-op/halfop/voice flagged users on join                      |
+| `op_flags`              | string[] | `["n","m","o"]` | Flags that grant auto-op                                        |
+| `halfop_flags`          | string[] | `[]`            | Flags that grant auto-halfop (disabled by default)              |
+| `voice_flags`           | string[] | `["v"]`         | Flags that grant auto-voice (when no op/halfop flag matches)    |
+| `notify_on_fail`        | boolean  | `false`         | NOTICE the user if NickServ verification fails on join          |
+| `enforce_modes`         | boolean  | `false`         | Re-op/halfop/voice flagged users if externally deopped/devoiced |
+| `enforce_channel_modes` | string   | `""`            | Channel modes to enforce (e.g. `"nt"`)                          |
+| `nodesynch_nicks`       | string[] | `["ChanServ"]`  | Nicks exempt from bitch mode and channel mode enforcement       |
+| `enforce_delay_ms`      | number   | `500`           | Delay before re-applying a mode, in milliseconds                |
+| `bitch`                 | boolean  | `false`         | Strip `+o`/`+h` from anyone without the appropriate flag        |
+
+### Kick / ban defaults
+
+| Key                    | Type   | Default       | Description                                      |
+| ---------------------- | ------ | ------------- | ------------------------------------------------ |
+| `default_kick_reason`  | string | `"Requested"` | Kick reason when none is given                   |
+| `default_ban_duration` | number | `120`         | Default ban duration in minutes; `0` = permanent |
+| `default_ban_type`     | number | `3`           | Ban mask style (1, 2, or 3 — see above)          |
+
+### Punish deop / enforcebans
+
+| Key                  | Type               | Default                    | Description                                       |
+| -------------------- | ------------------ | -------------------------- | ------------------------------------------------- |
+| `punish_deop`        | boolean            | `false`                    | Kick/kickban anyone who deops a flagged user      |
+| `punish_action`      | `"kick"│"kickban"` | `"kick"`                   | Action taken against the setter                   |
+| `punish_kick_reason` | string             | `"Don't deop my friends."` | Kick reason used when punishing                   |
+| `enforcebans`        | boolean            | `false`                    | Kick users whose hostmask matches a newly-set ban |
+
+### Rejoin / revenge
+
+| Key                        | Type                      | Default            | Description                                                              |
+| -------------------------- | ------------------------- | ------------------ | ------------------------------------------------------------------------ |
+| `rejoin_on_kick`           | boolean                   | `true`             | Rejoin after being kicked                                                |
+| `rejoin_delay_ms`          | number                    | `5000`             | Delay before rejoining, in milliseconds                                  |
+| `max_rejoin_attempts`      | number                    | `3`                | Max rejoins within `rejoin_attempt_window_ms` before giving up           |
+| `rejoin_attempt_window_ms` | number                    | `300000`           | Window for the rejoin rate limit, in milliseconds                        |
+| `revenge_on_kick`          | boolean                   | `false`            | Take action against whoever kicked the bot                               |
+| `revenge_action`           | `"deop"│"kick"│"kickban"` | `"deop"`           | Action taken against the kicker                                          |
+| `revenge_delay_ms`         | number                    | `3000`             | Extra delay after rejoin before taking revenge, in milliseconds          |
+| `revenge_kick_reason`      | string                    | `"Don't kick me."` | Kick reason used for kick/kickban revenge                                |
+| `revenge_exempt_flags`     | string                    | `"nm"`             | Flags that exempt the kicker from revenge (each char is a separate flag) |
+
+### Cycle on deop
+
+| Key              | Type    | Default | Description                                         |
+| ---------------- | ------- | ------- | --------------------------------------------------- |
+| `cycle_on_deop`  | boolean | `false` | Part and rejoin to recover ops after repeated deops |
+| `cycle_delay_ms` | number  | `5000`  | Delay before cycling, in milliseconds               |
+
+## Example config
 
 ```json
 {
   "chanmod": {
     "enabled": true,
-    "channels": ["#mychannel"],
     "config": {
       "auto_op": true,
       "enforce_modes": true,
       "enforce_channel_modes": "nt",
-      "default_ban_duration": 60,
-      "cycle_on_deop": true
+      "bitch": false,
+      "punish_deop": false,
+      "enforcebans": true,
+      "rejoin_on_kick": true,
+      "rejoin_delay_ms": 5000,
+      "revenge_on_kick": false,
+      "revenge_action": "deop",
+      "cycle_on_deop": true,
+      "default_ban_duration": 60
     }
   }
 }
@@ -105,3 +200,5 @@ Example `config/plugins.json` entry:
 - `!ban` by nick requires the target to be present in the channel so their hostmask can be resolved. For absent users, pass an explicit mask: `!ban *!*@1.2.3.4`.
 - `!unban <nick>` works if the target is still in the channel — chanmod derives candidate masks from their hostmask and removes whichever one matches a stored record (or tries all three if no record is found). For absent users, provide an explicit mask: `!unban *!*@1.2.3.4`. Use `!bans` to list stored masks.
 - Timed bans are only lifted in channels where the bot has ops at the time the timer fires. Bans in channels the bot has left, or where it has lost ops, will not be lifted until it regains them.
+- Revenge fires after `rejoin_delay_ms + revenge_delay_ms`. If the bot has not received ops by then (e.g. ChanServ is slow), revenge is skipped silently.
+- `bitch` and `punish_deop` both exempt nicks in `nodesynch_nicks` to avoid conflicting with ChanServ mode grants.

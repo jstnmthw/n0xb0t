@@ -4,13 +4,15 @@ This directory contains all bot plugins. Each subdirectory is a self-contained p
 
 ## Included plugins
 
-| Plugin              | Commands                                                                    | Description                                                              |
-| ------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| [8ball](8ball/)     | `!8ball <question>`                                                         | Magic 8-ball responses                                                   |
-| [chanmod](chanmod/) | `!op`, `!deop`, `!voice`, `!devoice`, `!kick`, `!ban`, `!unban`, `!kickban` | Channel protection: auto-op/voice, mode enforcement, moderation commands |
-| [greeter](greeter/) | _(automatic)_                                                               | Greets users on channel join                                             |
-| [seen](seen/)       | `!seen <nick>`                                                              | Tracks when a user was last active                                       |
-| [topic](topic/)     | `!topic`, `!topics`                                                         | Set channel topics with IRC color themes                                 |
+| Plugin              | Commands                                                                                                     | Description                                                                                                              |
+| ------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| [8ball](8ball/)     | `!8ball <question>`                                                                                          | Magic 8-ball responses                                                                                                   |
+| [chanmod](chanmod/) | `!op`, `!deop`, `!halfop`, `!dehalfop`, `!voice`, `!devoice`, `!kick`, `!ban`, `!unban`, `!kickban`, `!bans` | Channel protection: auto-op/halfop/voice on join, mode enforcement, bitch/punish/enforcebans, rejoin/revenge, timed bans |
+| [ctcp](ctcp/)       | _(automatic)_                                                                                                | Replies to CTCP VERSION, PING, and TIME requests                                                                         |
+| [flood](flood/)     | _(automatic)_                                                                                                | Message/join/nick-change flood detection with configurable escalation                                                    |
+| [greeter](greeter/) | _(automatic)_                                                                                                | Greets users on channel join                                                                                             |
+| [seen](seen/)       | `!seen <nick>`                                                                                               | Tracks when a user was last active                                                                                       |
+| [topic](topic/)     | `!topic`, `!topics`                                                                                          | Set channel topics with IRC color themes                                                                                 |
 
 ## Creating a new plugin
 
@@ -234,6 +236,13 @@ Plugins can be reloaded at runtime (`.reload my-plugin`). Design for this:
 - Use `api.db` for state that should survive reloads, not module-level variables
 - Clean up non-bind resources (connections, file handles) in `teardown()`
 - Binds are removed automatically
+
+Multi-file plugins are fully supported — the loader recursively discovers all `.ts` files local to the plugin directory and cache-busts each one on reload. Import sibling modules with relative paths:
+
+```typescript
+// plugins/my-plugin/index.ts
+import { setupHelpers } from './helpers.js';
+```
 
 ### Complete example: a dice roller
 

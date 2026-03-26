@@ -55,15 +55,15 @@ Plugins live in `plugins/<name>/` and are enabled via `config/plugins.json`. The
 
 ### Included plugins
 
-| Plugin      | Commands                                                                                                     | Description                                                                                       |
-| ----------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| **8ball**   | `!8ball <question>`                                                                                          | Magic 8-ball responses                                                                            |
-| **chanmod** | `!op`, `!deop`, `!halfop`, `!dehalfop`, `!voice`, `!devoice`, `!kick`, `!ban`, `!unban`, `!kickban`, `!bans` | Channel protection: auto-op/halfop/voice on join, mode enforcement, timed bans, cycle recovery    |
-| **ctcp**    | _(automatic)_                                                                                                | Replies to CTCP VERSION, PING, and TIME requests                                                  |
-| **flood**   | _(automatic)_                                                                                                | Inbound flood protection: rate limiting, join/part spam, nick-change spam; escalating enforcement |
-| **greeter** | _(automatic)_                                                                                                | Greets users on channel join                                                                      |
-| **seen**    | `!seen <nick>`                                                                                               | Tracks when a user was last active                                                                |
-| **topic**   | `!topic <theme> <text>`, `!topic preview <theme> <text>`, `!topics`                                          | Set channel topics with IRC color-coded theme borders                                             |
+| Plugin      | Commands                                                                                                     | Description                                                                                                              |
+| ----------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| **8ball**   | `!8ball <question>`                                                                                          | Magic 8-ball responses                                                                                                   |
+| **chanmod** | `!op`, `!deop`, `!halfop`, `!dehalfop`, `!voice`, `!devoice`, `!kick`, `!ban`, `!unban`, `!kickban`, `!bans` | Channel protection: auto-op/halfop/voice on join, mode enforcement, bitch/punish/enforcebans, rejoin/revenge, timed bans |
+| **ctcp**    | _(automatic)_                                                                                                | Replies to CTCP VERSION, PING, and TIME requests                                                                         |
+| **flood**   | _(automatic)_                                                                                                | Inbound flood protection: rate limiting, join/part spam, nick-change spam; escalating enforcement                        |
+| **greeter** | _(automatic)_                                                                                                | Greets users on channel join                                                                                             |
+| **seen**    | `!seen <nick>`                                                                                               | Tracks when a user was last active                                                                                       |
+| **topic**   | `!topic <theme> <text>`, `!topic preview <theme> <text>`, `!topics`                                          | Set channel topics with IRC color-coded theme borders                                                                    |
 
 ### Writing plugins
 

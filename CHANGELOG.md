@@ -75,7 +75,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Prettier code formatting with `@trivago/prettier-plugin-sort-imports`
 - Husky pre-commit hook running lint-staged (format check) and typecheck
 - `pnpm format` / `pnpm format:check` scripts
-- Plugin hot-reload: transitive dependency cache-busting — rewrites local import URLs so re-imported sub-modules are also reloaded
+- Plugin hot-reload: multi-file plugin support — loader now recursively discovers all local `.ts` modules and creates uniquely-named temp copies for cache-busting, replacing the prior approach that only worked for single-file plugins; orphaned temp files are cleaned up on `loadAll()`
+- `chanmod` v2 — refactored into focused module files and extended with Eggdrop-style protection features:
+  - **Rejoin on kick** (`rejoin_on_kick`) — bot rejoins after being kicked, with configurable delay and rate-limiting (`max_rejoin_attempts` per `rejoin_attempt_window_ms`)
+  - **Revenge** (`revenge_on_kick`) — optionally deops, kicks, or kickbans the kicker after rejoining; skips if kicker has left, bot has no ops, or kicker has an exempt flag (`revenge_exempt_flags`)
+  - **Bitch mode** (`bitch`) — strips `+o`/`+h` from anyone who receives them without the appropriate permission flag; nodesynch nicks exempt
+  - **Punish deop** (`punish_deop`) — kicks or kickbans whoever deops a flagged user without authority; rate-limited to 2 per setter per 30 seconds
+  - **Enforcebans** (`enforcebans`) — kicks in-channel users whose hostmask matches a newly-set ban mask
 - ACC/STATUS fallback for NickServ verification (supports Atheme and Anope)
 - Deployment plan (`docs/plans/deployment.md`) — Docker + docker-compose, GitHub Actions CI/CD, systemd unit guide
 - REPL mirrors incoming private messages and notices (e.g. from ChanServ/NickServ) to the console using IRC-conventional `<nick>` / `-nick-` formatting
@@ -103,6 +109,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Seen plugin updated to v1.1.0 with TTL cleanup — records older than `max_age_days` (default 365) are automatically purged on query
 - Extracted `sanitize()` (newline stripping) into shared `src/utils/sanitize.ts`, replacing inline implementations in irc-bridge, irc-commands, and plugin-loader
 - Vitest config excludes `.claude/worktrees/` to prevent duplicate test runs
+- `chanmod` refactored into focused module files (`state.ts`, `helpers.ts`, `bans.ts`, `auto-op.ts`, `mode-enforce.ts`, `commands.ts`, `protection.ts`) using a shared-state dependency-injection pattern; each module exports a `setup*()` function returning a teardown callback
+- Plugin tests: `chanmod` and `topic` switched to `vi.useFakeTimers` + `advanceTimersByTimeAsync`; `8ball` and `seen` switched from `beforeEach` to `beforeAll` for shared setup — total ~2 s saved per run
 - `auto-op` plugin replaced by `chanmod` — subsumes auto-op/voice behavior and adds manual moderation commands and mode enforcement
 - CTCP handlers moved from irc-bridge core into the standalone `ctcp` plugin
 - Plugin API reference renamed from `docs/plugin-api.md` to `docs/PLUGIN_API.md`
