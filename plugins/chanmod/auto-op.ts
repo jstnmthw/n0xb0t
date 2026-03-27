@@ -4,14 +4,14 @@ import { botCanHalfop, botHasOps, isBotNick, parseModesSet } from './helpers';
 import type { ChanmodConfig, SharedState } from './state';
 
 export function setupAutoOp(api: PluginAPI, config: ChanmodConfig, state: SharedState): () => void {
-  const enforceChannelModeSet = parseModesSet(config.enforce_channel_modes);
-
   api.bind('join', '-', '*', async (ctx: HandlerContext) => {
     const { nick, channel } = ctx;
     if (!channel) return;
 
     // Bot joined — check if channel needs enforce_channel_modes applied
     if (isBotNick(api, nick)) {
+      const channelModes = api.channelSettings.get(channel, 'channel_modes') as string;
+      const enforceChannelModeSet = parseModesSet(channelModes);
       if (enforceChannelModeSet.size > 0) {
         const timer = setTimeout(() => {
           if (!botHasOps(api, channel)) return;
@@ -21,7 +21,7 @@ export function setupAutoOp(api: PluginAPI, config: ChanmodConfig, state: Shared
           if (missing.length > 0) {
             const modeString = '+' + missing.join('');
             api.mode(channel, modeString);
-            api.log(`Set channel modes ${modeString} on ${channel} (enforce_channel_modes)`);
+            api.log(`Set channel modes ${modeString} on ${channel} (channel_modes)`);
           }
         }, config.enforce_delay_ms);
         state.enforcementTimers.push(timer);
@@ -29,7 +29,8 @@ export function setupAutoOp(api: PluginAPI, config: ChanmodConfig, state: Shared
       return;
     }
 
-    if (!config.auto_op) return;
+    const autoOp = api.channelSettings.get(channel, 'auto_op') as boolean;
+    if (!autoOp) return;
 
     const { ident, hostname } = ctx;
     const fullHostmask = `${nick}!${ident}@${hostname}`;

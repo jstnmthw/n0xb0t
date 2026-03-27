@@ -222,6 +222,16 @@ export class EventDispatcher {
         // Match CTCP type (IRC case-insensitive)
         return caseCompare(ctx.command, mask, cm);
 
+      case 'topic':
+        // Mask is a wildcard on channel name, or '*' for all
+        if (mask === '*') return true;
+        return wildcardMatch(mask, ctx.channel ?? '', true, cm);
+
+      case 'quit':
+        // Mask is a wildcard on nick!ident@host, or '*' for all
+        if (mask === '*') return true;
+        return wildcardMatch(mask, `${ctx.nick}!${ctx.ident}@${ctx.hostname}`, true, cm);
+
       case 'time':
         // Timer binds are handled by setInterval, not by dispatch
         return false;

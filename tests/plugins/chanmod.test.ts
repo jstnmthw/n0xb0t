@@ -976,7 +976,7 @@ describe('chanmod plugin — channel mode enforcement', () => {
     await bot.pluginLoader.load(PLUGIN_PATH, {
       chanmod: {
         enabled: true,
-        config: { enforce_channel_modes: '+nt', enforce_delay_ms: 5 },
+        config: { enforce_channel_modes: '+nt', enforce_modes: true, enforce_delay_ms: 5 },
       },
     });
   });

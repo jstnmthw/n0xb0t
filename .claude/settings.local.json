@@ -6,7 +6,10 @@
       "Bash(grep:*)",
       "WebSearch",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:ircv3.net)",
+      "WebFetch(domain:docs.inspircd.org)",
+      "WebFetch(domain:www.irchelp.org)"
     ]
   }
 }

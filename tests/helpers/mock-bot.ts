@@ -1,7 +1,9 @@
 // hexbot — Mock bot helper for testing
 // Creates a Bot-like object with real modules but a mock IRC client.
 import { CommandHandler } from '../../src/command-handler';
+import { ChannelSettings } from '../../src/core/channel-settings';
 import { ChannelState } from '../../src/core/channel-state';
+import { registerChannelCommands } from '../../src/core/commands/channel-commands';
 import { registerDispatcherCommands } from '../../src/core/commands/dispatcher-commands';
 import { registerIRCAdminCommands } from '../../src/core/commands/irc-commands-admin';
 import { registerPermissionCommands } from '../../src/core/commands/permission-commands';
@@ -29,6 +31,7 @@ export interface MockBot {
   channelState: ChannelState;
   ircCommands: IRCCommands;
   services: Services;
+  channelSettings: ChannelSettings;
   pluginLoader: PluginLoader;
   logger: Logger;
   cleanup(): void;
@@ -104,6 +107,8 @@ export function createMockBot(options?: { botNick?: string }): MockBot {
   });
   services.attach();
 
+  const channelSettings = new ChannelSettings(db);
+
   const pluginLoader = new PluginLoader({
     pluginDir: './plugins',
     dispatcher,
@@ -115,6 +120,7 @@ export function createMockBot(options?: { botNick?: string }): MockBot {
     channelState,
     ircCommands,
     services,
+    channelSettings,
     logger,
   });
 
@@ -128,6 +134,7 @@ export function createMockBot(options?: { botNick?: string }): MockBot {
     getUserCount: () => permissions.listUsers().length,
   });
   registerPluginCommands(commandHandler, pluginLoader, './plugins');
+  registerChannelCommands(commandHandler, channelSettings);
 
   return {
     client,
@@ -140,6 +147,7 @@ export function createMockBot(options?: { botNick?: string }): MockBot {
     channelState,
     ircCommands,
     services,
+    channelSettings,
     pluginLoader,
     logger,
     cleanup() {

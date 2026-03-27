@@ -1180,6 +1180,201 @@ describe('IRCBridge', () => {
     });
   });
 
+  describe('topic events', () => {
+    let topicBridge: IRCBridge;
+    let topicClient: MockIRCClient;
+    let topicDispatcher: EventDispatcher;
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      topicClient = new MockIRCClient();
+      topicDispatcher = new EventDispatcher();
+      topicBridge = new IRCBridge({
+        client: topicClient,
+        dispatcher: topicDispatcher,
+        eventBus: new BotEventBus(),
+        botNick: 'testbot',
+      });
+      topicBridge.attach();
+    });
+
+    afterEach(() => {
+      topicBridge.detach();
+      vi.useRealTimers();
+    });
+
+    it('should dispatch topic event with user prefix after grace expires', async () => {
+      const handler = vi.fn();
+      topicDispatcher.bind('topic', '-', '*', handler, 'test');
+
+      vi.advanceTimersByTime(6000);
+
+      topicClient.simulateEvent('topic', {
+        nick: 'user1',
+        ident: 'user',
+        hostname: 'host.com',
+        channel: '#test',
+        topic: 'New topic text',
+      });
+
+      await Promise.resolve();
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.nick).toBe('user1');
+      expect(ctx.ident).toBe('user');
+      expect(ctx.hostname).toBe('host.com');
+      expect(ctx.channel).toBe('#test');
+      expect(ctx.text).toBe('New topic text');
+      expect(ctx.command).toBe('topic');
+      expect(ctx.args).toBe('');
+
+      topicDispatcher.unbindAll('test');
+    });
+
+    it('should dispatch topic with server prefix (empty nick/ident/hostname)', async () => {
+      const handler = vi.fn();
+      topicDispatcher.bind('topic', '-', '*', handler, 'test');
+
+      vi.advanceTimersByTime(6000);
+
+      topicClient.simulateEvent('topic', {
+        nick: '',
+        ident: '',
+        hostname: '',
+        channel: '#test',
+        topic: 'Server set topic',
+      });
+
+      await Promise.resolve();
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.nick).toBe('');
+      expect(ctx.ident).toBe('');
+      expect(ctx.hostname).toBe('');
+      expect(ctx.channel).toBe('#test');
+
+      topicDispatcher.unbindAll('test');
+    });
+
+    it('should not dispatch topic events during startup grace', async () => {
+      const handler = vi.fn();
+      topicDispatcher.bind('topic', '-', '*', handler, 'test');
+
+      topicClient.simulateEvent('topic', {
+        nick: 'user1',
+        ident: 'user',
+        hostname: 'host.com',
+        channel: '#test',
+        topic: 'Topic during grace',
+      });
+
+      await Promise.resolve();
+
+      expect(handler).not.toHaveBeenCalled();
+
+      topicDispatcher.unbindAll('test');
+    });
+
+    it('should dispatch topic events after startup grace expires', async () => {
+      const handler = vi.fn();
+      topicDispatcher.bind('topic', '-', '*', handler, 'test');
+
+      topicClient.simulateEvent('topic', {
+        nick: 'user1',
+        ident: 'user',
+        hostname: 'host.com',
+        channel: '#test',
+        topic: 'During grace',
+      });
+      await Promise.resolve();
+      expect(handler).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(6000);
+
+      topicClient.simulateEvent('topic', {
+        nick: 'user1',
+        ident: 'user',
+        hostname: 'host.com',
+        channel: '#test',
+        topic: 'After grace',
+      });
+      await Promise.resolve();
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.text).toBe('After grace');
+
+      topicDispatcher.unbindAll('test');
+    });
+
+    it('should not dispatch topic for invalid channel', async () => {
+      const handler = vi.fn();
+      topicDispatcher.bind('topic', '-', '*', handler, 'test');
+
+      vi.advanceTimersByTime(6000);
+
+      topicClient.simulateEvent('topic', {
+        nick: 'user1',
+        channel: 'notachannel',
+        topic: 'Some topic',
+      });
+
+      await Promise.resolve();
+
+      expect(handler).not.toHaveBeenCalled();
+
+      topicDispatcher.unbindAll('test');
+    });
+  });
+
+  describe('quit events', () => {
+    it('should dispatch quit event with correct fields', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('quit', '-', '*', handler, 'test');
+
+      client.simulateEvent('quit', {
+        nick: 'user1',
+        ident: 'user',
+        hostname: 'host.com',
+        message: 'Goodbye!',
+      });
+
+      await Promise.resolve();
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.nick).toBe('user1');
+      expect(ctx.ident).toBe('user');
+      expect(ctx.hostname).toBe('host.com');
+      expect(ctx.text).toBe('Goodbye!');
+      expect(ctx.command).toBe('quit');
+      expect(ctx.args).toBe('');
+      expect(ctx.channel).toBeNull();
+
+      dispatcher.unbindAll('test');
+    });
+
+    it("should not dispatch the bot's own quit", async () => {
+      const handler = vi.fn();
+      dispatcher.bind('quit', '-', '*', handler, 'test');
+
+      client.simulateEvent('quit', {
+        nick: 'testbot',
+        ident: 'bot',
+        hostname: 'localhost',
+        message: 'Shutting down',
+      });
+
+      await Promise.resolve();
+
+      expect(handler).not.toHaveBeenCalled();
+
+      dispatcher.unbindAll('test');
+    });
+  });
+
   describe('dispatchError with logger', () => {
     it('should log errors from failed dispatches when a logger is provided', async () => {
       const logger = createLogger('error');

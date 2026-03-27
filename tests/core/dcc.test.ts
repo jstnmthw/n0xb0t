@@ -162,6 +162,7 @@ describe('DCCManager', () => {
       commandHandler: makeCommandHandler(),
       config: makeConfig(),
       version: '1.0.0',
+      botNick: 'hexbot',
     });
   });
 
@@ -175,6 +176,7 @@ describe('DCCManager', () => {
       commandHandler: makeCommandHandler(),
       config: makeConfig(),
       version: '1.0.0',
+      botNick: 'hexbot',
     });
     m.attach();
     expect(dispatcher.bind).toHaveBeenCalledWith(
@@ -196,6 +198,7 @@ describe('DCCManager', () => {
       commandHandler: makeCommandHandler(),
       config: makeConfig(),
       version: '1.0.0',
+      botNick: 'hexbot',
     });
     m.attach();
     m.detach();
@@ -223,6 +226,7 @@ describe('DCCManager', () => {
       commandHandler: makeCommandHandler(),
       config: makeConfig(),
       version: '1.0.0',
+      botNick: 'hexbot',
     });
     m.attach();
 
@@ -247,6 +251,7 @@ describe('DCCManager', () => {
       commandHandler: makeCommandHandler(),
       config: makeConfig(),
       version: '1.0.0',
+      botNick: 'hexbot',
     });
     m.attach();
 
@@ -270,6 +275,7 @@ describe('DCCManager', () => {
       commandHandler: makeCommandHandler(),
       config: makeConfig({ require_flags: 'm' }),
       version: '1.0.0',
+      botNick: 'hexbot',
     });
     m.attach();
 
@@ -321,6 +327,7 @@ describe('DCCManager', () => {
       commandHandler: makeCommandHandler(),
       config: makeConfig({ port_range: [50000, 50000] }), // only one port
       version: '1.0.0',
+      botNick: 'hexbot',
     });
     // Mark the only port as in use
     (m as unknown as { allocatedPorts: Set<number> }).allocatedPorts.add(50000);
@@ -344,6 +351,7 @@ describe('DCCManager', () => {
       commandHandler: makeCommandHandler(),
       config: makeConfig({ max_sessions: 1 }),
       version: '1.0.0',
+      botNick: 'hexbot',
     });
     m.attach();
 

@@ -28,20 +28,23 @@ export function setupModeEnforce(
   config: ChanmodConfig,
   state: SharedState,
 ): () => void {
-  const enforceChannelModeSet = parseModesSet(config.enforce_channel_modes);
-
   api.bind('mode', '-', '*', (ctx: HandlerContext) => {
     const { nick: setter, channel, command: modeStr, args: target } = ctx;
     if (!channel) return;
+
+    // Read per-channel settings (fall back to config default via channelSettings)
+    const channelModes = api.channelSettings.get(channel, 'channel_modes') as string;
+    const enforceChannelModeSet = parseModesSet(channelModes);
 
     // --- Channel mode enforcement (e.g. +nt) ---
     if (enforceChannelModeSet.size > 0 && modeStr.startsWith('-') && modeStr.length === 2) {
       const modeChar = modeStr[1];
       if (enforceChannelModeSet.has(modeChar)) {
+        const enforceModes = api.channelSettings.get(channel, 'enforce_modes') as boolean;
         const isNodesynch = config.nodesynch_nicks.some(
           (n) => api.ircLower(n) === api.ircLower(setter),
         );
-        if (!isNodesynch && !isBotNick(api, setter) && botHasOps(api, channel)) {
+        if (enforceModes && !isNodesynch && !isBotNick(api, setter) && botHasOps(api, channel)) {
           api.log(`Re-enforcing +${modeChar} on ${channel} (removed by ${setter})`);
           const timer = setTimeout(() => {
             api.mode(channel, '+' + modeChar);
@@ -88,7 +91,8 @@ export function setupModeEnforce(
     }
 
     // --- Bitch mode: strip unauthorized +o / +h ---
-    if (config.bitch && (modeStr === '+o' || modeStr === '+h') && target) {
+    const bitch = api.channelSettings.get(channel, 'bitch') as boolean;
+    if (bitch && (modeStr === '+o' || modeStr === '+h') && target) {
       if (isBotNick(api, setter) || isBotNick(api, target)) return;
       const isNodesynch = config.nodesynch_nicks.some(
         (n) => api.ircLower(n) === api.ircLower(setter),
@@ -116,7 +120,8 @@ export function setupModeEnforce(
     }
 
     // --- Enforcebans: kick channel members matching a new ban mask ---
-    if (config.enforcebans && modeStr === '+b' && target && botHasOps(api, channel)) {
+    const enforcebans = api.channelSettings.get(channel, 'enforcebans') as boolean;
+    if (enforcebans && modeStr === '+b' && target && botHasOps(api, channel)) {
       const ch = api.getChannel(channel);
       if (ch) {
         for (const user of ch.users.values()) {
@@ -139,9 +144,11 @@ export function setupModeEnforce(
     if (wasIntentional(state, api, channel, target)) return;
 
     // -h/-v: only enforce if enforce_modes is on; punish_deop only applies to -o
-    if ((modeStr === '-h' || modeStr === '-v') && !config.enforce_modes) return;
+    const enforceModes = api.channelSettings.get(channel, 'enforce_modes') as boolean;
+    const protectOps = api.channelSettings.get(channel, 'protect_ops') as boolean;
+    if ((modeStr === '-h' || modeStr === '-v') && !enforceModes) return;
     // -o: process if either feature is enabled
-    if (modeStr === '-o' && !config.enforce_modes && !config.punish_deop) return;
+    if (modeStr === '-o' && !enforceModes && !protectOps) return;
 
     const flags = getUserFlags(api, channel, target);
     if (!flags) return; // Unknown user — neither feature applies
@@ -162,7 +169,7 @@ export function setupModeEnforce(
     if (modeStr === '-o') {
       if (!botHasOps(api, channel)) return;
       const shouldBeOpped = config.op_flags.some((f) => flags.includes(f));
-      if (shouldBeOpped && config.enforce_modes) {
+      if (shouldBeOpped && enforceModes) {
         api.log(`Re-enforcing +o on ${target} in ${channel} (deopped by ${setter})`);
         const timer = setTimeout(() => {
           api.op(channel, target);
@@ -170,7 +177,7 @@ export function setupModeEnforce(
         state.enforcementTimers.push(timer);
       }
       // Punish whoever stripped ops from a recognized op
-      if (config.punish_deop && shouldBeOpped) {
+      if (protectOps && shouldBeOpped) {
         const isSetterNodesynch = config.nodesynch_nicks.some(
           (n) => api.ircLower(n) === api.ircLower(setter),
         );

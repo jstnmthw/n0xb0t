@@ -4,6 +4,7 @@ import { existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from
 import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import type { ChannelSettings } from './core/channel-settings';
 import type { ChannelState } from './core/channel-state';
 import { HelpRegistry } from './core/help-registry';
 import type { IRCCommands } from './core/irc-commands';
@@ -19,9 +20,12 @@ import type {
   BindType,
   BotConfig,
   Casemapping,
+  ChannelSettingDef,
+  ChannelSettingValue,
   ChannelUser,
   HelpEntry,
   PluginAPI,
+  PluginChannelSettings,
   PluginDB,
   PluginPermissions,
   PluginServices,
@@ -72,6 +76,7 @@ export interface PluginLoaderDeps {
   messageQueue?: MessageQueue | null;
   services?: Services | null;
   helpRegistry?: HelpRegistry | null;
+  channelSettings?: ChannelSettings | null;
   logger?: Logger | null;
   getCasemapping?: () => Casemapping;
   getServerSupports?: () => Record<string, string>;
@@ -106,6 +111,7 @@ export class PluginLoader {
   private messageQueue: MessageQueue | null;
   private services: Services | null;
   private helpRegistry: HelpRegistry | null;
+  private channelSettings: ChannelSettings | null;
   private logger: Logger | null;
   private rootLogger: Logger | null;
   private getCasemapping: () => Casemapping;
@@ -124,6 +130,7 @@ export class PluginLoader {
     this.messageQueue = deps.messageQueue ?? null;
     this.services = deps.services ?? null;
     this.helpRegistry = deps.helpRegistry ?? null;
+    this.channelSettings = deps.channelSettings ?? null;
     this.rootLogger = deps.logger ?? null;
     this.logger = deps.logger?.child('plugin-loader') ?? null;
     this.getCasemapping = deps.getCasemapping ?? (() => 'rfc1459');
@@ -296,6 +303,9 @@ export class PluginLoader {
     // Remove help entries
     this.helpRegistry?.unregister(pluginName);
 
+    // Remove channel setting defs (stored values are intentionally preserved)
+    this.channelSettings?.unregister(pluginName);
+
     // Remove from loaded map
     this.loaded.delete(pluginName);
 
@@ -352,6 +362,7 @@ export class PluginLoader {
     const permissions = this.permissions;
     const services = this.services;
     const helpRegistry = this.helpRegistry;
+    const channelSettings = this.channelSettings;
     const getCasemapping = this.getCasemapping;
     const getServerSupports = this.getServerSupports;
 
@@ -562,6 +573,22 @@ export class PluginLoader {
       ircLower(text: string): string {
         return ircLower(text, getCasemapping());
       },
+
+      // Per-channel settings
+      channelSettings: Object.freeze({
+        register(defs: ChannelSettingDef[]): void {
+          channelSettings?.register(pluginId, defs);
+        },
+        get(channel: string, key: string): ChannelSettingValue {
+          return channelSettings?.get(channel, key) ?? '';
+        },
+        set(channel: string, key: string, value: ChannelSettingValue): void {
+          channelSettings?.set(channel, key, value);
+        },
+        isSet(channel: string, key: string): boolean {
+          return channelSettings?.isSet(channel, key) ?? false;
+        },
+      } satisfies PluginChannelSettings),
 
       // Help registry
       registerHelp(entries: HelpEntry[]): void {

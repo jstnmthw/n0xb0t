@@ -8,7 +8,9 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { CommandHandler } from './command-handler';
+import { ChannelSettings } from './core/channel-settings';
 import { ChannelState } from './core/channel-state';
+import { registerChannelCommands } from './core/commands/channel-commands';
 import { registerDispatcherCommands } from './core/commands/dispatcher-commands';
 import { registerIRCAdminCommands } from './core/commands/irc-commands-admin';
 import { registerPermissionCommands } from './core/commands/permission-commands';
@@ -60,6 +62,7 @@ export class Bot {
   readonly logger: Logger;
 
   readonly pluginLoader: PluginLoader;
+  readonly channelSettings: ChannelSettings;
   readonly channelState: ChannelState;
   readonly ircCommands: IRCCommands;
   readonly messageQueue: MessageQueue;
@@ -117,6 +120,7 @@ export class Bot {
       logger: this.logger,
     });
     this.helpRegistry = new HelpRegistry();
+    this.channelSettings = new ChannelSettings(this.db);
     this.pluginLoader = new PluginLoader({
       pluginDir: this.config.pluginDir,
       dispatcher: this.dispatcher,
@@ -130,6 +134,7 @@ export class Bot {
       messageQueue: this.messageQueue,
       services: this.services,
       helpRegistry: this.helpRegistry,
+      channelSettings: this.channelSettings,
       logger: this.logger,
       getCasemapping: () => this.getCasemapping(),
       getServerSupports: () => {
@@ -182,6 +187,7 @@ export class Bot {
       getUserCount: () => this.permissions.listUsers().length,
     });
     registerPluginCommands(this.commandHandler, this.pluginLoader, resolve(this.config.pluginDir));
+    registerChannelCommands(this.commandHandler, this.channelSettings);
 
     this.botLogger.info('Starting...');
 
@@ -215,6 +221,7 @@ export class Bot {
         commandHandler: this.commandHandler,
         config: this.config.dcc,
         version: this.readPackageVersion(),
+        botNick: this.config.irc.nick,
         logger: this.logger,
       });
       this._dccManager.attach();

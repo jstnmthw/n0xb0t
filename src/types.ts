@@ -26,7 +26,9 @@ export type BindType =
   | 'raw' // Raw server line, stackable
   | 'time' // Timer (interval), stackable
   | 'ctcp' // CTCP request, stackable
-  | 'notice'; // Notice message, stackable
+  | 'notice' // Notice message, stackable
+  | 'topic' // Topic change, stackable
+  | 'quit'; // User quit (not channel-scoped), stackable
 
 /** Permission flags: n=owner, m=master, o=op, v=voice, -=anyone. */
 export type Flag = 'n' | 'm' | 'o' | 'v' | '-';
@@ -128,6 +130,9 @@ export interface PluginAPI {
 
   // IRC-aware case folding using the connected network's CASEMAPPING
   ircLower(text: string): string;
+
+  // Per-channel settings
+  channelSettings: PluginChannelSettings;
 
   // Help registry
   registerHelp(entries: HelpEntry[]): void;
@@ -272,6 +277,41 @@ export interface BotConfig {
   proxy?: ProxyConfig;
   dcc?: DccConfig;
   quit_message?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Channel settings
+// ---------------------------------------------------------------------------
+
+/** Storage type for a per-channel setting. */
+export type ChannelSettingType = 'flag' | 'string' | 'int';
+
+/** Runtime value type returned from ChannelSettings.get(). */
+export type ChannelSettingValue = boolean | string | number;
+
+/** A typed per-channel setting definition registered by a plugin. */
+export interface ChannelSettingDef {
+  key: string; // globally unique key, e.g. 'bitch', 'greet_msg'
+  type: ChannelSettingType;
+  default: ChannelSettingValue;
+  description: string; // shown in .chaninfo output
+}
+
+/** ChannelSettingDef with its owning plugin attached (internal + PluginAPI). */
+export interface ChannelSettingEntry extends ChannelSettingDef {
+  pluginId: string;
+}
+
+/** Per-channel settings API provided to plugins. */
+export interface PluginChannelSettings {
+  /** Declare per-channel setting definitions for this plugin. Call once in init(). */
+  register(defs: ChannelSettingDef[]): void;
+  /** Read a per-channel setting. Returns def.default if not set by an operator. */
+  get(channel: string, key: string): ChannelSettingValue;
+  /** Write a per-channel setting (for plugin-managed settings, e.g. topic text). */
+  set(channel: string, key: string, value: ChannelSettingValue): void;
+  /** True if an operator has explicitly set this value (not relying on default). */
+  isSet(channel: string, key: string): boolean;
 }
 
 // ---------------------------------------------------------------------------

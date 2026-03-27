@@ -54,7 +54,6 @@ export function init(api: PluginAPI): void {
     },
   ]);
 
-  const message = (api.config.message as string) ?? 'Welcome to {channel}, {nick}!';
   const allowCustom = (api.config.allow_custom as boolean) ?? false;
   const minFlag = (api.config.min_flag as string) ?? 'v';
   const delivery = (api.config.delivery as string) ?? 'say';
@@ -62,11 +61,22 @@ export function init(api: PluginAPI): void {
   const irc = api.botConfig.irc as Record<string, unknown> | undefined;
   botNick = (irc?.nick as string) ?? '';
 
+  // Register per-channel greeting setting; default reflects the global config value
+  api.channelSettings.register([
+    {
+      key: 'greet_msg',
+      type: 'string',
+      default: (api.config.message as string) ?? 'Welcome to {channel}, {nick}!',
+      description: 'Per-channel join greeting ({channel} and {nick} substituted)',
+    },
+  ]);
+
   // --- Join handler ---
   api.bind('join', '-', '*', (ctx: HandlerContext) => {
     if (api.ircLower(ctx.nick) === api.ircLower(botNick)) return;
 
-    let greeting = message;
+    // Precedence: user custom greet > channel greet_msg setting > global default
+    let greeting = api.channelSettings.get(ctx.channel ?? '', 'greet_msg') as string;
 
     if (allowCustom) {
       const hostmask = `${ctx.nick}!${ctx.ident}@${ctx.hostname}`;

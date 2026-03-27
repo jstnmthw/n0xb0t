@@ -38,6 +38,7 @@ export interface DCCManagerDeps {
   commandHandler: CommandHandler;
   config: DccConfig;
   version: string;
+  botNick: string;
   logger?: Logger | null;
 }
 
@@ -116,8 +117,18 @@ export function isPassiveDcc(ip: number, port: number): boolean {
 
 const PROMPT = 'hexbot> ';
 
+// ASCII logo placeholder — replace BANNER_LOGO lines with your own art.
+// Each entry is one line of text sent to the user's DCC CHAT window.
+const BANNER_LOGO = [
+  ' _______               __           __   ',
+  '|   |   |.-----.--.--.|  |--.-----.|  |_ ',
+  '|       ||  -__|_   _||  _  |  _  ||   _|',
+  '|___|___||_____|__.__||_____|_____||____|',
+];
+
 export class DCCSession {
   readonly handle: string;
+  readonly flags: string;
   readonly nick: string;
   readonly ident: string;
   readonly hostname: string;
@@ -144,6 +155,7 @@ export class DCCSession {
   }) {
     this.manager = opts.manager;
     this.handle = opts.user.handle;
+    this.flags = opts.user.global;
     this.nick = opts.nick;
     this.ident = opts.ident;
     this.hostname = opts.hostname;
@@ -155,25 +167,53 @@ export class DCCSession {
   }
 
   /** Start the session: send banner, begin readline loop. */
-  start(version: string): void {
+  start(version: string, botNick: string): void {
     // Wrap socket in readline — DCC uses \r\n but readline handles both
     const rl = createReadline({ input: this.socket, crlfDelay: Infinity });
 
     // Banner
-    const now = new Date().toUTCString();
+    const now = new Date().toLocaleString();
+    const platform = `Node.js ${process.version} on ${process.platform}`;
     const others = this.manager
       .getSessionList()
       .filter((s) => s.handle !== this.handle)
       .map((s) => s.handle);
-    const connected =
+    const onConsole =
       others.length > 0
-        ? `${others.length} other(s): ${others.join(', ')}`
+        ? `${others.length} other(s) here: ${others.join(', ')}`
         : 'you are the only one here';
 
-    this.writeLine(`*** Connected to Hexbot v${version} — ${now}`);
-    this.writeLine(`*** Logged in as ${this.handle} (${this.nick}!${this.ident}@${this.hostname})`);
-    this.writeLine(`*** Console: ${connected}`);
-    this.writeLine('*** Lines starting with . are commands (.help). Plain text is broadcast.');
+    this.writeLine(`Connected to ${botNick}, running hexbot v${version}`);
+    this.writeLine('');
+    for (const line of BANNER_LOGO) {
+      this.writeLine(line);
+    }
+    this.writeLine('');
+    this.writeLine(
+      `Hey ${this.handle}!  My name is ${botNick} and I am running hexbot v${version},`,
+    );
+    this.writeLine(`on ${platform}.`);
+    this.writeLine('');
+    this.writeLine(`Local time is now ${now}`);
+    this.writeLine('');
+    this.writeLine(`Logged in as: ${this.handle} (${this.nick}!${this.ident}@${this.hostname})`);
+    this.writeLine(`Your flags: +${this.flags || '-'}`);
+    if (this.flags.includes('n')) {
+      this.writeLine('');
+      this.writeLine('You are an owner of this bot.  Only +n users can see this!');
+    }
+    this.writeLine('');
+    this.writeLine(`Console: ${onConsole}`);
+    this.writeLine('');
+    this.writeLine('Use .help for basic help.');
+    this.writeLine('Use .help <command> for help on a specific command.');
+    this.writeLine('Use .console to see who is currently on the console.');
+    this.writeLine('');
+    this.writeLine('Have fun.');
+    this.writeLine('');
+    this.writeLine("Commands start with '.' (like '.quit' or '.help')");
+    this.writeLine('Everything else goes out to the party line.');
+    this.writeLine('');
     this.write(PROMPT);
 
     this.resetIdle();
@@ -313,6 +353,7 @@ export class DCCManager {
   private allocatedPorts: Set<number> = new Set();
   private pending: Map<number, PendingDCC> = new Map(); // key = port
   private casemapping: Casemapping = 'rfc1459';
+  private botNick: string;
 
   constructor(deps: DCCManagerDeps) {
     this.client = deps.client;
@@ -322,6 +363,7 @@ export class DCCManager {
     this.commandHandler = deps.commandHandler;
     this.config = deps.config;
     this.version = deps.version;
+    this.botNick = deps.botNick;
     this.logger = deps.logger?.child('dcc') ?? null;
   }
 
@@ -515,7 +557,7 @@ export class DCCManager {
     this.announce(`*** ${pending.user.handle} has joined the console`);
     this.logger?.info(`DCC session opened: ${pending.user.handle} (${pending.nick})`);
 
-    session.start(this.version);
+    session.start(this.version, this.botNick);
   }
 
   private closeAll(reason?: string): void {

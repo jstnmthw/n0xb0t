@@ -37,6 +37,13 @@ interface IRCBridgeOptions {
 }
 
 // ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/** Duration after attach() during which topic events are suppressed (server join burst). */
+const STARTUP_GRACE_MS = 5000;
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -70,6 +77,7 @@ export class IRCBridge {
   private logger: Logger | null;
   private listeners: Array<{ event: string; fn: (...args: unknown[]) => void }> = [];
   private ctcpRateLimiter: Map<string, number[]> = new Map();
+  private topicStartupGrace = false;
 
   constructor(options: IRCBridgeOptions) {
     this.client = options.client;
@@ -92,6 +100,14 @@ export class IRCBridge {
     this.listenIrc('mode', this.onMode.bind(this));
     this.listenIrc('notice', this.onNotice.bind(this));
     this.listenIrc('ctcp request', this.onCtcp.bind(this));
+    this.listenIrc('topic', this.onTopic.bind(this));
+    this.listenIrc('quit', this.onQuit.bind(this));
+
+    // Suppress topic events during the initial channel join burst
+    this.topicStartupGrace = true;
+    setTimeout(() => {
+      this.topicStartupGrace = false;
+    }, STARTUP_GRACE_MS);
 
     this.logger?.info('Attached to IRC client');
   }
@@ -382,6 +398,52 @@ export class IRCBridge {
 
     if (!this.ctcpAllowed(nick)) return;
     this.dispatcher.dispatch('ctcp', ctx).catch(this.dispatchError('ctcp'));
+  }
+
+  private onTopic(event: Record<string, unknown>): void {
+    if (this.topicStartupGrace) return;
+
+    const channel = sanitize(String(event.channel ?? ''));
+    if (!isValidChannel(channel)) return;
+
+    const nick = sanitize(String(event.nick ?? ''));
+    const ident = sanitize(String(event.ident ?? ''));
+    const hostname = sanitize(String(event.hostname ?? ''));
+    const topic = sanitize(String(event.topic ?? ''));
+
+    const ctx = this.buildContext({
+      nick,
+      ident,
+      hostname,
+      channel,
+      text: topic,
+      command: 'topic',
+      args: '',
+    });
+
+    this.dispatcher.dispatch('topic', ctx).catch(this.dispatchError('topic'));
+  }
+
+  private onQuit(event: Record<string, unknown>): void {
+    const nick = sanitize(String(event.nick ?? ''));
+    const ident = sanitize(String(event.ident ?? ''));
+    const hostname = sanitize(String(event.hostname ?? ''));
+    const message = sanitize(String(event.message ?? ''));
+
+    // Don't dispatch the bot's own quit
+    if (nick === this.botNick) return;
+
+    const ctx = this.buildContext({
+      nick,
+      ident,
+      hostname,
+      channel: null,
+      text: message,
+      command: 'quit',
+      args: '',
+    });
+
+    this.dispatcher.dispatch('quit', ctx).catch(this.dispatchError('quit'));
   }
 
   // -------------------------------------------------------------------------

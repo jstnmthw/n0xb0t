@@ -1,0 +1,232 @@
+import { beforeEach, describe, expect, it } from 'vitest';
+
+import { ChannelSettings } from '../../src/core/channel-settings';
+import { BotDatabase } from '../../src/database';
+import type { ChannelSettingDef } from '../../src/types';
+
+function makeDb(): BotDatabase {
+  const db = new BotDatabase(':memory:');
+  db.open();
+  return db;
+}
+
+const flagDef: ChannelSettingDef = {
+  key: 'bitch',
+  type: 'flag',
+  default: false,
+  description: 'Deop users without op flag',
+};
+
+const stringDef: ChannelSettingDef = {
+  key: 'greet_msg',
+  type: 'string',
+  default: 'Welcome!',
+  description: 'Per-channel greeting',
+};
+
+const intDef: ChannelSettingDef = {
+  key: 'max_lines',
+  type: 'int',
+  default: 5,
+  description: 'Max flood lines',
+};
+
+describe('ChannelSettings', () => {
+  let db: BotDatabase;
+  let cs: ChannelSettings;
+
+  beforeEach(() => {
+    db = makeDb();
+    cs = new ChannelSettings(db);
+  });
+
+  describe('register / getDef', () => {
+    it('registers a def and makes it retrievable', () => {
+      cs.register('myplugin', [flagDef]);
+      const entry = cs.getDef('bitch');
+      expect(entry).toBeDefined();
+      expect(entry!.key).toBe('bitch');
+      expect(entry!.pluginId).toBe('myplugin');
+      expect(entry!.type).toBe('flag');
+    });
+
+    it('registers multiple defs at once', () => {
+      cs.register('myplugin', [flagDef, stringDef, intDef]);
+      expect(cs.getDef('bitch')).toBeDefined();
+      expect(cs.getDef('greet_msg')).toBeDefined();
+      expect(cs.getDef('max_lines')).toBeDefined();
+    });
+
+    it('returns undefined for unknown key', () => {
+      expect(cs.getDef('nonexistent')).toBeUndefined();
+    });
+
+    it('re-registering same pluginId replaces def without error', () => {
+      cs.register('myplugin', [{ ...flagDef, description: 'old' }]);
+      cs.register('myplugin', [{ ...flagDef, description: 'new' }]);
+      expect(cs.getDef('bitch')!.description).toBe('new');
+    });
+
+    it('key collision from different plugin is skipped (original preserved)', () => {
+      cs.register('plugin-a', [flagDef]);
+      cs.register('plugin-b', [{ ...flagDef, description: 'from plugin-b' }]);
+      const entry = cs.getDef('bitch');
+      expect(entry!.pluginId).toBe('plugin-a');
+      expect(entry!.description).toBe(flagDef.description);
+    });
+  });
+
+  describe('get — returns default when no stored value', () => {
+    it('flag default (false)', () => {
+      cs.register('p', [flagDef]);
+      expect(cs.get('#test', 'bitch')).toBe(false);
+    });
+
+    it('string default', () => {
+      cs.register('p', [stringDef]);
+      expect(cs.get('#test', 'greet_msg')).toBe('Welcome!');
+    });
+
+    it('int default', () => {
+      cs.register('p', [intDef]);
+      expect(cs.get('#test', 'max_lines')).toBe(5);
+    });
+
+    it("returns '' for unknown key (graceful degradation)", () => {
+      expect(cs.get('#test', 'not_registered')).toBe('');
+    });
+  });
+
+  describe('set + get — type coercion', () => {
+    it('flag stored as "true" → coerced to boolean true', () => {
+      cs.register('p', [flagDef]);
+      cs.set('#test', 'bitch', true);
+      expect(cs.get('#test', 'bitch')).toBe(true);
+    });
+
+    it('flag stored as "false" → coerced to boolean false', () => {
+      cs.register('p', [flagDef]);
+      cs.set('#test', 'bitch', false);
+      expect(cs.get('#test', 'bitch')).toBe(false);
+    });
+
+    it('int stored as "42" → coerced to 42', () => {
+      cs.register('p', [intDef]);
+      cs.set('#test', 'max_lines', 42);
+      expect(cs.get('#test', 'max_lines')).toBe(42);
+    });
+
+    it('string stored as "hello" → returned as "hello"', () => {
+      cs.register('p', [stringDef]);
+      cs.set('#test', 'greet_msg', 'hello');
+      expect(cs.get('#test', 'greet_msg')).toBe('hello');
+    });
+
+    it('values are channel-scoped (different channels independent)', () => {
+      cs.register('p', [flagDef]);
+      cs.set('#foo', 'bitch', true);
+      cs.set('#bar', 'bitch', false);
+      expect(cs.get('#foo', 'bitch')).toBe(true);
+      expect(cs.get('#bar', 'bitch')).toBe(false);
+    });
+
+    it('set warns and no-ops for unknown key', () => {
+      // Should not throw
+      expect(() => cs.set('#test', 'unknown', 'value')).not.toThrow();
+      expect(cs.get('#test', 'unknown')).toBe('');
+    });
+  });
+
+  describe('unset', () => {
+    it('subsequent get returns def.default after unset', () => {
+      cs.register('p', [flagDef]);
+      cs.set('#test', 'bitch', true);
+      cs.unset('#test', 'bitch');
+      expect(cs.get('#test', 'bitch')).toBe(false);
+    });
+
+    it('isSet returns false after unset', () => {
+      cs.register('p', [flagDef]);
+      cs.set('#test', 'bitch', true);
+      cs.unset('#test', 'bitch');
+      expect(cs.isSet('#test', 'bitch')).toBe(false);
+    });
+  });
+
+  describe('isSet', () => {
+    it('returns false before set', () => {
+      cs.register('p', [flagDef]);
+      expect(cs.isSet('#test', 'bitch')).toBe(false);
+    });
+
+    it('returns true after set', () => {
+      cs.register('p', [flagDef]);
+      cs.set('#test', 'bitch', true);
+      expect(cs.isSet('#test', 'bitch')).toBe(true);
+    });
+
+    it('returns false after unset', () => {
+      cs.register('p', [flagDef]);
+      cs.set('#test', 'bitch', true);
+      cs.unset('#test', 'bitch');
+      expect(cs.isSet('#test', 'bitch')).toBe(false);
+    });
+  });
+
+  describe('unregister', () => {
+    it('removes defs for a plugin from getAllDefs()', () => {
+      cs.register('plugin-a', [flagDef]);
+      cs.register('plugin-b', [stringDef]);
+      cs.unregister('plugin-a');
+      const defs = cs.getAllDefs();
+      expect(defs).toHaveLength(1);
+      expect(defs[0].key).toBe('greet_msg');
+    });
+
+    it('stored DB values survive unregister (re-register and get returns stored value)', () => {
+      cs.register('p', [flagDef]);
+      cs.set('#test', 'bitch', true);
+      cs.unregister('p');
+
+      // Value should still be in DB — re-register and confirm
+      cs.register('p', [flagDef]);
+      expect(cs.get('#test', 'bitch')).toBe(true);
+    });
+  });
+
+  describe('getAllDefs', () => {
+    it('returns all defs across all plugins in registration order', () => {
+      cs.register('plugin-a', [flagDef]);
+      cs.register('plugin-b', [stringDef, intDef]);
+      const defs = cs.getAllDefs();
+      expect(defs).toHaveLength(3);
+      expect(defs.map((d) => d.key)).toEqual(['bitch', 'greet_msg', 'max_lines']);
+    });
+
+    it('returns empty array when nothing is registered', () => {
+      expect(cs.getAllDefs()).toEqual([]);
+    });
+  });
+
+  describe('getChannelSnapshot', () => {
+    it('lists all defs with correct values and isDefault flags', () => {
+      cs.register('p', [flagDef, stringDef]);
+      cs.set('#test', 'bitch', true);
+
+      const snapshot = cs.getChannelSnapshot('#test');
+      expect(snapshot).toHaveLength(2);
+
+      const bitchEntry = snapshot.find((s) => s.entry.key === 'bitch')!;
+      expect(bitchEntry.value).toBe(true);
+      expect(bitchEntry.isDefault).toBe(false);
+
+      const greetEntry = snapshot.find((s) => s.entry.key === 'greet_msg')!;
+      expect(greetEntry.value).toBe('Welcome!');
+      expect(greetEntry.isDefault).toBe(true);
+    });
+
+    it('returns empty array when no defs are registered', () => {
+      expect(cs.getChannelSnapshot('#test')).toEqual([]);
+    });
+  });
+});

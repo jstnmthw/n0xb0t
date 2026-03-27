@@ -1,17 +1,35 @@
-// topic — IRC topic creator with color-coded themes
+// topic — IRC topic creator with color-coded themes + topic protection
 // Sets channel topics using pre-built color theme borders.
+// Also provides protect_topic/topic_text settings and !settopic command.
 import type { HandlerContext, PluginAPI } from '../../src/types';
 import { themeNames, themes } from './themes';
 
 export const name = 'topic';
-export const version = '1.0.0';
-export const description = 'Set channel topics with color-coded theme borders';
+export const version = '2.0.0';
+export const description =
+  'Set channel topics with color-coded theme borders; optional topic protection';
 
 const PREVIEW_COOLDOWN_MS = 60_000;
 let previewCooldown: Map<string, number>;
 
 export function init(api: PluginAPI): void {
   previewCooldown = new Map();
+
+  // Register per-channel settings for topic protection
+  api.channelSettings.register([
+    {
+      key: 'protect_topic',
+      type: 'flag',
+      default: false,
+      description: 'Restore topic if changed by a user without +o flag',
+    },
+    {
+      key: 'topic_text',
+      type: 'string',
+      default: '',
+      description: 'The enforced topic text (set by !settopic or an authorized topic change)',
+    },
+  ]);
 
   api.registerHelp([
     {
@@ -27,6 +45,13 @@ export function init(api: PluginAPI): void {
       flags: '-',
       usage: '!topics [preview [text]]',
       description: 'List available topic themes; preview renders all themes',
+      category: 'topic',
+    },
+    {
+      command: '!settopic',
+      flags: 'o',
+      usage: '!settopic <text>',
+      description: 'Set and lock the channel topic',
       category: 'topic',
     },
   ]);
@@ -124,6 +149,41 @@ export function init(api: PluginAPI): void {
     ctx.reply(
       `Available themes: ${themeNames.join(', ')} — Use "!topics preview [text]" to preview all via PM.`,
     );
+  });
+
+  // !settopic <text> — set and lock the channel topic (requires o flag)
+  api.bind('pub', '+o', '!settopic', (ctx: HandlerContext) => {
+    if (!ctx.channel) return;
+
+    const text = ctx.args.trim();
+    if (!text) {
+      ctx.reply('Usage: !settopic <text>');
+      return;
+    }
+
+    api.channelSettings.set(ctx.channel, 'topic_text', text);
+    api.topic(ctx.channel, text);
+    ctx.reply(`Topic set and locked.`);
+  });
+
+  // topic bind — enforce topic protection on unauthorized changes
+  api.bind('topic', '-', '*', (ctx: HandlerContext) => {
+    if (!ctx.channel) return;
+
+    const protect = api.channelSettings.get(ctx.channel, 'protect_topic') as boolean;
+    if (!protect) return;
+
+    const enforced = api.channelSettings.get(ctx.channel, 'topic_text') as string;
+    if (!enforced) return; // no authoritative topic set yet
+
+    const isAuthorized = api.permissions.checkFlags('o', ctx);
+    if (isAuthorized) {
+      // Authorized change — update the stored topic
+      api.channelSettings.set(ctx.channel, 'topic_text', ctx.text);
+    } else {
+      // Restore the enforced topic
+      api.topic(ctx.channel, enforced);
+    }
   });
 }
 
