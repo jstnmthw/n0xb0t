@@ -22,6 +22,8 @@ export interface UserInfo {
   hostmask: string; // computed: nick!ident@hostname
   modes: string[]; // channel modes: 'o', 'v', etc.
   joinedAt: Date;
+  /** Services account name. null = known not identified. undefined = unknown (no account-notify/extended-join data). */
+  accountName?: string | null;
 }
 
 export interface ChannelInfo {
@@ -37,6 +39,8 @@ export interface ChannelInfo {
 
 export class ChannelState {
   private channels: Map<string, ChannelInfo> = new Map();
+  /** Network-wide account map. Key: nick (lowercase). Value: account name or null (known not identified). */
+  private networkAccounts: Map<string, string | null> = new Map();
   private client: ChannelStateClient;
   private eventBus: BotEventBus;
   private logger: Logger | null;
@@ -64,6 +68,10 @@ export class ChannelState {
     this.listen('userlist', this.onUserlist.bind(this));
     this.listen('wholist', this.onWholist.bind(this));
     this.listen('topic', this.onTopic.bind(this));
+    // IRCv3: account-notify (fires when a user identifies or deidentifies)
+    this.listen('account', this.onAccount.bind(this));
+    // IRCv3: chghost (fires when a user's ident/hostname changes — requires enable_chghost: true)
+    this.listen('user updated', this.onUserUpdated.bind(this));
     this.logger?.info('Attached to IRC client');
   }
 
@@ -100,6 +108,18 @@ export class ChannelState {
     return this.getUser(channel, nick) !== undefined;
   }
 
+  /**
+   * Return the services account for a nick from the network-wide account map.
+   * - `string`    — nick is identified as this account (from account-notify or extended-join)
+   * - `null`      — nick is known NOT to be identified
+   * - `undefined` — no account-notify/extended-join data received yet for this nick
+   */
+  getAccountForNick(nick: string): string | null | undefined {
+    const lower = ircLower(nick, this.casemapping);
+    if (!this.networkAccounts.has(lower)) return undefined;
+    return this.networkAccounts.get(lower);
+  }
+
   getUserModes(channel: string, nick: string): string[] {
     const user = this.getUser(channel, nick);
     return user?.modes ?? [];
@@ -117,6 +137,15 @@ export class ChannelState {
 
     if (!channel || !nick) return;
 
+    // IRCv3 extended-join: account field is present when the cap is negotiated.
+    // irc-framework sets it to false (not the string '*') when the user is not identified.
+    let accountName: string | null | undefined;
+    if ('account' in event) {
+      accountName =
+        event.account === false || event.account === null ? null : String(event.account);
+      this.networkAccounts.set(ircLower(nick, this.casemapping), accountName);
+    }
+
     const ch = this.ensureChannel(channel);
     const user: UserInfo = {
       nick,
@@ -125,6 +154,7 @@ export class ChannelState {
       hostmask: `${nick}!${ident}@${hostname}`,
       modes: [],
       joinedAt: new Date(),
+      accountName,
     };
     ch.users.set(ircLower(nick, this.casemapping), user);
 
@@ -153,6 +183,7 @@ export class ChannelState {
     for (const ch of this.channels.values()) {
       ch.users.delete(lower);
     }
+    this.networkAccounts.delete(lower);
 
     this.eventBus.emit('channel:userLeft', '*', nick);
   }
@@ -179,6 +210,13 @@ export class ChannelState {
 
     const oldLower = ircLower(oldNick, this.casemapping);
     const newLower = ircLower(newNick, this.casemapping);
+
+    // Carry account info forward to the new nick
+    if (this.networkAccounts.has(oldLower)) {
+      const account = this.networkAccounts.get(oldLower);
+      this.networkAccounts.delete(oldLower);
+      this.networkAccounts.set(newLower, account ?? null);
+    }
 
     for (const ch of this.channels.values()) {
       const user = ch.users.get(oldLower);
@@ -305,6 +343,54 @@ export class ChannelState {
 
     const ch = this.ensureChannel(channel);
     ch.topic = topic;
+  }
+
+  /** IRCv3 account-notify: fires when a user's identification status changes. */
+  private onAccount(event: Record<string, unknown>): void {
+    const nick = String(event.nick ?? '');
+    if (!nick) return;
+
+    // irc-framework sets account to false when the user deidentifies
+    const accountName: string | null =
+      event.account === false || event.account === null ? null : String(event.account);
+
+    const lower = ircLower(nick, this.casemapping);
+    this.networkAccounts.set(lower, accountName);
+
+    // Update accountName on all per-channel UserInfo objects for this nick
+    for (const ch of this.channels.values()) {
+      const user = ch.users.get(lower);
+      if (user) {
+        user.accountName = accountName;
+      }
+    }
+
+    if (accountName) {
+      this.logger?.debug(`account-notify: ${nick} identified as ${accountName}`);
+    } else {
+      this.logger?.debug(`account-notify: ${nick} deidentified`);
+    }
+  }
+
+  /** IRCv3 chghost: fires when a user's displayed ident/hostname changes. */
+  private onUserUpdated(event: Record<string, unknown>): void {
+    const nick = String(event.nick ?? '');
+    const newIdent = event.new_ident !== undefined ? String(event.new_ident) : undefined;
+    const newHostname = event.new_hostname !== undefined ? String(event.new_hostname) : undefined;
+
+    if (!nick || (!newIdent && !newHostname)) return;
+
+    const lower = ircLower(nick, this.casemapping);
+    for (const ch of this.channels.values()) {
+      const user = ch.users.get(lower);
+      if (user) {
+        if (newIdent) user.ident = newIdent;
+        if (newHostname) user.hostname = newHostname;
+        if (newIdent || newHostname) {
+          user.hostmask = `${user.nick}!${user.ident}@${user.hostname}`;
+        }
+      }
+    }
   }
 
   // -------------------------------------------------------------------------

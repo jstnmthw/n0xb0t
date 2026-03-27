@@ -23,16 +23,45 @@ import { Permissions } from './core/permissions';
 import { Services } from './core/services';
 import { BotDatabase } from './database';
 import { EventDispatcher } from './dispatcher';
+import type { VerificationProvider } from './dispatcher';
 import { BotEventBus } from './event-bus';
 import { IRCBridge } from './irc-bridge';
 import { type Logger, createLogger } from './logger';
 import { PluginLoader } from './plugin-loader';
 import type { Casemapping } from './types';
-import type { BotConfig, ProxyConfig } from './types';
+import type { BotConfig, IdentityConfig, ProxyConfig } from './types';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Flag hierarchy for require_acc_for checking. */
+const FLAG_LEVEL: Record<string, number> = { n: 4, m: 3, o: 2, v: 1 };
+
+/**
+ * Determine whether the bind's required flags are at or above any threshold
+ * in `config.identity.require_acc_for`. Used by the VerificationProvider.
+ * Exported for unit testing.
+ */
+export function requiresVerificationForFlags(
+  bindFlags: string,
+  requireAccFor: IdentityConfig['require_acc_for'],
+): boolean {
+  if (bindFlags === '-' || bindFlags === '') return false;
+  if (!requireAccFor || requireAccFor.length === 0) return false;
+
+  // Find the minimum threshold flag level from require_acc_for (e.g. ["+o", "+n"] → 2)
+  const thresholds = requireAccFor
+    .map((f) => f.replace('+', ''))
+    .map((f) => FLAG_LEVEL[f] ?? 0)
+    .filter((l) => l > 0);
+  if (thresholds.length === 0) return false;
+  const minThreshold = Math.min(...thresholds);
+
+  // Find the highest flag level among the bind's required flags
+  const bindLevel = Math.max(...[...bindFlags].map((f) => FLAG_LEVEL[f] ?? 0));
+  return bindLevel >= minThreshold;
+}
 
 /**
  * Build the `socks` options object expected by irc-framework from a ProxyConfig.
@@ -121,6 +150,20 @@ export class Bot {
     });
     this.helpRegistry = new HelpRegistry();
     this.channelSettings = new ChannelSettings(this.db);
+
+    // Wire verification provider: gates privileged dispatch on NickServ identity.
+    // Uses the live account map from account-notify/extended-join (fast path),
+    // falling back to NickServ ACC queries when account state is unknown.
+    const verificationProvider: VerificationProvider = {
+      requiresVerificationForFlags: (flags: string) =>
+        requiresVerificationForFlags(flags, this.config.identity.require_acc_for),
+      getAccountForNick: (nick: string) => this.channelState.getAccountForNick(nick),
+      verifyUser: (nick: string) => this.services.verifyUser(nick),
+    };
+    if (this.config.identity.require_acc_for.length > 0 && this.config.services.type !== 'none') {
+      this.dispatcher.setVerification(verificationProvider);
+    }
+
     this.pluginLoader = new PluginLoader({
       pluginDir: this.config.pluginDir,
       dispatcher: this.dispatcher,
@@ -288,14 +331,32 @@ export class Bot {
         // Disable irc-framework's built-in CTCP VERSION reply —
         // we handle it ourselves in irc-bridge.ts via the dispatcher
         version: null,
+        // IRCv3: request chghost capability so channel-state receives real-time hostmask updates.
+        // account-notify and extended-join are requested automatically by irc-framework.
+        enable_chghost: true,
       };
 
       // SASL config
-      if (this.config.services.sasl && this.config.services.password) {
-        connectOptions.account = {
-          account: cfg.nick,
-          password: this.config.services.password,
-        };
+      const saslMechanism = this.config.services.sasl_mechanism ?? 'PLAIN';
+      if (this.config.services.sasl) {
+        if (saslMechanism === 'EXTERNAL') {
+          // SASL EXTERNAL: authenticate via TLS client certificate (CertFP).
+          // No password is needed — the server authenticates from the cert fingerprint.
+          connectOptions.sasl_mechanism = 'EXTERNAL';
+          if (cfg.tls_cert) {
+            connectOptions.tls_cert = cfg.tls_cert;
+          }
+          if (cfg.tls_key) {
+            connectOptions.tls_key = cfg.tls_key;
+          }
+          this.botLogger.info('SASL EXTERNAL (CertFP) authentication enabled');
+        } else if (this.config.services.password) {
+          // SASL PLAIN: username + password over TLS
+          connectOptions.account = {
+            account: cfg.nick,
+            password: this.config.services.password,
+          };
+        }
       }
 
       // Proxy config

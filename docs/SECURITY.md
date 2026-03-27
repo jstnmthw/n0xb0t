@@ -138,6 +138,7 @@ Plugins receive a `PluginAPI` object. They must NOT:
 - Access `globalThis`, `process.env`, or the filesystem without going through an approved API
 - Modify the `api` object or its prototypes
 - Access other plugins' state or database namespaces
+- **Call `eval()` or `new Function()` on user-supplied input** — this is a critical vulnerability class. CVE-2019-19010 (Limnoria, CVSS 9.8) demonstrated that an IRC bot plugin using `eval()` for user-submitted math expressions allows full code execution in the bot's process. Any plugin that needs to evaluate expressions must use a sandboxed library with no access to Node.js builtins.
 
 **Enforcement:** The plugin loader validates exports and the scoped API object is frozen (`Object.freeze` on nested objects where practical). Database namespace isolation is enforced at the `Database` class level, not by convention.
 
@@ -173,9 +174,15 @@ Don't let user input appear in contexts where IRC formatting codes could mislead
 api.say(channel, `User ${nick} has been granted ops`);
 // An attacker could set nick to include IRC color codes to hide/fake the message
 
-// GOOD: strip formatting from interpolated values in security-relevant messages
-api.say(channel, `User ${stripFormatting(nick)} has been granted ops`);
+// GOOD: use the shared utility from PluginAPI
+api.say(channel, `User ${api.stripFormatting(nick)} has been granted ops`);
 ```
+
+`api.stripFormatting(text)` removes all IRC control characters (bold `\x02`, color `\x03`, italic `\x1D`, underline `\x1F`, strikethrough `\x1E`, monospace `\x11`, reset `\x0F`, reverse `\x16`) including color code parameters. Apply it to any user-controlled string appearing in:
+
+- Permission grant/revoke announcements
+- Op/kick/ban action messages
+- Any console or log output that contains user-supplied data
 
 ### 5.3 Logging
 
@@ -211,7 +218,28 @@ The bot should be safe out of the box, without requiring the admin to harden it:
 
 ---
 
-## 8. Security checklist for code review
+## 8. IRCv3 message tags — trust model
+
+IRCv3 message tags carry metadata alongside messages. Their trust level depends on who set them:
+
+| Tag type             | Prefix | Trust level                                | Examples                   |
+| -------------------- | ------ | ------------------------------------------ | -------------------------- |
+| **Server tags**      | none   | Server-verified — may be trusted           | `time`, `account`, `msgid` |
+| **Client-only tags** | `+`    | Completely untrusted — treat as user input | `+draft/react`, `+typing`  |
+
+**Rule:** Client-only tags (prefixed `+`) are relayed verbatim by the server without modification. An attacker can set any client-only tag to any value. Never use client-only tag values for security decisions.
+
+**Rule:** The `account` server tag (when present) identifies the sender's services account. It may be treated as server-verified, but only when the server has enabled the `account-tag` capability. Hexbot's dispatcher uses the live account map from `account-notify` / `extended-join` rather than reading this tag directly.
+
+```typescript
+// BAD: reading a client-only tag as authoritative
+const userRole = ctx.tags?.['+role']; // attacker can set this to anything
+
+// GOOD: read user flags from the permissions system
+const record = api.permissions.findByHostmask(`${ctx.nick}!${ctx.ident}@${ctx.hostname}`);
+```
+
+## 9. Security checklist for code review
 
 Use this checklist when reviewing any PR or code change:
 

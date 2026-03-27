@@ -138,6 +138,14 @@ export interface PluginAPI {
   registerHelp(entries: HelpEntry[]): void;
   getHelpEntries(): HelpEntry[];
 
+  /**
+   * Strip IRC formatting and control characters from a string.
+   * Use whenever user-controlled values appear in security-relevant output
+   * (permission grants, op/kick/ban announcements, log messages).
+   * See docs/SECURITY.md section 5.2.
+   */
+  stripFormatting(text: string): string;
+
   // Logging (prefixed with [plugin:<name>])
   log(...args: unknown[]): void;
   error(...args: unknown[]): void;
@@ -200,6 +208,16 @@ export interface IrcConfig {
   username: string;
   realname: string;
   channels: string[];
+  /**
+   * Path to a TLS client certificate file (PEM format).
+   * Required when `services.sasl_mechanism` is "EXTERNAL" (CertFP authentication).
+   */
+  tls_cert?: string;
+  /**
+   * Path to a TLS client private key file (PEM format).
+   * Required when `services.sasl_mechanism` is "EXTERNAL" (CertFP authentication).
+   */
+  tls_key?: string;
 }
 
 /** Owner settings from config/bot.json. */
@@ -220,6 +238,13 @@ export interface ServicesConfig {
   nickserv: string;
   password: string;
   sasl: boolean;
+  /**
+   * SASL mechanism to use. Defaults to "PLAIN" (password auth over TLS).
+   * Set to "EXTERNAL" to authenticate via TLS client certificate (CertFP) —
+   * eliminates the need for a plaintext password in config/bot.json.
+   * Requires `irc.tls_cert` and `irc.tls_key` to be set.
+   */
+  sasl_mechanism?: 'PLAIN' | 'EXTERNAL';
 }
 
 /** Logging settings. */

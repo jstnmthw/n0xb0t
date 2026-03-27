@@ -32,6 +32,7 @@ import type {
   PluginsConfig,
 } from './types';
 import { sanitize } from './utils/sanitize';
+import { stripFormatting } from './utils/strip-formatting';
 import { ircLower } from './utils/wildcard';
 
 // ---------------------------------------------------------------------------
@@ -596,6 +597,11 @@ export class PluginLoader {
       },
       getHelpEntries(): HelpEntry[] {
         return helpRegistry?.getAll() ?? [];
+      },
+
+      // Formatting utility
+      stripFormatting(text: string): string {
+        return stripFormatting(text);
       },
 
       // Logging

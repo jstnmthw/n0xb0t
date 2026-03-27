@@ -1,12 +1,6 @@
 // greeter — Configurable join greeting plugin with user-settable custom greets
 import type { HandlerContext, PluginAPI, UserRecord } from '../../src/types';
 
-// eslint-disable-next-line no-control-regex
-const IRC_FORMAT_RE = /[\x02\x03\x0F\x16\x1D\x1E\x1F]|\x03\d{1,2}(,\d{1,2})?/g;
-function stripFormatting(s: string): string {
-  return s.replace(IRC_FORMAT_RE, '');
-}
-
 export const name = 'greeter';
 export const version = '2.1.0';
 export const description = 'Greets users when they join; lets registered users set a custom greet';
@@ -89,7 +83,7 @@ export function init(api: PluginAPI): void {
 
     const text = greeting
       .replace(/\{channel\}/g, ctx.channel ?? '')
-      .replace(/\{nick\}/g, stripFormatting(ctx.nick));
+      .replace(/\{nick\}/g, api.stripFormatting(ctx.nick));
 
     if (delivery === 'channel_notice' && ctx.channel) {
       api.notice(ctx.channel, text);
@@ -101,7 +95,7 @@ export function init(api: PluginAPI): void {
       const noticeText = joinNotice
         .replace(/[\r\n]/g, '')
         .replace(/\{channel\}/g, ctx.channel ?? '')
-        .replace(/\{nick\}/g, stripFormatting(ctx.nick));
+        .replace(/\{nick\}/g, api.stripFormatting(ctx.nick));
       api.notice(ctx.nick, noticeText);
     }
   });

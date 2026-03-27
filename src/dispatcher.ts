@@ -23,6 +23,27 @@ export interface PermissionsProvider {
   checkFlags(requiredFlags: string, ctx: HandlerContext): boolean;
 }
 
+/**
+ * Optional verification provider — gates privileged handlers on NickServ identity.
+ * Enforces the `config.identity.require_acc_for` policy at dispatch time so that
+ * plugin authors cannot accidentally ship the ACC race condition by omitting a
+ * `verifyUser()` call.
+ */
+export interface VerificationProvider {
+  /** True if the bind's required flags are at or above the `require_acc_for` threshold. */
+  requiresVerificationForFlags(flags: string): boolean;
+  /**
+   * Returns the known services account for a nick from the live account map
+   * (populated via IRCv3 account-notify / extended-join).
+   * - `string`    — nick is identified as this account
+   * - `null`      — nick is known NOT to be identified
+   * - `undefined` — no account data received yet; caller should fall back to NickServ query
+   */
+  getAccountForNick(nick: string): string | null | undefined;
+  /** Verify a user's identity via NickServ ACC/STATUS (async fallback). */
+  verifyUser(nick: string): Promise<{ verified: boolean; account: string | null }>;
+}
+
 /** Filter for listBinds(). */
 export interface BindFilter {
   type?: BindType;
@@ -44,12 +65,18 @@ export class EventDispatcher {
   private binds: BindEntry[] = [];
   private timers: Map<BindEntry, ReturnType<typeof setInterval>> = new Map();
   private permissions: PermissionsProvider | null;
+  private verification: VerificationProvider | null = null;
   private logger: Logger | null;
   private casemapping: Casemapping = 'rfc1459';
 
   constructor(permissions?: PermissionsProvider | null, logger?: Logger | null) {
     this.permissions = permissions ?? null;
     this.logger = logger?.child('dispatcher') ?? null;
+  }
+
+  /** Wire in the verification provider (called after services + channel-state are available). */
+  setVerification(provider: VerificationProvider): void {
+    this.verification = provider;
   }
 
   setCasemapping(cm: Casemapping): void {
@@ -140,6 +167,8 @@ export class EventDispatcher {
   /**
    * Dispatch an event to all matching handlers.
    * Flag checking happens before calling the handler.
+   * When a VerificationProvider is attached, privileged handlers are additionally
+   * gated on NickServ identity — enforcing the require_acc_for policy automatically.
    * Handler errors are caught — one bad handler won't crash others.
    */
   async dispatch(type: BindType, ctx: HandlerContext): Promise<void> {
@@ -147,6 +176,15 @@ export class EventDispatcher {
       if (entry.type !== type) continue;
       if (!this.matchesMask(type, entry.mask, ctx)) continue;
       if (!this.checkFlags(entry.flags, ctx)) continue;
+
+      // ACC verification gate — enforces require_acc_for without plugin authors needing
+      // to remember to call verifyUser() themselves.
+      if (this.verification && !(await this.checkVerification(entry.flags, ctx))) {
+        this.logger?.warn(
+          `ACC verification failed for ${ctx.nick} (${entry.pluginId}, ${type}:${entry.mask})`,
+        );
+        continue;
+      }
 
       entry.hits++;
       try {
@@ -158,6 +196,29 @@ export class EventDispatcher {
         this.logger?.error(`Handler error (${entry.pluginId}, ${type}:${entry.mask}):`, err);
       }
     }
+  }
+
+  /**
+   * Check ACC verification for the given bind flags and context nick.
+   * Returns true (allow) if verification is not required for these flags,
+   * or if the user is already known to be identified (from account-notify/extended-join),
+   * or if NickServ ACC confirms identity. Returns false (deny) if verification
+   * is required and the user is not identified or the query timed out.
+   */
+  private async checkVerification(flags: string, ctx: HandlerContext): Promise<boolean> {
+    if (!this.verification) return true;
+    if (!this.verification.requiresVerificationForFlags(flags)) return true;
+
+    // Fast path: check the live account map populated by account-notify / extended-join
+    const known = this.verification.getAccountForNick(ctx.nick);
+    if (known !== undefined) {
+      // We have definitive information — no NickServ round-trip needed
+      return known !== null; // null = known not identified
+    }
+
+    // Slow path: fall back to NickServ ACC query (pre-IRCv3 or if account data not yet received)
+    const result = await this.verification.verifyUser(ctx.nick);
+    return result.verified;
   }
 
   /** List registered binds, optionally filtered. */

@@ -17,7 +17,7 @@ export function registerChannelCommands(
   handler.registerCommand(
     'chanset',
     {
-      flags: '+o',
+      flags: 'm',
       description: 'Set a per-channel setting',
       usage: '.chanset #chan [+/-]key [value]',
       category: 'settings',

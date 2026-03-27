@@ -632,4 +632,154 @@ describe('ChannelState', () => {
       expect(user).toBeDefined();
     });
   });
+
+  // -------------------------------------------------------------------------
+  // IRCv3: extended-join, account-notify, chghost
+  // -------------------------------------------------------------------------
+
+  describe('IRCv3 extended-join', () => {
+    it('stores account name when extended-join provides one', () => {
+      client.simulateEvent('join', {
+        nick: 'Alice',
+        ident: 'alice',
+        hostname: 'host.com',
+        channel: '#test',
+        account: 'AliceAccount',
+      });
+
+      expect(state.getAccountForNick('Alice')).toBe('AliceAccount');
+      expect(state.getUser('#test', 'Alice')!.accountName).toBe('AliceAccount');
+    });
+
+    it('stores null when extended-join account is false (not identified)', () => {
+      client.simulateEvent('join', {
+        nick: 'Alice',
+        ident: 'alice',
+        hostname: 'host.com',
+        channel: '#test',
+        account: false,
+      });
+
+      expect(state.getAccountForNick('Alice')).toBeNull();
+      expect(state.getUser('#test', 'Alice')!.accountName).toBeNull();
+    });
+
+    it('returns undefined for a nick with no account-notify/extended-join data', () => {
+      client.simulateEvent('join', {
+        nick: 'Alice',
+        ident: 'alice',
+        hostname: 'host.com',
+        channel: '#test',
+        // no account field — server didn't negotiate extended-join
+      });
+
+      expect(state.getAccountForNick('Alice')).toBeUndefined();
+    });
+  });
+
+  describe('IRCv3 account-notify', () => {
+    it('updates account name when user identifies', () => {
+      client.simulateEvent('join', {
+        nick: 'Alice',
+        ident: 'alice',
+        hostname: 'host.com',
+        channel: '#test',
+        account: false,
+      });
+      expect(state.getAccountForNick('Alice')).toBeNull();
+
+      client.simulateEvent('account', {
+        nick: 'Alice',
+        ident: 'alice',
+        hostname: 'host.com',
+        account: 'AliceAccount',
+      });
+
+      expect(state.getAccountForNick('Alice')).toBe('AliceAccount');
+      expect(state.getUser('#test', 'Alice')!.accountName).toBe('AliceAccount');
+    });
+
+    it('clears account name when user deidentifies', () => {
+      client.simulateEvent('join', {
+        nick: 'Alice',
+        ident: 'alice',
+        hostname: 'host.com',
+        channel: '#test',
+        account: 'AliceAccount',
+      });
+      expect(state.getAccountForNick('Alice')).toBe('AliceAccount');
+
+      client.simulateEvent('account', {
+        nick: 'Alice',
+        ident: 'alice',
+        hostname: 'host.com',
+        account: false,
+      });
+
+      expect(state.getAccountForNick('Alice')).toBeNull();
+      expect(state.getUser('#test', 'Alice')!.accountName).toBeNull();
+    });
+  });
+
+  describe('IRCv3 chghost', () => {
+    it('updates ident and hostname on user updated event', () => {
+      client.simulateEvent('join', {
+        nick: 'Alice',
+        ident: 'alice',
+        hostname: 'old.host.com',
+        channel: '#test',
+      });
+
+      client.simulateEvent('user updated', {
+        nick: 'Alice',
+        ident: 'alice',
+        hostname: 'old.host.com',
+        new_ident: 'newident',
+        new_hostname: 'cloaked.host.net',
+      });
+
+      const user = state.getUser('#test', 'Alice')!;
+      expect(user.ident).toBe('newident');
+      expect(user.hostname).toBe('cloaked.host.net');
+      expect(user.hostmask).toBe('Alice!newident@cloaked.host.net');
+    });
+  });
+
+  describe('account tracking on nick change and quit', () => {
+    it('carries account forward when user changes nick', () => {
+      client.simulateEvent('join', {
+        nick: 'Alice',
+        ident: 'alice',
+        hostname: 'host.com',
+        channel: '#test',
+        account: 'AliceAccount',
+      });
+      expect(state.getAccountForNick('Alice')).toBe('AliceAccount');
+
+      client.simulateEvent('nick', {
+        nick: 'Alice',
+        ident: 'alice',
+        hostname: 'host.com',
+        new_nick: 'Alice2',
+      });
+
+      expect(state.getAccountForNick('Alice2')).toBe('AliceAccount');
+      expect(state.getAccountForNick('Alice')).toBeUndefined();
+    });
+
+    it('removes account from map on quit', () => {
+      client.simulateEvent('join', {
+        nick: 'Alice',
+        ident: 'alice',
+        hostname: 'host.com',
+        channel: '#test',
+        account: 'AliceAccount',
+      });
+      expect(state.getAccountForNick('Alice')).toBe('AliceAccount');
+
+      client.simulateEvent('quit', { nick: 'Alice' });
+
+      expect(state.getAccountForNick('Alice')).toBeUndefined();
+    });
+  });
 });
