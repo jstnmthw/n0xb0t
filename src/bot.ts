@@ -408,22 +408,29 @@ export class Bot {
       this.services.setCasemapping(this._casemapping);
       if (this._dccManager) this._dccManager.setCasemapping(this._casemapping);
 
-      // Log join failures so the user knows why the bot is not in a channel
-      const JOIN_ERRORS: Record<string, string> = {
-        '471': 'channel is full (+l)',
-        '473': 'invite only (+i)',
-        '474': 'banned from channel (+b)',
-        '475': 'bad channel key (+k)',
-        '477': 'need to register nick (+r)',
+      // Log join failures so the user knows why the bot is not in a channel.
+      // irc-framework maps join error numerics to named 'irc error' events, not numeric strings.
+      const JOIN_ERROR_NAMES: Record<string, string> = {
+        channel_is_full: 'channel is full (+l)',
+        invite_only_channel: 'invite only (+i)',
+        banned_from_channel: 'banned from channel (+b)',
+        bad_channel_key: 'bad channel key (+k)',
       };
-      for (const [numeric, reason] of Object.entries(JOIN_ERRORS)) {
-        this.client.on(numeric, (event: unknown) => {
-          const e = event as Record<string, unknown>;
+      this.client.on('irc error', (event: unknown) => {
+        const e = event as Record<string, unknown>;
+        const reason = JOIN_ERROR_NAMES[String(e.error ?? '')];
+        if (reason) {
+          this.botLogger.warn(`Cannot join ${String(e.channel ?? '')}: ${reason}`);
+        }
+      });
+      // 477 (need to register nick) is unknown to irc-framework — catch it via raw numeric.
+      this.client.on('unknown command', (event: unknown) => {
+        const e = event as Record<string, unknown>;
+        if (String(e.command ?? '') === '477') {
           const params = Array.isArray(e.params) ? (e.params as unknown[]) : [];
-          const channel = String(params[1] ?? '');
-          this.botLogger.warn(`Cannot join ${channel}: ${reason}`);
-        });
-      }
+          this.botLogger.warn(`Cannot join ${String(params[1] ?? '')}: need to register nick (+r)`);
+        }
+      });
 
       // Join configured channels
       for (const ch of this.configuredChannels) {
