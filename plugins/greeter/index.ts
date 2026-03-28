@@ -162,8 +162,6 @@ export function init(api: PluginAPI): void {
 
     ctx.replyPrivate('Usage: !greet | !greet set <message> | !greet del');
   });
-
-  api.log('Loaded');
 }
 
 export function teardown(): void {

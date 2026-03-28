@@ -295,8 +295,6 @@ export function init(pluginApi: PluginAPI): void {
   api.bind('time', '-', '60', () => {
     liftExpiredFloodBans();
   });
-
-  api.log('Loaded');
 }
 
 // ---------------------------------------------------------------------------

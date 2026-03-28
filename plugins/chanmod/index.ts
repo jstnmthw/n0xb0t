@@ -66,8 +66,6 @@ export function init(api: PluginAPI): void {
     setupProtection(api, config, state),
     setupCommands(api, config, state),
   ];
-
-  api.log('Loaded');
 }
 
 export function teardown(): void {

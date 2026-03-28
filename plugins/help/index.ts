@@ -97,8 +97,6 @@ export function init(api: PluginAPI): void {
 
   api.bind('pub', '-', '!help', handler);
   api.bind('msg', '-', '!help', handler);
-
-  api.log('Loaded');
 }
 
 export function teardown(): void {

@@ -33,6 +33,4 @@ export function init(api: PluginAPI): void {
   api.bind('ctcp', '-', 'TIME', (ctx) => {
     api.ctcpResponse(ctx.nick, 'TIME', new Date().toString());
   });
-
-  api.log('Loaded');
 }
