@@ -27,10 +27,12 @@
   "punish_action": "kick",
   "punish_kick_reason": "Don't deop my friends.",
   "enforcebans": false,
-  "topic_protect": false,
   "nick_recovery": true,
   "nick_recovery_ghost": false,
   "nick_recovery_password": "",
   "stopnethack_mode": 0,
-  "split_timeout_ms": 300000
+  "split_timeout_ms": 300000,
+  "chanserv_op": false,
+  "chanserv_nick": "ChanServ",
+  "chanserv_op_delay_ms": 1000
 }

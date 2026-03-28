@@ -78,12 +78,14 @@ export interface ChanmodConfig {
   punish_action: 'kick' | 'kickban';
   punish_kick_reason: string;
   enforcebans: boolean;
-  topic_protect: boolean;
   nick_recovery: boolean;
   nick_recovery_ghost: boolean;
   nick_recovery_password: string;
   stopnethack_mode: number;
   split_timeout_ms: number;
+  chanserv_op: boolean;
+  chanserv_nick: string;
+  chanserv_op_delay_ms: number;
 }
 
 /** Read a typed value from the plugin config, falling back to a default. Single cast site. */
@@ -123,11 +125,13 @@ export function readConfig(api: PluginAPI): ChanmodConfig {
     punish_action: cfg<'kick' | 'kickban'>(c, 'punish_action', 'kick'),
     punish_kick_reason: cfg(c, 'punish_kick_reason', "Don't deop my friends."),
     enforcebans: cfg(c, 'enforcebans', false),
-    topic_protect: cfg(c, 'topic_protect', false),
     nick_recovery: cfg(c, 'nick_recovery', true),
     nick_recovery_ghost: cfg(c, 'nick_recovery_ghost', false),
     nick_recovery_password: cfg(c, 'nick_recovery_password', ''),
     stopnethack_mode: cfg(c, 'stopnethack_mode', 0),
     split_timeout_ms: cfg(c, 'split_timeout_ms', 300_000),
+    chanserv_op: cfg(c, 'chanserv_op', false),
+    chanserv_nick: cfg(c, 'chanserv_nick', 'ChanServ'),
+    chanserv_op_delay_ms: cfg(c, 'chanserv_op_delay_ms', 1000),
   };
 }

@@ -55,8 +55,22 @@ export function setupModeEnforce(
       }
     }
 
-    // --- Bot self-deop → cycle ---
+    // --- Bot self-deop → ChanServ OP recovery + cycle ---
     if (modeStr === '-o' && isBotNick(api, target)) {
+      // Ask ChanServ to re-op the bot if it is present in the channel
+      const chanservOp = api.channelSettings.get(channel, 'chanserv_op') as boolean;
+      if (chanservOp) {
+        const ch = api.getChannel(channel);
+        const csNickLower = api.ircLower(config.chanserv_nick);
+        if (ch?.users.has(csNickLower)) {
+          api.log(`Requesting ops from ${config.chanserv_nick} in ${channel}`);
+          const csTimer = setTimeout(() => {
+            api.say(config.chanserv_nick, `OP ${channel}`);
+          }, config.chanserv_op_delay_ms);
+          state.cycleTimers.push(csTimer);
+        }
+      }
+
       if (config.cycle_on_deop && !state.cycleScheduled.has(api.ircLower(channel))) {
         const cooldownKey = `${api.ircLower(channel)}:cycle`;
         const now = Date.now();

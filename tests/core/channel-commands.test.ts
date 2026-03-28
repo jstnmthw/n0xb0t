@@ -185,10 +185,13 @@ describe('channel-commands', () => {
       expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('Unknown setting'));
     });
 
-    it('missing key arg → usage error', async () => {
+    it('missing key arg → lists available settings', async () => {
       const ctx = makeCtx();
       await handler.execute('.chanset #test', ctx);
-      expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('Usage'));
+      // First reply is the header line
+      expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('Settings for #test'));
+      // Subsequent replies list individual settings
+      expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('protect_topic'));
     });
 
     it('empty key after stripping prefix → usage error', async () => {

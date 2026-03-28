@@ -56,6 +56,18 @@ export function init(api: PluginAPI): void {
       default: config.enforcebans,
       description: 'Kick users who match a new ban mask',
     },
+    {
+      key: 'revenge',
+      type: 'flag',
+      default: config.revenge_on_kick,
+      description: 'Kick/deop/kickban whoever kicks the bot (see revenge_action in config)',
+    },
+    {
+      key: 'chanserv_op',
+      type: 'flag',
+      default: config.chanserv_op,
+      description: 'Request ops from ChanServ when the bot is deopped and ChanServ is present',
+    },
   ]);
 
   teardowns = [

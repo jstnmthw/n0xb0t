@@ -32,7 +32,25 @@ export function registerChannelCommands(
       }
 
       if (parts.length < 2 || !parts[1]) {
-        ctx.reply('Usage: .chanset #chan [+/-]key [value]');
+        // List all available settings for this channel
+        const snapshot = channelSettings.getChannelSnapshot(channel);
+        if (snapshot.length === 0) {
+          ctx.reply('No channel settings registered (no plugins with settings loaded)');
+          return;
+        }
+        ctx.reply(`Settings for ${channel} — use .chanset ${channel} [+/-]key [value] to change:`);
+        for (const { entry, value, isDefault } of snapshot) {
+          let display: string;
+          if (entry.type === 'flag') {
+            display = value ? 'ON' : 'OFF';
+          } else {
+            display = String(value) || '(not set)';
+          }
+          const marker = isDefault ? '' : ' *';
+          ctx.reply(
+            `  ${entry.key.padEnd(16)} ${entry.type.padEnd(6)} ${display.padEnd(8)}${marker}  ${entry.description}`,
+          );
+        }
         return;
       }
 
@@ -48,7 +66,7 @@ export function registerChannelCommands(
 
       const def = channelSettings.getDef(key);
       if (!def) {
-        ctx.reply(`Unknown setting: "${key}" — is the plugin loaded?`);
+        ctx.reply(`Unknown setting: "${key}" — use .chanset ${channel} to list available settings`);
         return;
       }
 

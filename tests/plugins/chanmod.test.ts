@@ -3075,3 +3075,78 @@ describe('chanmod plugin — stopnethack ignores non-split quits', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// chanserv_op: request ops from ChanServ when bot is deopped
+// ---------------------------------------------------------------------------
+describe('chanmod plugin — chanserv_op recovery', () => {
+  it('messages ChanServ OP <channel> when bot is deopped and ChanServ is present', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: { chanserv_op: true, chanserv_nick: 'ChanServ', chanserv_op_delay_ms: 10 },
+        },
+      });
+      addToChannel(freshBot, 'ChanServ', 'ChanServ', 'services.', '#test');
+      giveBotOps(freshBot, '#test');
+      freshBot.client.clearMessages();
+      simulateMode(freshBot, 'SomeOp', '#test', '-o', 'hexbot');
+      await tick(50);
+      expect(
+        freshBot.client.messages.find(
+          (m) => m.type === 'say' && m.target === 'ChanServ' && m.message === 'OP #test',
+        ),
+      ).toBeDefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+
+  it('does NOT message ChanServ when it is not in the channel', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: { chanserv_op: true, chanserv_nick: 'ChanServ', chanserv_op_delay_ms: 10 },
+        },
+      });
+      giveBotOps(freshBot, '#test');
+      freshBot.client.clearMessages();
+      simulateMode(freshBot, 'SomeOp', '#test', '-o', 'hexbot');
+      await tick(50);
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'say' && m.target === 'ChanServ'),
+      ).toBeUndefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+
+  it('does NOT message ChanServ when chanserv_op is disabled', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: { chanserv_op: false, chanserv_nick: 'ChanServ', chanserv_op_delay_ms: 10 },
+        },
+      });
+      addToChannel(freshBot, 'ChanServ', 'ChanServ', 'services.', '#test');
+      giveBotOps(freshBot, '#test');
+      freshBot.client.clearMessages();
+      simulateMode(freshBot, 'SomeOp', '#test', '-o', 'hexbot');
+      await tick(50);
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'say' && m.target === 'ChanServ'),
+      ).toBeUndefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+});
