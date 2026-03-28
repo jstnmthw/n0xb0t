@@ -435,13 +435,20 @@ export class DCCManager {
     const { nick, ident, hostname } = ctx;
 
     // 1. Parse payload — must be a passive CHAT request
+    this.logger?.debug(`DCC CTCP from ${nick}: args="${ctx.args}"`);
     const parsed = parseDccChatPayload(ctx.args);
-    if (!parsed) return; // not a CHAT subtype, silently ignore
+    if (!parsed) {
+      this.logger?.debug(`DCC CTCP from ${nick}: not a CHAT subtype, ignoring`);
+      return;
+    }
 
     if (!isPassiveDcc(parsed.ip, parsed.port)) {
+      this.logger?.info(
+        `DCC CHAT rejected (active DCC) from ${nick}: ip=${parsed.ip} port=${parsed.port}`,
+      );
       this.client.notice(
         nick,
-        'hexbot only accepts passive DCC CHAT. In your client use: /dcc chat hexbot (not active DCC).',
+        'hexbot only accepts passive DCC CHAT. Enable passive/reverse DCC in your client settings, then try /dcc chat hexbot again.',
       );
       return;
     }
@@ -450,6 +457,7 @@ export class DCCManager {
     const fullHostmask = `${nick}!${ident}@${hostname}`;
     const user = this.permissions.findByHostmask(fullHostmask);
     if (!user) {
+      this.logger?.info(`DCC CHAT rejected (no hostmask match) for ${fullHostmask}`);
       this.client.notice(nick, 'DCC CHAT: your hostmask is not in the user database.');
       return;
     }
@@ -458,6 +466,9 @@ export class DCCManager {
     const requiredFlags = this.config.require_flags;
     const hasFlags = requiredFlags.split('').some((f) => user.global.includes(f));
     if (!hasFlags) {
+      this.logger?.info(
+        `DCC CHAT rejected (insufficient flags) for ${nick}: has="${user.global}" needs="${requiredFlags}"`,
+      );
       this.client.notice(nick, `DCC CHAT: insufficient flags (requires +${requiredFlags}).`);
       return;
     }
