@@ -42,7 +42,7 @@ jobs:
         with:
           auth: ${{ secrets.GIST_SECRET }}
           gistID: ${{ vars.COVERAGE_GIST_ID }}
-          filename: hexbot-coverage-badge.json
+          filename: hexbot-coverage.json
           label: coverage
           message: ${{ needs.test.outputs.coverage }}%
           valColorRange: ${{ needs.test.outputs.coverage }}
