@@ -52,8 +52,7 @@ export function setupAutoOp(api: PluginAPI, config: ChanmodConfig, state: Shared
     if (!shouldOp && !shouldHalfop && !shouldVoice) return;
 
     // NickServ verification if required
-    const identityConfig = api.botConfig.identity as Record<string, unknown> | undefined;
-    const requireAccFor = (identityConfig?.require_acc_for as string[] | undefined) ?? [];
+    const requireAccFor = api.botConfig.identity.require_acc_for;
     const flagToApply = shouldOp ? '+o' : shouldHalfop ? '+h' : '+v';
     const needsVerification = requireAccFor.includes(flagToApply) && api.services.isAvailable();
 

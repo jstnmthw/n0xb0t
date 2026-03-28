@@ -23,8 +23,10 @@ import type {
   ChannelSettingDef,
   ChannelSettingValue,
   ChannelUser,
+  HandlerContext,
   HelpEntry,
   PluginAPI,
+  PluginBotConfig,
   PluginChannelSettings,
   PluginDB,
   PluginPermissions,
@@ -217,13 +219,13 @@ export class PluginLoader {
     }
     if (typeof mod.init !== 'function') {
       return {
-        name: mod.name as string,
+        name: mod.name,
         status: 'error',
         error: 'Plugin must export an "init" function',
       };
     }
 
-    const pluginName = mod.name as string;
+    const pluginName = mod.name;
 
     // Validate safe name
     if (!SAFE_NAME_RE.test(pluginName)) {
@@ -399,7 +401,7 @@ export class PluginLoader {
       findByHostmask(hostmask: string) {
         return permissions.findByHostmask(hostmask);
       },
-      checkFlags(requiredFlags: string, ctx: import('./types.js').HandlerContext) {
+      checkFlags(requiredFlags: string, ctx: HandlerContext) {
         return permissions.checkFlags(requiredFlags, ctx);
       },
     });
@@ -414,6 +416,25 @@ export class PluginLoader {
         return services?.isAvailable() ?? false;
       },
     });
+
+    // Build the plugin-facing bot config as a typed variable so TypeScript can verify
+    // the shape before freezing — avoids the `as unknown as PluginBotConfig` double cast.
+    const pluginBotConfig: PluginBotConfig = {
+      irc: {
+        ...this.botConfig.irc,
+        channels: [...this.botConfig.irc.channels],
+      },
+      owner: { ...this.botConfig.owner },
+      identity: { ...this.botConfig.identity },
+      services: {
+        type: this.botConfig.services.type,
+        nickserv: this.botConfig.services.nickserv,
+        sasl: this.botConfig.services.sasl,
+        // password intentionally omitted
+      },
+      // database and pluginDir intentionally omitted — plugins don't need filesystem paths
+      logging: { ...this.botConfig.logging },
+    };
 
     const api: PluginAPI = {
       pluginId,
@@ -547,22 +568,7 @@ export class PluginLoader {
       db: pluginDb,
 
       // Bot config (read-only, deep-frozen, password redacted)
-      botConfig: Object.freeze({
-        irc: Object.freeze({
-          ...this.botConfig.irc,
-          channels: Object.freeze([...this.botConfig.irc.channels]),
-        }),
-        owner: Object.freeze({ ...this.botConfig.owner }),
-        identity: Object.freeze({ ...this.botConfig.identity }),
-        services: Object.freeze({
-          type: this.botConfig.services.type,
-          nickserv: this.botConfig.services.nickserv,
-          sasl: this.botConfig.services.sasl,
-          // password intentionally omitted
-        }),
-        // database and pluginDir intentionally omitted — plugins don't need filesystem paths
-        logging: Object.freeze({ ...this.botConfig.logging }),
-      }),
+      botConfig: Object.freeze(pluginBotConfig),
 
       // Config
       config: Object.freeze({ ...config }),

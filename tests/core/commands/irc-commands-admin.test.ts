@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { type CommandContext, CommandHandler } from '../../../src/command-handler';
 import {
@@ -7,15 +7,13 @@ import {
   registerIRCAdminCommands,
 } from '../../../src/core/commands/irc-commands-admin';
 
-/** Helper: create a minimal CommandContext. */
-function makeCtx(overrides: Partial<CommandContext> = {}): CommandContext {
-  return {
-    source: 'repl',
-    nick: 'admin',
-    channel: null,
-    reply: vi.fn(),
-    ...overrides,
-  };
+/** Helper: create a minimal CommandContext with a typed reply mock. */
+function makeCtx(
+  overrides: Partial<CommandContext> = {},
+): CommandContext & { reply: Mock<(msg: string) => void> } {
+  const reply = vi.fn<(msg: string) => void>();
+  const ctx: CommandContext = { source: 'repl', nick: 'admin', channel: null, reply, ...overrides };
+  return ctx as CommandContext & { reply: Mock<(msg: string) => void> };
 }
 
 describe('irc-commands-admin', () => {
@@ -127,7 +125,7 @@ describe('irc-commands-admin', () => {
       const ctx = makeCtx();
       await handler.execute('.status', ctx);
 
-      const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const output = ctx.reply.mock.calls[0][0];
       expect(output).toContain('Status: connected as testbot');
       expect(output).toContain('Uptime: 1h 1m 1s');
       expect(output).toContain('#test, #dev');
@@ -140,7 +138,7 @@ describe('irc-commands-admin', () => {
       const ctx = makeCtx();
       await handler.execute('.status', ctx);
 
-      const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const output = ctx.reply.mock.calls[0][0];
       expect(output).toContain('Status: disconnected');
     });
 
@@ -149,7 +147,7 @@ describe('irc-commands-admin', () => {
       const ctx = makeCtx();
       await handler.execute('.status', ctx);
 
-      const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const output = ctx.reply.mock.calls[0][0];
       expect(output).toContain('(none)');
     });
   });

@@ -1,18 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { type Mock, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { type CommandContext, CommandHandler } from '../../../src/command-handler';
 import { registerDispatcherCommands } from '../../../src/core/commands/dispatcher-commands';
 import { EventDispatcher } from '../../../src/dispatcher';
 
-/** Helper: create a minimal CommandContext. */
-function makeCtx(overrides: Partial<CommandContext> = {}): CommandContext {
-  return {
-    source: 'repl',
-    nick: 'admin',
-    channel: null,
-    reply: vi.fn(),
-    ...overrides,
-  };
+/** Helper: create a minimal CommandContext with a typed reply mock. */
+function makeCtx(
+  overrides: Partial<CommandContext> = {},
+): CommandContext & { reply: Mock<(msg: string) => void> } {
+  const reply = vi.fn<(msg: string) => void>();
+  const ctx: CommandContext = { source: 'repl', nick: 'admin', channel: null, reply, ...overrides };
+  return ctx as CommandContext & { reply: Mock<(msg: string) => void> };
 }
 
 describe('dispatcher-commands', () => {
@@ -38,7 +36,7 @@ describe('dispatcher-commands', () => {
       const ctx = makeCtx();
       await handler.execute('.binds', ctx);
 
-      const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const output = ctx.reply.mock.calls[0][0];
       expect(output).toContain('All binds');
       expect(output).toContain('!hello');
       expect(output).toContain('*bye*');
@@ -52,7 +50,7 @@ describe('dispatcher-commands', () => {
       const ctx = makeCtx();
       await handler.execute('.binds seen', ctx);
 
-      const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const output = ctx.reply.mock.calls[0][0];
       expect(output).toContain('seen');
       expect(output).not.toContain('test-plugin');
     });
@@ -61,7 +59,7 @@ describe('dispatcher-commands', () => {
       const ctx = makeCtx();
       await handler.execute('.binds', ctx);
 
-      const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const output = ctx.reply.mock.calls[0][0];
       expect(output).toContain('No active binds');
     });
   });

@@ -176,8 +176,8 @@ export interface PluginAPI {
   // Database (namespaced to this plugin)
   db: PluginDB;
 
-  // Bot config (read-only)
-  botConfig: Record<string, unknown>;
+  // Bot config (read-only, password redacted)
+  botConfig: PluginBotConfig;
 
   // Config (from plugins.json overrides, falling back to plugin's config.json)
   config: Record<string, unknown>;
@@ -419,6 +419,25 @@ export interface HelpEntry {
   description: string; // one-line description
   detail?: string[]; // extra lines shown only in !help <command>
   category?: string; // grouping label, defaults to pluginId
+}
+
+// ---------------------------------------------------------------------------
+// Plugin-facing bot config
+// ---------------------------------------------------------------------------
+
+/** IrcConfig as exposed to plugins — channels is readonly. */
+export interface PluginIrcConfig extends Readonly<Omit<IrcConfig, 'channels'>> {
+  readonly channels: readonly string[];
+}
+
+/** Plugin-facing bot config (read-only view, password redacted). */
+export interface PluginBotConfig {
+  readonly irc: PluginIrcConfig;
+  readonly owner: Readonly<OwnerConfig>;
+  readonly identity: Readonly<IdentityConfig>;
+  /** NickServ config with password omitted. */
+  readonly services: Readonly<Pick<ServicesConfig, 'type' | 'nickserv' | 'sasl'>>;
+  readonly logging: Readonly<LoggingConfig>;
 }
 
 /** Shape for a single plugin entry in config/plugins.json. */

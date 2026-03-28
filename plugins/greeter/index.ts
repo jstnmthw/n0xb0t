@@ -52,8 +52,7 @@ export function init(api: PluginAPI): void {
   const minFlag = (api.config.min_flag as string) ?? 'v';
   const delivery = (api.config.delivery as string) ?? 'say';
   const joinNotice = (api.config.join_notice as string) ?? '';
-  const irc = api.botConfig.irc as Record<string, unknown> | undefined;
-  botNick = (irc?.nick as string) ?? '';
+  botNick = api.botConfig.irc.nick;
 
   // Register per-channel greeting setting; default reflects the global config value
   api.channelSettings.register([

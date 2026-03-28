@@ -44,8 +44,7 @@ let offenceTracker: Map<string, OffenceEntry>; // `${nick}@${channel}` or `${hos
 // ---------------------------------------------------------------------------
 
 function getBotNick(): string {
-  const irc = api.botConfig.irc as Record<string, unknown> | undefined;
-  return (irc?.nick as string | undefined) ?? '';
+  return api.botConfig.irc.nick;
 }
 
 function isBotNick(nick: string): boolean {
@@ -272,8 +271,7 @@ export function init(pluginApi: PluginAPI): void {
 
     // Nick changes are global — find channels the user is in
     // Punish in the first channel where we have ops
-    const botConfig = api.botConfig.irc as Record<string, unknown> | undefined;
-    const channels = (botConfig?.channels as string[] | undefined) ?? [];
+    const channels = api.botConfig.irc.channels;
     for (const channel of channels) {
       if (isPrivileged(ctx.nick, channel, ignoreOps)) return;
       if (!botHasOps(channel)) continue;

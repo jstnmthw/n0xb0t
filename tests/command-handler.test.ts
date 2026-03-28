@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { type Mock, describe, expect, it, vi } from 'vitest';
 
 import {
   type CommandContext,
@@ -6,15 +6,13 @@ import {
   type CommandPermissionsProvider,
 } from '../src/command-handler';
 
-/** Helper: create a minimal CommandContext. */
-function makeCtx(overrides: Partial<CommandContext> = {}): CommandContext {
-  return {
-    source: 'repl',
-    nick: 'admin',
-    channel: null,
-    reply: vi.fn(),
-    ...overrides,
-  };
+/** Helper: create a minimal CommandContext with a typed reply mock. */
+function makeCtx(
+  overrides: Partial<CommandContext> = {},
+): CommandContext & { reply: Mock<(msg: string) => void> } {
+  const reply = vi.fn<(msg: string) => void>();
+  const ctx: CommandContext = { source: 'repl', nick: 'admin', channel: null, reply, ...overrides };
+  return ctx as CommandContext & { reply: Mock<(msg: string) => void> };
 }
 
 describe('CommandHandler', () => {
@@ -29,7 +27,7 @@ describe('CommandHandler', () => {
       await handler.execute('.help', ctx);
 
       expect(ctx.reply).toHaveBeenCalledOnce();
-      const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const output = ctx.reply.mock.calls[0][0];
       expect(output).toContain('Available commands');
       expect(output).toContain('.help');
     });
@@ -39,7 +37,7 @@ describe('CommandHandler', () => {
       const ctx = makeCtx();
       await handler.execute('.help help', ctx);
 
-      const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const output = ctx.reply.mock.calls[0][0];
       expect(output).toContain('.help');
       expect(output).toContain('List commands');
     });
@@ -49,7 +47,7 @@ describe('CommandHandler', () => {
       const ctx = makeCtx();
       await handler.execute('.help nosuchcommand', ctx);
 
-      const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const output = ctx.reply.mock.calls[0][0];
       expect(output).toContain('Unknown command');
     });
   });
@@ -110,7 +108,7 @@ describe('CommandHandler', () => {
       const ctx = makeCtx();
       await handler.execute('.nonexistent', ctx);
 
-      const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const output = ctx.reply.mock.calls[0][0];
       expect(output).toContain('Unknown command');
       expect(output).toContain('.help');
     });
@@ -166,7 +164,7 @@ describe('CommandHandler', () => {
       const ctx = makeCtx();
       await handler.execute('.broken', ctx);
 
-      const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const output = ctx.reply.mock.calls[0][0];
       expect(output).toContain('Error');
       expect(output).toContain('something went wrong');
     });

@@ -11,7 +11,7 @@ function makeCtx(
   overrides?: Partial<CommandContext>,
 ): CommandContext & { reply: Mock<(msg: string) => void> } {
   const reply = vi.fn<(msg: string) => void>();
-  return {
+  const ctx: CommandContext = {
     source: 'repl',
     nick: 'admin',
     ident: 'admin',
@@ -19,7 +19,9 @@ function makeCtx(
     channel: null,
     reply,
     ...overrides,
-  } as unknown as CommandContext & { reply: Mock<(msg: string) => void> };
+  };
+  // Narrow: reply is always Mock<...> unless overridden — safe direct cast (no unknown bridge)
+  return ctx as CommandContext & { reply: Mock<(msg: string) => void> };
 }
 
 describe('channel-commands', () => {

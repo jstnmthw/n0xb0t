@@ -3,6 +3,7 @@
 import type { BotEventBus } from '../event-bus';
 import type { Logger } from '../logger';
 import type { IdentityConfig, ServicesConfig } from '../types';
+import { toEventObject } from '../utils/irc-event';
 import { type Casemapping, ircLower } from '../utils/wildcard';
 
 // ---------------------------------------------------------------------------
@@ -65,8 +66,7 @@ export class Services {
   /** Start listening for NickServ responses. */
   attach(): void {
     this.noticeListener = (...args: unknown[]) => {
-      const event = (args[0] ?? {}) as Record<string, unknown>;
-      this.onNotice(event);
+      this.onNotice(toEventObject(args[0]));
     };
     this.client.on('notice', this.noticeListener);
     this.logger?.info('Attached to IRC client');

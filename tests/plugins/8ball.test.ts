@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { type Mock, afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { Permissions } from '../../src/core/permissions';
 import { BotDatabase } from '../../src/database';
@@ -26,8 +26,11 @@ const MINIMAL_BOT_CONFIG: BotConfig = {
   logging: { level: 'info', mod_actions: false },
 };
 
-function makeCtx(overrides: Partial<HandlerContext> = {}): HandlerContext {
-  return {
+function makeCtx(
+  overrides: Partial<HandlerContext> = {},
+): HandlerContext & { reply: Mock<(msg: string) => void> } {
+  const reply = vi.fn<(msg: string) => void>();
+  const ctx: HandlerContext = {
     nick: 'user1',
     ident: 'user',
     hostname: 'host.com',
@@ -35,10 +38,11 @@ function makeCtx(overrides: Partial<HandlerContext> = {}): HandlerContext {
     text: '!8ball Will this work?',
     command: '!8ball',
     args: 'Will this work?',
-    reply: vi.fn(),
+    reply,
     replyPrivate: vi.fn(),
     ...overrides,
   };
+  return ctx as HandlerContext & { reply: Mock<(msg: string) => void> };
 }
 
 describe('8ball plugin', () => {
@@ -78,7 +82,7 @@ describe('8ball plugin', () => {
     await dispatcher.dispatch('pub', ctx);
 
     expect(ctx.reply).toHaveBeenCalledOnce();
-    const response = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    const response = ctx.reply.mock.calls[0][0];
     expect(response).toMatch(/^🎱 /);
   });
 
@@ -109,7 +113,7 @@ describe('8ball plugin', () => {
     const ctx = makeCtx();
     await dispatcher.dispatch('pub', ctx);
 
-    const response = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    const response = ctx.reply.mock.calls[0][0];
     const answer = response.replace('🎱 ', '');
     expect(KNOWN_RESPONSES).toContain(answer);
   });

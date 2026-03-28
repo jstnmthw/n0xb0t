@@ -3,6 +3,7 @@
 // Updated in real time from IRC events.
 import type { BotEventBus } from '../event-bus';
 import type { Logger } from '../logger';
+import { isModeArray, isObjectArray, toEventObject } from '../utils/irc-event';
 import { type Casemapping, ircLower } from '../utils/wildcard';
 
 // ---------------------------------------------------------------------------
@@ -231,9 +232,8 @@ export class ChannelState {
 
   private onMode(event: Record<string, unknown>): void {
     const target = String(event.target ?? '');
-    const modes = event.modes as Array<{ mode: string; param?: string }> | undefined;
-
-    if (!target || !modes) return;
+    if (!target || !isModeArray(event.modes)) return;
+    const modes = event.modes;
 
     const ch = this.channels.get(ircLower(target, this.casemapping));
     if (!ch) return;
@@ -274,9 +274,8 @@ export class ChannelState {
 
   private onUserlist(event: Record<string, unknown>): void {
     const channel = String(event.channel ?? '');
-    const users = event.users as Array<Record<string, unknown>> | undefined;
-
-    if (!channel || !users) return;
+    if (!channel || !isObjectArray(event.users)) return;
+    const users = event.users;
 
     const ch = this.ensureChannel(channel);
 
@@ -286,7 +285,7 @@ export class ChannelState {
 
       const ident = String(u.ident ?? '');
       const hostname = String(u.hostname ?? '');
-      const modes = this.parseUserlistModes(u.modes as string | undefined);
+      const modes = this.parseUserlistModes(typeof u.modes === 'string' ? u.modes : undefined);
 
       // Only add if not already present (join event may have fired first)
       if (!ch.users.has(ircLower(nick, this.casemapping))) {
@@ -312,8 +311,8 @@ export class ChannelState {
   }
 
   private onWholist(event: Record<string, unknown>): void {
-    const users = event.users as Array<Record<string, unknown>> | undefined;
-    if (!users) return;
+    if (!isObjectArray(event.users)) return;
+    const users = event.users;
 
     for (const u of users) {
       const nick = String(u.nick ?? '');
@@ -408,7 +407,7 @@ export class ChannelState {
   }
 
   private listen(event: string, handler: (event: Record<string, unknown>) => void): void {
-    const fn = (...args: unknown[]) => handler((args[0] ?? {}) as Record<string, unknown>);
+    const fn = (...args: unknown[]) => handler(toEventObject(args[0]));
     this.client.on(event, fn);
     this.listeners.push({ event, fn });
   }

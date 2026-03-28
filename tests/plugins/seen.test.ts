@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { type Mock, afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { Permissions } from '../../src/core/permissions';
 import { BotDatabase } from '../../src/database';
@@ -26,12 +26,16 @@ const MINIMAL_BOT_CONFIG: BotConfig = {
   logging: { level: 'info', mod_actions: false },
 };
 
-function makePubCtx(nick: string, text: string, channel = '#test'): HandlerContext {
+function makePubCtx(
+  nick: string,
+  text: string,
+  channel = '#test',
+): HandlerContext & { reply: Mock<(msg: string) => void> } {
   const spaceIdx = text.indexOf(' ');
   const command = spaceIdx === -1 ? text : text.substring(0, spaceIdx);
   const args = spaceIdx === -1 ? '' : text.substring(spaceIdx + 1).trim();
-
-  return {
+  const reply = vi.fn<(msg: string) => void>();
+  const ctx: HandlerContext = {
     nick,
     ident: 'user',
     hostname: 'host.com',
@@ -39,9 +43,10 @@ function makePubCtx(nick: string, text: string, channel = '#test'): HandlerConte
     text,
     command,
     args,
-    reply: vi.fn(),
+    reply,
     replyPrivate: vi.fn(),
   };
+  return ctx as HandlerContext & { reply: Mock<(msg: string) => void> };
 }
 
 describe('seen plugin', () => {
@@ -100,7 +105,7 @@ describe('seen plugin', () => {
     await dispatcher.dispatch('pub', queryCtx);
 
     expect(queryCtx.reply).toHaveBeenCalledOnce();
-    const response = (queryCtx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    const response = queryCtx.reply.mock.calls[0][0];
     expect(response).toContain('alice');
     expect(response).toContain('#dev');
     expect(response).toContain('hello there');
@@ -128,7 +133,7 @@ describe('seen plugin', () => {
     const queryCtx = makePubCtx('bob', '!seen alice');
     await dispatcher.dispatch('pub', queryCtx);
 
-    const response = (queryCtx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    const response = queryCtx.reply.mock.calls[0][0];
     expect(response).toContain('Alice');
   });
 
@@ -144,7 +149,7 @@ describe('seen plugin', () => {
     const queryCtx = makePubCtx('bob', '!seen charlie');
     await dispatcher.dispatch('pub', queryCtx);
 
-    const response = (queryCtx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    const response = queryCtx.reply.mock.calls[0][0];
     expect(response).toContain('charlie');
   });
 
@@ -245,7 +250,7 @@ describe('seen plugin', () => {
     const ctx = makePubCtx('bob', '!seen minuser');
     await dispatcher.dispatch('pub', ctx);
 
-    const response = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    const response = ctx.reply.mock.calls[0][0];
     expect(response).toMatch(/\d+m ago/);
   });
 
@@ -266,7 +271,7 @@ describe('seen plugin', () => {
     const ctx = makePubCtx('bob', '!seen houruser');
     await dispatcher.dispatch('pub', ctx);
 
-    const response = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    const response = ctx.reply.mock.calls[0][0];
     expect(response).toMatch(/\d+h \d+m ago/);
   });
 
@@ -287,7 +292,7 @@ describe('seen plugin', () => {
     const ctx = makePubCtx('bob', '!seen dayuser');
     await dispatcher.dispatch('pub', ctx);
 
-    const response = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    const response = ctx.reply.mock.calls[0][0];
     expect(response).toMatch(/\d+d \d+h ago/);
   });
 });

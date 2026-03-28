@@ -5,6 +5,7 @@ import { type Interface as ReadlineInterface, createInterface } from 'node:readl
 
 import type { Bot } from './bot';
 import type { Logger } from './logger';
+import { toEventObject } from './utils/irc-event';
 
 // ---------------------------------------------------------------------------
 // BotREPL
@@ -44,7 +45,7 @@ export class BotREPL {
     // Mirror incoming private messages and notices to the console so the
     // operator can see responses from services (e.g. ChanServ, NickServ).
     const onNotice = (event: unknown) => {
-      const e = event as Record<string, unknown>;
+      const e = toEventObject(event);
       const nick = String(e.nick ?? '');
       const target = String(e.target ?? '');
       const message = String(e.message ?? '');
@@ -53,7 +54,7 @@ export class BotREPL {
       this.print(`-${nick}- ${message}`);
     };
     const onPrivmsg = (event: unknown) => {
-      const e = event as Record<string, unknown>;
+      const e = toEventObject(event);
       const nick = String(e.nick ?? '');
       const target = String(e.target ?? '');
       const message = String(e.message ?? '');

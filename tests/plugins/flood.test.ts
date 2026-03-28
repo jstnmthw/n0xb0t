@@ -49,7 +49,7 @@ async function _tick(ms = 20): Promise<void> {
 }
 
 function giveBotOps(bot: MockBot, channel: string): void {
-  const nick = (bot.client.user as { nick: string }).nick;
+  const nick = bot.client.user.nick;
   bot.client.simulateEvent('join', { nick, ident: 'bot', hostname: 'bot.host', channel });
   bot.client.simulateEvent('mode', {
     nick: 'ChanServ',

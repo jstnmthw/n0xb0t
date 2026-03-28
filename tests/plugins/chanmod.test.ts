@@ -71,7 +71,7 @@ function addToChannel(
 
 /** Simulate the bot joining a channel with ops (via userlist). */
 function giveBotOps(bot: MockBot, channel: string): void {
-  const nick = (bot.client.user as { nick: string }).nick;
+  const nick = bot.client.user.nick;
   // Ensure bot is in the channel
   bot.client.simulateEvent('join', { nick, ident: 'bot', hostname: 'bot.host', channel });
   // Give the bot +o via mode event
@@ -558,7 +558,7 @@ describe('chanmod plugin — mode commands', () => {
         nick: 'Admin',
         ident: 'admin',
         hostname: 'admin.host',
-        channel: null as unknown as string,
+        channel: null,
         text: `${cmd} alice`,
         command: cmd,
         args: 'alice',

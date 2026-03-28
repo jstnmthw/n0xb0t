@@ -15,13 +15,18 @@ import { PluginLoader } from '../src/plugin-loader';
 import type { PluginLoaderDeps } from '../src/plugin-loader';
 import type { BotConfig, PluginAPI } from '../src/types';
 
+// Test plugins stash their api on globalThis so we can inspect it from tests.
+declare global {
+  var __testPluginApi: PluginAPI | undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 /** Retrieve the PluginAPI stashed on globalThis by test plugins during init(). */
 function getTestPluginApi(): PluginAPI {
-  return (globalThis as Record<string, unknown>).__testPluginApi as PluginAPI;
+  return globalThis.__testPluginApi!;
 }
 
 function makeTempDir(): string {
@@ -117,8 +122,8 @@ function createLoaderFull(pluginDir: string, overrides?: Partial<PluginLoaderDep
 
   // Minimal mock client for ChannelState and Services
   const mockChannelClient = {
-    on: vi.fn(),
-    removeListener: vi.fn(),
+    on: vi.fn<(event: string, listener: (...args: unknown[]) => void) => void>(),
+    removeListener: vi.fn<(event: string, listener: (...args: unknown[]) => void) => void>(),
     say: vi.fn(),
   };
 
@@ -154,6 +159,7 @@ function createLoaderFull(pluginDir: string, overrides?: Partial<PluginLoaderDep
     db: database,
     permissions,
     mockIrcClient,
+    mockChannelClient,
     channelState,
     ircCommands,
     services,
@@ -169,7 +175,7 @@ describe('PluginLoader', () => {
 
   beforeEach(() => {
     tempDir = makeTempDir();
-    (globalThis as Record<string, unknown>).__testPluginApi = undefined;
+    globalThis.__testPluginApi = undefined;
   });
 
   afterEach(() => {
@@ -870,20 +876,14 @@ describe('PluginLoader', () => {
       `,
       );
 
-      const { loader, channelState } = createLoaderFull(tempDir);
+      const { loader, channelState, mockChannelClient } = createLoaderFull(tempDir);
       await loader.load(pluginPath);
 
       // Simulate a user joining so channelState has data
-      // ChannelState responds to IRC events; trigger a join manually
-      // We need to call the join handler directly via the mock client
-      const mockClient = (channelState as unknown as { client: Record<string, unknown> })[
-        'client'
-      ] as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-      // Attach first
       channelState.attach();
-      // Find the join handler
-      const onCalls = mockClient.on.mock.calls;
-      const joinCall = onCalls.find((c: [string, (...args: unknown[]) => void]) => c[0] === 'join');
+      // Find the join handler registered by attach() on the mock client
+      const onCalls = mockChannelClient.on.mock.calls;
+      const joinCall = onCalls.find((c) => c[0] === 'join');
       if (joinCall) {
         joinCall[1]({
           nick: 'testuser',
@@ -1222,7 +1222,7 @@ describe('PluginLoader', () => {
 
       const api = getTestPluginApi();
 
-      expect((api.botConfig.irc as Record<string, unknown>).nick).toBe('test');
+      expect(api.botConfig.irc.nick).toBe('test');
       expect(api.botConfig.services).toBeDefined();
       expect((api.botConfig.services as Record<string, unknown>).password).toBeUndefined();
     });

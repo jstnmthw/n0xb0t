@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { type Mock, afterEach, describe, expect, it, vi } from 'vitest';
 
 import { HelpRegistry } from '../../src/core/help-registry';
 import { Permissions } from '../../src/core/permissions';
@@ -73,8 +73,8 @@ describe('help plugin', () => {
   let db: BotDatabase;
   let permissions: Permissions;
   let helpRegistry: HelpRegistry;
-  let mockNotice: ReturnType<typeof vi.fn>;
-  let mockSay: ReturnType<typeof vi.fn>;
+  let mockNotice: Mock<(target: string, message: string) => void>;
+  let mockSay: Mock<(target: string, message: string) => void>;
 
   async function loadHelp(pluginsConfig?: PluginsConfig): Promise<void> {
     db = new BotDatabase(':memory:');
@@ -83,8 +83,8 @@ describe('help plugin', () => {
     const eventBus = new BotEventBus();
     permissions = new Permissions(db);
     helpRegistry = new HelpRegistry();
-    mockNotice = vi.fn();
-    mockSay = vi.fn();
+    mockNotice = vi.fn<(target: string, message: string) => void>();
+    mockSay = vi.fn<(target: string, message: string) => void>();
 
     loader = new PluginLoader({
       pluginDir: resolve('./plugins'),
@@ -150,7 +150,7 @@ describe('help plugin', () => {
     const ctx = makeCtx();
     await dispatcher.dispatch('pub', ctx);
 
-    const messages = mockNotice.mock.calls.map((c) => c[1] as string);
+    const messages = mockNotice.mock.calls.map((c) => c[1]);
     expect(messages[0]).toBe('*** Help ***');
     expect(messages[messages.length - 1]).toBe('*** End of Help ***');
   });
@@ -163,7 +163,7 @@ describe('help plugin', () => {
     const ctx = makeCtx();
     await dispatcher.dispatch('pub', ctx);
 
-    const messages = mockNotice.mock.calls.map((c) => c[1] as string);
+    const messages = mockNotice.mock.calls.map((c) => c[1]);
     expect(messages).toContain('[fun]');
     expect(messages).toContain('[info]');
   });
@@ -232,7 +232,7 @@ describe('help plugin', () => {
     const ctx = makeCtx(); // no user registered — no flags
     await dispatcher.dispatch('pub', ctx);
 
-    const messages = mockNotice.mock.calls.map((c) => c[1] as string);
+    const messages = mockNotice.mock.calls.map((c) => c[1]);
     const hasOp = messages.some((m) => m.includes('!op'));
     const hasBall = messages.some((m) => m.includes('!8ball'));
 
@@ -252,7 +252,7 @@ describe('help plugin', () => {
     const ctx = makeCtx({ nick: 'user1', ident: 'user', hostname: 'host.com' });
     await dispatcher.dispatch('pub', ctx);
 
-    const messages = mockNotice.mock.calls.map((c) => c[1] as string);
+    const messages = mockNotice.mock.calls.map((c) => c[1]);
     expect(messages.some((m) => m.includes('!op'))).toBe(true);
     expect(messages.some((m) => m.includes('!8ball'))).toBe(true);
   });
@@ -272,7 +272,7 @@ describe('help plugin', () => {
     for (const call of mockNotice.mock.calls) {
       expect(call[0]).toBe('user1');
     }
-    const messages = mockNotice.mock.calls.map((c) => c[1] as string);
+    const messages = mockNotice.mock.calls.map((c) => c[1]);
     expect(messages.some((m) => m.includes('!op [nick]'))).toBe(true);
   });
 
@@ -283,7 +283,7 @@ describe('help plugin', () => {
     const ctx = makeCtx({ args: '!op', text: '!help !op' });
     await dispatcher.dispatch('pub', ctx);
 
-    const messages = mockNotice.mock.calls.map((c) => c[1] as string);
+    const messages = mockNotice.mock.calls.map((c) => c[1]);
     expect(messages.some((m) => m.includes('!op [nick]'))).toBe(true);
   });
 
@@ -295,7 +295,7 @@ describe('help plugin', () => {
     const ctx = makeCtx({ args: 'op' });
     await dispatcher.dispatch('pub', ctx);
 
-    const messages = mockNotice.mock.calls.map((c) => c[1] as string);
+    const messages = mockNotice.mock.calls.map((c) => c[1]);
     expect(messages).toContain('Extra info here');
     expect(messages).toContain('More info');
   });

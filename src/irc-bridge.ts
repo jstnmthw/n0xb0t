@@ -6,6 +6,7 @@ import type { EventDispatcher } from './dispatcher';
 import type { BotEventBus } from './event-bus';
 import type { Logger } from './logger';
 import type { HandlerContext } from './types';
+import { isModeArray, toEventObject } from './utils/irc-event';
 import { sanitize } from './utils/sanitize';
 import { splitMessage } from './utils/split-message';
 
@@ -324,9 +325,8 @@ export class IRCBridge {
     const ident = sanitize(String(event.ident ?? ''));
     const hostname = sanitize(String(event.hostname ?? ''));
     const target = sanitize(String(event.target ?? ''));
-    const modes = event.modes as Array<{ mode: string; param?: string }> | undefined;
-
-    if (!modes || !isValidChannel(target)) return;
+    if (!isModeArray(event.modes) || !isValidChannel(target)) return;
+    const modes = event.modes;
 
     // Break compound modes into individual dispatches
     for (const m of modes) {
@@ -452,7 +452,7 @@ export class IRCBridge {
 
   /** Wrap a typed handler for use with the generic irc-framework event API. */
   private listenIrc(event: string, handler: (event: Record<string, unknown>) => void): void {
-    const fn = (...args: unknown[]) => handler((args[0] ?? {}) as Record<string, unknown>);
+    const fn = (...args: unknown[]) => handler(toEventObject(args[0]));
     this.client.on(event, fn);
     this.listeners.push({ event, fn });
   }

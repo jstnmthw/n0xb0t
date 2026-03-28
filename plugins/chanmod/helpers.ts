@@ -3,8 +3,7 @@ import type { PluginAPI } from '../../src/types';
 import { INTENTIONAL_TTL_MS, type SharedState } from './state';
 
 export function getBotNick(api: PluginAPI): string {
-  const irc = api.botConfig.irc as Record<string, unknown> | undefined;
-  return (irc?.nick as string | undefined) ?? '';
+  return api.botConfig.irc.nick;
 }
 
 export function isBotNick(api: PluginAPI, nick: string): boolean {

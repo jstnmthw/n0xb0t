@@ -1,18 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { type CommandContext, CommandHandler } from '../../../src/command-handler';
 import { registerPermissionCommands } from '../../../src/core/commands/permission-commands';
 import { Permissions } from '../../../src/core/permissions';
 
-/** Helper: create a minimal CommandContext. */
-function makeCtx(overrides: Partial<CommandContext> = {}): CommandContext {
-  return {
-    source: 'repl',
-    nick: 'admin',
-    channel: null,
-    reply: vi.fn(),
-    ...overrides,
-  };
+/** Helper: create a minimal CommandContext with a typed reply mock. */
+function makeCtx(
+  overrides: Partial<CommandContext> = {},
+): CommandContext & { reply: Mock<(msg: string) => void> } {
+  const reply = vi.fn<(msg: string) => void>();
+  const ctx: CommandContext = { source: 'repl', nick: 'admin', channel: null, reply, ...overrides };
+  return ctx as CommandContext & { reply: Mock<(msg: string) => void> };
 }
 
 describe('permission-commands', () => {
@@ -40,7 +38,7 @@ describe('permission-commands', () => {
       expect(user!.hostmasks).toEqual(['*!test@host']);
       expect(user!.global).toBe('nmov');
 
-      const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const output = ctx.reply.mock.calls[0][0];
       expect(output).toContain('added');
     });
 
@@ -48,7 +46,7 @@ describe('permission-commands', () => {
       const ctx = makeCtx();
       await handler.execute('.adduser admin', ctx);
 
-      const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const output = ctx.reply.mock.calls[0][0];
       expect(output).toContain('Usage');
     });
 
@@ -56,7 +54,7 @@ describe('permission-commands', () => {
       const ctx = makeCtx();
       await handler.execute('.adduser admin *!t@h', ctx);
 
-      const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const output = ctx.reply.mock.calls[0][0];
       expect(output).toContain('Usage');
     });
 
@@ -67,7 +65,7 @@ describe('permission-commands', () => {
       const ctx2 = makeCtx();
       await handler.execute('.adduser admin *!t@h2 o', ctx2);
 
-      const output = (ctx2.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const output = ctx2.reply.mock.calls[0][0];
       expect(output).toContain('Error');
       expect(output).toContain('already exists');
     });
@@ -87,7 +85,7 @@ describe('permission-commands', () => {
       const ctx = makeCtx();
       await handler.execute('.flags testuser', ctx);
 
-      const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const output = ctx.reply.mock.calls[0][0];
       expect(output).toContain('testuser');
       expect(output).toContain('ov');
     });
@@ -99,7 +97,7 @@ describe('permission-commands', () => {
       const user = perms.getUser('testuser')!;
       expect(user.channels['#main']).toBe('o');
 
-      const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const output = ctx.reply.mock.calls[0][0];
       expect(output).toContain('#main');
     });
 
@@ -115,7 +113,7 @@ describe('permission-commands', () => {
       const ctx = makeCtx();
       await handler.execute('.flags nobody', ctx);
 
-      const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const output = ctx.reply.mock.calls[0][0];
       expect(output).toContain('not found');
     });
 
@@ -128,7 +126,7 @@ describe('permission-commands', () => {
       const viewCtx = makeCtx();
       await handler.execute('.flags testuser', viewCtx);
 
-      const output = (viewCtx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const output = viewCtx.reply.mock.calls[0][0];
       expect(output).toContain('testuser');
       expect(output).toContain('#special');
       expect(output).toContain('channels');
@@ -141,7 +139,7 @@ describe('permission-commands', () => {
       const user = perms.getUser('testuser')!;
       expect(user.channels['#ops']).toBeDefined();
 
-      const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const output = ctx.reply.mock.calls[0][0];
       expect(output).toContain('#ops');
       expect(output).toContain('Channel flags');
     });
@@ -160,7 +158,7 @@ describe('permission-commands', () => {
       const ctx = makeCtx();
       await handler.execute('.users', ctx);
 
-      const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const output = ctx.reply.mock.calls[0][0];
       expect(output).toContain('alice');
       expect(output).toContain('bob');
       expect(output).toContain('2');
@@ -170,7 +168,7 @@ describe('permission-commands', () => {
       const ctx = makeCtx();
       await handler.execute('.users', ctx);
 
-      const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const output = ctx.reply.mock.calls[0][0];
       expect(output).toContain('No users');
     });
   });
@@ -189,7 +187,7 @@ describe('permission-commands', () => {
 
       expect(perms.getUser('admin')).toBeNull();
 
-      const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const output = ctx.reply.mock.calls[0][0];
       expect(output).toContain('removed');
     });
 
@@ -197,7 +195,7 @@ describe('permission-commands', () => {
       const ctx = makeCtx();
       await handler.execute('.deluser nobody', ctx);
 
-      const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const output = ctx.reply.mock.calls[0][0];
       expect(output).toContain('Error');
       expect(output).toContain('not found');
     });
@@ -206,7 +204,7 @@ describe('permission-commands', () => {
       const ctx = makeCtx();
       await handler.execute('.deluser', ctx);
 
-      const output = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const output = ctx.reply.mock.calls[0][0];
       expect(output).toContain('Usage');
     });
   });
