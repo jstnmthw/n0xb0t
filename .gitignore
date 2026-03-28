@@ -40,8 +40,8 @@ Thumbs.db
 # Logs
 *.log
 
-# Claude Code worktrees
-.claude/worktrees/
+# Claude Code
+.claude/
 
 # Personal Docker Compose overrides
 docker-compose.override.yml
