@@ -5,7 +5,7 @@ import type { ProxyConfig } from '../src/types';
 
 describe('buildSocksOptions', () => {
   it('produces host and port without auth fields when credentials are omitted', () => {
-    const proxy: ProxyConfig = { host: '127.0.0.1', port: 9050 };
+    const proxy: ProxyConfig = { enabled: true, host: '127.0.0.1', port: 9050 };
     const opts = buildSocksOptions(proxy);
 
     expect(opts).toEqual({ host: '127.0.0.1', port: 9050 });
@@ -15,6 +15,7 @@ describe('buildSocksOptions', () => {
 
   it('includes user and pass when credentials are provided', () => {
     const proxy: ProxyConfig = {
+      enabled: true,
       host: 'proxy.example.com',
       port: 1080,
       username: 'alice',
@@ -26,7 +27,7 @@ describe('buildSocksOptions', () => {
   });
 
   it('omits user/pass when only username is provided (no password)', () => {
-    const proxy: ProxyConfig = { host: '127.0.0.1', port: 1080, username: 'bob' };
+    const proxy: ProxyConfig = { enabled: true, host: '127.0.0.1', port: 1080, username: 'bob' };
     const opts = buildSocksOptions(proxy);
 
     expect(opts.user).toBe('bob');
@@ -35,6 +36,7 @@ describe('buildSocksOptions', () => {
 
   it('omits user/pass when only password is provided (no username)', () => {
     const proxy: ProxyConfig = {
+      enabled: true,
       host: '127.0.0.1',
       port: 1080,
       password: 'only-pass',
@@ -46,7 +48,7 @@ describe('buildSocksOptions', () => {
   });
 
   it('does not include credential keys with undefined values', () => {
-    const proxy: ProxyConfig = { host: '10.0.0.1', port: 9050 };
+    const proxy: ProxyConfig = { enabled: true, host: '10.0.0.1', port: 9050 };
     const opts = buildSocksOptions(proxy);
 
     // Ensure the spread didn't add keys with undefined values

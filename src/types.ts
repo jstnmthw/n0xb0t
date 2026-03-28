@@ -331,6 +331,8 @@ export interface QueueConfig {
 
 /** SOCKS5 proxy settings. */
 export interface ProxyConfig {
+  /** Must be true for the proxy to be used. */
+  enabled: boolean;
   host: string;
   port: number;
   /** Optional SOCKS5 username. */

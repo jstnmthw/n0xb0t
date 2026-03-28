@@ -360,7 +360,7 @@ export class Bot {
       }
 
       // Proxy config
-      if (this.config.proxy) {
+      if (this.config.proxy?.enabled) {
         connectOptions.socks = buildSocksOptions(this.config.proxy);
         this.botLogger.info(
           `Using SOCKS5 proxy: ${this.config.proxy.host}:${this.config.proxy.port}`,

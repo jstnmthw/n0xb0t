@@ -217,6 +217,8 @@ export interface QueueConfig {
  * Useful for connecting through Tor or a corporate proxy.
  */
 export interface ProxyConfig {
+  /** Must be `true` for the proxy to be used. Presence of the config block alone does not activate it. */
+  enabled: boolean;
   /** SOCKS5 proxy hostname or IP. */
   host: string;
   /** SOCKS5 proxy port. */

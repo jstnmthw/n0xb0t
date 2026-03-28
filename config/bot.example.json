@@ -37,13 +37,14 @@
   "dcc": {
     "enabled": false,
     "ip": "0.0.0.0",
-    "port_range": [50000, 50010],
+    "port_range": [49152, 49171],
     "require_flags": "m",
     "max_sessions": 5,
     "idle_timeout_ms": 300000,
     "nickserv_verify": false
   },
   "proxy": {
+    "enabled": false,
     "host": "127.0.0.1",
     "port": 9050
   },
