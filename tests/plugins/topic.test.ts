@@ -141,6 +141,23 @@ describe('topic plugin', () => {
     expect(reply!.message).toContain(themeNames[0]);
   });
 
+  it('!topics preview cooldown — second call within window is rejected', async () => {
+    // First call — succeeds and sets the cooldown
+    simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!topics preview hello');
+    await tick();
+    bot.client.clearMessages();
+
+    // Second call immediately — should hit the cooldown branch
+    simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!topics preview hello');
+    await tick();
+
+    const cooldownReply = bot.client.messages.find(
+      (m) => m.type === 'say' && m.message?.includes('cooldown'),
+    );
+    expect(cooldownReply).toBeDefined();
+    expect(cooldownReply!.message).toMatch(/Preview cooldown active/);
+  });
+
   it('!topic <theme> with no text — should show usage', async () => {
     const themeName = themeNames[0];
     simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', `!topic ${themeName}`);
@@ -293,6 +310,34 @@ describe('topic plugin', () => {
       );
       expect(topicCmds).toHaveLength(1);
       expect(topicCmds[0].message).toContain('locked topic');
+    });
+
+    it('authorized op change while locked → updates stored topic', async () => {
+      setLiveTopic(bot, '#test', 'original topic');
+      simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!topic lock');
+      await tick();
+
+      await advancePastGrace();
+      bot.client.clearMessages();
+
+      // Op (Admin has +o) changes the topic to something different
+      bot.client.simulateEvent('topic', {
+        nick: 'Admin',
+        ident: 'admin',
+        hostname: 'admin.host',
+        channel: '#test',
+        topic: 'new authorized topic',
+      });
+      await tick();
+
+      // No restore should happen
+      const topicCmds = bot.client.messages.filter(
+        (m) => m.type === 'raw' && m.message?.startsWith('TOPIC'),
+      );
+      expect(topicCmds).toHaveLength(0);
+
+      // Stored topic should be updated to the authorized change
+      expect(bot.channelSettings.get('#test', 'topic_text')).toBe('new authorized topic');
     });
 
     it('non-op change after unlock → bot does NOT restore', async () => {

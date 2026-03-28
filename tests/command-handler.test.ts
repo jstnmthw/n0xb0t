@@ -32,6 +32,26 @@ describe('CommandHandler', () => {
       expect(output).toContain('.help');
     });
 
+    it('should group multiple commands in the same category', async () => {
+      const handler = new CommandHandler();
+      handler.registerCommand(
+        'foo',
+        { flags: '-', description: 'Foo', usage: '.foo', category: 'general' },
+        vi.fn(),
+      );
+      handler.registerCommand(
+        'bar',
+        { flags: '-', description: 'Bar', usage: '.bar', category: 'general' },
+        vi.fn(),
+      );
+      const ctx = makeCtx();
+      await handler.execute('.help', ctx);
+
+      const output = ctx.reply.mock.calls[0][0];
+      expect(output).toContain('.foo');
+      expect(output).toContain('.bar');
+    });
+
     it('should show help for a specific command', async () => {
       const handler = new CommandHandler();
       const ctx = makeCtx();
@@ -139,6 +159,13 @@ describe('CommandHandler', () => {
       await handler.execute('hello world', ctx);
       expect(ctx.reply).not.toHaveBeenCalled();
     });
+
+    it('should ignore a bare dot with no command name', async () => {
+      const handler = new CommandHandler();
+      const ctx = makeCtx();
+      await handler.execute('.', ctx);
+      expect(ctx.reply).not.toHaveBeenCalled();
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -167,6 +194,22 @@ describe('CommandHandler', () => {
       const output = ctx.reply.mock.calls[0][0];
       expect(output).toContain('Error');
       expect(output).toContain('something went wrong');
+    });
+
+    it('should handle non-Error thrown values', async () => {
+      const handler = new CommandHandler();
+      handler.registerCommand(
+        'throwstring',
+        { flags: '-', description: 'Throws a string', usage: '.throwstring', category: 'test' },
+        () => {
+          throw 'bare string error';
+        },
+      );
+
+      const ctx = makeCtx();
+      await handler.execute('.throwstring', ctx);
+
+      expect(ctx.reply).toHaveBeenCalledWith('Error: bare string error');
     });
   });
 
@@ -276,6 +319,42 @@ describe('CommandHandler', () => {
       await handler.execute('.admin', ctx);
 
       expect(handlerFn).toHaveBeenCalledOnce();
+    });
+
+    it('should deny IRC user when no permissions provider is configured', async () => {
+      const handler = new CommandHandler(); // no permissions provider
+      const handlerFn = vi.fn();
+      handler.registerCommand(
+        'admin',
+        { flags: '+n', description: 'Admin only', usage: '.admin', category: 'test' },
+        handlerFn,
+      );
+
+      const ctx = makeCtx({ source: 'irc', nick: 'anyone', ident: 'u', hostname: 'h' });
+      await handler.execute('.admin', ctx);
+
+      expect(handlerFn).not.toHaveBeenCalled();
+      expect(ctx.reply).toHaveBeenCalledWith('Permission denied.');
+    });
+
+    it('should use empty string for missing ident and hostname during permission check', async () => {
+      const perms: CommandPermissionsProvider = { checkFlags: vi.fn().mockReturnValue(true) };
+      const handler = new CommandHandler(perms);
+      const handlerFn = vi.fn();
+      handler.registerCommand(
+        'admin',
+        { flags: '+n', description: 'Admin only', usage: '.admin', category: 'test' },
+        handlerFn,
+      );
+
+      // No ident or hostname — should default to ''
+      const ctx = makeCtx({ source: 'irc', nick: 'someone' });
+      await handler.execute('.admin', ctx);
+
+      expect(handlerFn).toHaveBeenCalledOnce();
+      const passedCtx = (perms.checkFlags as ReturnType<typeof vi.fn>).mock.calls[0][1];
+      expect(passedCtx.ident).toBe('');
+      expect(passedCtx.hostname).toBe('');
     });
 
     it('should allow anyone for flags "-" from IRC', async () => {

@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { BotConfig } from '../../src/types';
 import { type MockBot, createMockBot } from '../helpers/mock-bot';
 
 // ---------------------------------------------------------------------------
@@ -1585,6 +1586,18 @@ describe('chanmod plugin — bitch mode', () => {
       ),
     ).toBeUndefined();
   });
+
+  it('dehalfs a user who gains +h without halfop flags (halfop_flags is empty)', async () => {
+    addToChannel(bot, 'Intruder', 'int', 'int.host', '#test');
+    giveBotOps(bot, '#test');
+    simulateMode(bot, 'SomeOp', '#test', '+h', 'Intruder');
+    await tick(20);
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'mode' && m.message === '-h' && m.args?.includes('Intruder'),
+      ),
+    ).toBeDefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -2041,5 +2054,1024 @@ describe('chanmod plugin — stopnethack mode 2 (wasoptest)', () => {
         (m) => m.type === 'mode' && m.message === '-o' && m.args?.includes('bob'),
       ),
     ).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ban/unban/kickban edge cases (uncovered paths)
+// ---------------------------------------------------------------------------
+
+describe('chanmod plugin — ban/unban/kickban edge cases', () => {
+  let bot: MockBot;
+
+  beforeAll(async () => {
+    bot = createMockBot({ botNick: 'hexbot' });
+    giveBotOps(bot, '#test');
+    await bot.pluginLoader.load(PLUGIN_PATH);
+    bot.permissions.addUser('admin', '*!admin@admin.host', 'o', 'test');
+  });
+
+  afterAll(() => {
+    bot.cleanup();
+  });
+
+  beforeEach(() => {
+    bot.client.clearMessages();
+  });
+
+  // No-ops guard: !op, !deop, !voice, !devoice, !kick, !ban (use #noops where bot has no mode)
+  for (const cmd of ['!op', '!deop', '!voice', '!devoice', '!kick', '!ban'] as const) {
+    it(`${cmd} when bot has no ops → rejects`, async () => {
+      simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#noops', `${cmd} SomeUser`);
+      await flush();
+      expect(
+        bot.client.messages.find((m) => m.type === 'say' && m.message?.includes('not opped')),
+      ).toBeDefined();
+    });
+  }
+
+  // No halfop guard: !halfop, !dehalfop (use #noops where bot has neither +h nor +o)
+  for (const cmd of ['!halfop', '!dehalfop'] as const) {
+    it(`${cmd} when bot cannot halfop → rejects`, async () => {
+      simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#noops', `${cmd} SomeUser`);
+      await flush();
+      expect(
+        bot.client.messages.find((m) => m.type === 'say' && m.message?.includes('do not have')),
+      ).toBeDefined();
+    });
+  }
+
+  // Invalid nick for !halfop and !dehalfop (multi-word args, dispatch directly)
+  for (const cmd of ['!halfop', '!dehalfop'] as const) {
+    it(`${cmd} with invalid nick → rejects`, async () => {
+      await bot.dispatcher.dispatch('pub', {
+        nick: 'Admin',
+        ident: 'admin',
+        hostname: 'admin.host',
+        channel: '#test',
+        text: `${cmd} bad nick`,
+        command: cmd,
+        args: 'bad nick',
+        reply: (msg: string) => {
+          bot.client.say('#test', msg);
+        },
+        replyPrivate: () => {},
+      });
+      expect(
+        bot.client.messages.find((m) => m.type === 'say' && m.message?.includes('Invalid nick')),
+      ).toBeDefined();
+    });
+  }
+
+  // !bans DM guard (null channel)
+  it('!bans in DM (no channel) → does nothing', async () => {
+    await bot.dispatcher.dispatch('pub', {
+      nick: 'Admin',
+      ident: 'admin',
+      hostname: 'admin.host',
+      channel: null,
+      text: '!bans',
+      command: '!bans',
+      args: '',
+      reply: () => {},
+      replyPrivate: () => {},
+    });
+    expect(bot.client.messages.find((m) => m.type === 'say')).toBeUndefined();
+  });
+
+  // No-args variants (ctx.nick fallback): !deop, !voice, !devoice, !halfop, !dehalfop
+  it('!deop with no args → deops the caller', async () => {
+    simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!deop');
+    await flush();
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'mode' && m.message === '-o' && m.args?.includes('Admin'),
+      ),
+    ).toBeDefined();
+  });
+
+  it('!voice with no args → voices the caller', async () => {
+    simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!voice');
+    await flush();
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'mode' && m.message === '+v' && m.args?.includes('Admin'),
+      ),
+    ).toBeDefined();
+  });
+
+  it('!devoice with no args → devoices the caller', async () => {
+    simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!devoice');
+    await flush();
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'mode' && m.message === '-v' && m.args?.includes('Admin'),
+      ),
+    ).toBeDefined();
+  });
+
+  it('!halfop with no args → halfops the caller', async () => {
+    // Give bot halfop ability first by giving it ops
+    giveBotOps(bot, '#test');
+    simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!halfop');
+    await flush();
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'mode' && m.message === '+h' && m.args?.includes('Admin'),
+      ),
+    ).toBeDefined();
+  });
+
+  it('!dehalfop with no args → dehalfops the caller', async () => {
+    simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!dehalfop');
+    await flush();
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'mode' && m.message === '-h' && m.args?.includes('Admin'),
+      ),
+    ).toBeDefined();
+  });
+
+  // DM guards for !halfop and !dehalfop
+  for (const cmd of ['!halfop', '!dehalfop'] as const) {
+    it(`${cmd} in DM (no channel) → does nothing`, async () => {
+      await bot.dispatcher.dispatch('pub', {
+        nick: 'Admin',
+        ident: 'admin',
+        hostname: 'admin.host',
+        channel: null,
+        text: `${cmd} Alice`,
+        command: cmd,
+        args: 'Alice',
+        reply: () => {},
+        replyPrivate: () => {},
+      });
+      expect(bot.client.messages.find((m) => m.type === 'mode')).toBeUndefined();
+    });
+  }
+
+  // !ban nick with 0 duration → "permanent" log entry
+  it('!ban nick with duration 0 → permanent ban', async () => {
+    addToChannel(bot, 'PermTarget', 'pt', 'perm.host.com', '#test');
+    bot.client.clearMessages();
+    simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!ban PermTarget 0');
+    await flush();
+    expect(bot.client.messages.find((m) => m.type === 'mode' && m.message === '+b')).toBeDefined();
+  });
+
+  // !ban — multi-word target (space) fails isValidNick → "Invalid nick."
+  it('!ban multi-word target → invalid nick', async () => {
+    simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!ban bad user');
+    await flush();
+    expect(
+      bot.client.messages.find((m) => m.type === 'say' && m.message?.includes('Invalid nick')),
+    ).toBeDefined();
+  });
+
+  // !ban — user with empty hostname → buildBanMask returns null
+  it('!ban user with empty hostname → cannot build ban mask', async () => {
+    addToChannel(bot, 'NoHost', 'nh', '', '#test');
+    bot.client.clearMessages();
+    simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!ban NoHost');
+    await flush();
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'say' && m.message?.includes('Cannot build ban mask'),
+      ),
+    ).toBeDefined();
+  });
+
+  // !unban — bot has no ops (use a channel the bot was never given ops in)
+  it('!unban when bot has no ops → rejects', async () => {
+    simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#noops', '!unban *!*@host');
+    await flush();
+    expect(
+      bot.client.messages.find((m) => m.type === 'say' && m.message?.includes('not opped')),
+    ).toBeDefined();
+  });
+
+  // !unban — valid nick, not in channel → "not in the channel"
+  it('!unban nick not in channel → reports not in channel', async () => {
+    simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!unban GhostNick');
+    await flush();
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'say' && m.message?.includes('not in the channel'),
+      ),
+    ).toBeDefined();
+  });
+
+  // !unban — nick in channel with stored ban record → removes stored mask (match path)
+  it('!unban nick with stored ban record → removes that mask', async () => {
+    addToChannel(bot, 'BanTarget', 'bt', 'ban.target.com', '#test');
+    // Ban them first to create a stored record
+    bot.client.clearMessages();
+    simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!ban BanTarget');
+    await flush();
+    // Now unban by nick — should find the stored mask
+    bot.client.clearMessages();
+    simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!unban BanTarget');
+    await flush();
+    expect(
+      bot.client.messages.find((m) => m.type === 'raw' && m.message?.includes('MODE #test -b')),
+    ).toBeDefined();
+  });
+
+  // !unban — nick in channel but no stored ban record → sends -b for all candidate masks
+  it('!unban nick with no stored record → sends -b for all candidate masks', async () => {
+    addToChannel(bot, 'CleanNick', 'cn', 'clean.nick.com', '#test');
+    bot.client.clearMessages();
+    simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!unban CleanNick');
+    await flush();
+    // Should have sent at least one MODE -b (trying all 3 candidate masks)
+    expect(
+      bot.client.messages.find((m) => m.type === 'raw' && m.message?.includes('MODE #test -b')),
+    ).toBeDefined();
+  });
+
+  // !kickban — bot has no ops
+  it('!kickban when bot has no ops → rejects', async () => {
+    simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#noops', '!kickban SomeUser');
+    await flush();
+    expect(
+      bot.client.messages.find((m) => m.type === 'say' && m.message?.includes('not opped')),
+    ).toBeDefined();
+  });
+
+  // !kickban — user with empty hostname → buildBanMask returns null
+  it('!kickban user with empty hostname → cannot build ban mask', async () => {
+    addToChannel(bot, 'NoHostKick', 'nhk', '', '#test');
+    bot.client.clearMessages();
+    simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!kickban NoHostKick');
+    await flush();
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'say' && m.message?.includes('Cannot build ban mask'),
+      ),
+    ).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// channel_modes enforcement on bot join (auto-op.ts lines 16-27)
+// ---------------------------------------------------------------------------
+describe('chanmod plugin — channel_modes enforcement on bot join', () => {
+  it('applies missing channel modes after the enforce delay when bot joins', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: { enabled: true, config: { enforce_channel_modes: 'n', enforce_delay_ms: 5 } },
+      });
+      giveBotOps(freshBot, '#newchan');
+      freshBot.client.clearMessages();
+      await tick(10);
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'raw' && m.message === 'MODE #newchan +n'),
+      ).toBeDefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// NickServ verification failure on auto-op (auto-op.ts lines 57-66)
+// ---------------------------------------------------------------------------
+describe('chanmod plugin — NickServ auto-op verification failure', () => {
+  it('skips auto-op and sends notice when NickServ verification fails', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      (
+        freshBot.pluginLoader as unknown as { botConfig: BotConfig }
+      ).botConfig.identity.require_acc_for = ['+o'];
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: { enabled: true, config: { notify_on_fail: true } },
+      });
+      giveBotOps(freshBot, '#test');
+      freshBot.permissions.addUser('alice', '*!alice@alice.host', 'o', 'test');
+      vi.spyOn(freshBot.services, 'isAvailable').mockReturnValue(true);
+      vi.spyOn(freshBot.services, 'verifyUser').mockResolvedValue({
+        verified: false,
+        account: null,
+      });
+      freshBot.client.clearMessages();
+      simulateJoin(freshBot, 'Alice', 'alice', 'alice.host', '#test');
+      await tick();
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'mode' && m.args?.includes('Alice')),
+      ).toBeUndefined();
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'notice' && m.target === 'Alice'),
+      ).toBeDefined();
+    } finally {
+      vi.restoreAllMocks();
+      freshBot.cleanup();
+    }
+  });
+
+  it('applies auto-op when NickServ verification succeeds', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      (
+        freshBot.pluginLoader as unknown as { botConfig: BotConfig }
+      ).botConfig.identity.require_acc_for = ['+o'];
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: { enabled: true, config: { notify_on_fail: true } },
+      });
+      giveBotOps(freshBot, '#test');
+      freshBot.permissions.addUser('alice', '*!alice@alice.host', 'o', 'test');
+      vi.spyOn(freshBot.services, 'isAvailable').mockReturnValue(true);
+      vi.spyOn(freshBot.services, 'verifyUser').mockResolvedValue({
+        verified: true,
+        account: 'alice',
+      });
+      freshBot.client.clearMessages();
+      simulateJoin(freshBot, 'Alice', 'alice', 'alice.host', '#test');
+      await tick();
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'mode' && m.args?.includes('Alice')),
+      ).toBeDefined();
+    } finally {
+      vi.restoreAllMocks();
+      freshBot.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ban auto-lift: startup timer and time bind (bans.ts lines 65-68, 73)
+// ---------------------------------------------------------------------------
+describe('chanmod plugin — ban auto-lift timers', () => {
+  it('lifts expired bans when startup timer fires (5s after load)', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      await freshBot.pluginLoader.load(PLUGIN_PATH);
+      const mask = '*!bad@bad.host';
+      freshBot.db.set(
+        'chanmod',
+        `ban:#test:${mask}`,
+        JSON.stringify({
+          mask,
+          channel: '#test',
+          by: 'admin',
+          ts: Date.now() - 3 * 60_000,
+          expires: Date.now() - 60_000,
+        }),
+      );
+      freshBot.client.clearMessages();
+      await tick(5001);
+      expect(
+        freshBot.client.messages.find(
+          (m) => m.type === 'raw' && m.message?.includes('-b') && m.message.includes(mask),
+        ),
+      ).toBeDefined();
+      expect(freshBot.db.get('chanmod', `ban:#test:${mask}`)).toBeNull();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+
+  it('lifts expired bans when the 60s time bind fires', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      await freshBot.pluginLoader.load(PLUGIN_PATH);
+      // Advance past startup timer so it doesn't consume the ban record
+      await tick(5001);
+      freshBot.client.clearMessages();
+      const mask = '*!stale@old.host';
+      freshBot.db.set(
+        'chanmod',
+        `ban:#test:${mask}`,
+        JSON.stringify({
+          mask,
+          channel: '#test',
+          by: 'admin',
+          ts: Date.now() - 3 * 60_000,
+          expires: Date.now() - 60_000,
+        }),
+      );
+      // Advance to fire the 60s time bind
+      await tick(60001);
+      expect(
+        freshBot.client.messages.find(
+          (m) => m.type === 'raw' && m.message?.includes('-b') && m.message.includes(mask),
+        ),
+      ).toBeDefined();
+      expect(freshBot.db.get('chanmod', `ban:#test:${mask}`)).toBeNull();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// punishDeop rate limit — PUNISH_MAX (mode-enforce.ts lines 237-241)
+// ---------------------------------------------------------------------------
+describe('chanmod plugin — punishDeop rate limit', () => {
+  it('suppresses punishment after PUNISH_MAX (2) punishments in the cooldown window', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: { punish_deop: true, punish_action: 'kick', enforce_delay_ms: 5 },
+        },
+      });
+      freshBot.permissions.addUser('alice', '*!alice@alice.host', 'o', 'test');
+      addToChannel(freshBot, 'Alice', 'alice', 'alice.host', '#test');
+      addToChannel(freshBot, 'Badguy', 'bad', 'bad.host', '#test');
+      giveBotOps(freshBot, '#test');
+      freshBot.client.clearMessages();
+      for (let i = 0; i < 3; i++) {
+        simulateMode(freshBot, 'Badguy', '#test', '-o', 'Alice');
+      }
+      await tick(20);
+      const kicks = freshBot.client.messages.filter(
+        (m) => m.type === 'raw' && m.message?.startsWith('KICK') && m.message.includes('Badguy'),
+      );
+      expect(kicks).toHaveLength(2);
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// punishDeop kickban action (mode-enforce.ts lines 249-255)
+// ---------------------------------------------------------------------------
+describe('chanmod plugin — punishDeop kickban action', () => {
+  it('kickbans the setter when punish_action is "kickban"', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: { punish_deop: true, punish_action: 'kickban', enforce_delay_ms: 5 },
+        },
+      });
+      freshBot.permissions.addUser('alice', '*!alice@alice.host', 'o', 'test');
+      addToChannel(freshBot, 'Alice', 'alice', 'alice.host', '#test');
+      addToChannel(freshBot, 'Badguy', 'bad', 'bad.host', '#test');
+      giveBotOps(freshBot, '#test');
+      freshBot.client.clearMessages();
+      simulateMode(freshBot, 'Badguy', '#test', '-o', 'Alice');
+      await tick(20);
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'mode' && m.message === '+b'),
+      ).toBeDefined();
+      expect(
+        freshBot.client.messages.find(
+          (m) => m.type === 'raw' && m.message?.startsWith('KICK') && m.message.includes('Badguy'),
+        ),
+      ).toBeDefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// revenge on kick — kickban action (protection.ts lines 137-148)
+// ---------------------------------------------------------------------------
+describe('chanmod plugin — revenge on kick kickban', () => {
+  it('kickbans the kicker when revenge_action is "kickban"', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      addToChannel(freshBot, 'Kicker', 'kicker', 'kicker.host', '#test');
+      const result = await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: {
+            rejoin_on_kick: true,
+            rejoin_delay_ms: 10,
+            revenge_on_kick: true,
+            revenge_action: 'kickban',
+            revenge_delay_ms: 10,
+            revenge_exempt_flags: '',
+            max_rejoin_attempts: 3,
+            rejoin_attempt_window_ms: 300_000,
+          },
+        },
+      });
+      expect(result.status).toBe('ok');
+      addToChannel(freshBot, 'Kicker', 'kicker', 'kicker.host', '#test');
+      giveBotOps(freshBot, '#test');
+      freshBot.client.clearMessages();
+      freshBot.client.simulateEvent('kick', {
+        nick: 'Kicker',
+        channel: '#test',
+        kicked: 'hexbot',
+        message: 'bye',
+      });
+      // Fire rejoin timer
+      await tick(10);
+      // Simulate bot rejoining and getting ops
+      giveBotOps(freshBot, '#test');
+      // Fire revenge timer
+      await tick(10);
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'mode' && m.message === '+b'),
+      ).toBeDefined();
+      expect(
+        freshBot.client.messages.find(
+          (m) => m.type === 'raw' && m.message?.startsWith('KICK') && m.message.includes('Kicker'),
+        ),
+      ).toBeDefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// revenge on kick — skipped when bot has no ops (protection.ts lines 115-117)
+// ---------------------------------------------------------------------------
+describe('chanmod plugin — revenge skipped without ops', () => {
+  it('does NOT execute revenge when bot has no ops after rejoining', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      addToChannel(freshBot, 'Kicker', 'kicker', 'kicker.host', '#test');
+      const result = await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: {
+            rejoin_on_kick: true,
+            rejoin_delay_ms: 10,
+            revenge_on_kick: true,
+            revenge_action: 'deop',
+            revenge_delay_ms: 10,
+            revenge_exempt_flags: '',
+            max_rejoin_attempts: 3,
+            rejoin_attempt_window_ms: 300_000,
+          },
+        },
+      });
+      expect(result.status).toBe('ok');
+      addToChannel(freshBot, 'Kicker', 'kicker', 'kicker.host', '#test');
+      giveBotOps(freshBot, '#test');
+      freshBot.client.clearMessages();
+      freshBot.client.simulateEvent('kick', {
+        nick: 'Kicker',
+        channel: '#test',
+        kicked: 'hexbot',
+        message: 'out',
+      });
+      // Fire rejoin timer (bot rejoins but does NOT get ops)
+      await tick(10);
+      // Fire revenge timer — bot has no ops, revenge should be skipped
+      await tick(10);
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'mode' && m.message === '-o'),
+      ).toBeUndefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// cycle_on_deop: bot self-deop triggers part+rejoin (mode-enforce.ts lines 60-91)
+// ---------------------------------------------------------------------------
+describe('chanmod plugin — cycle on deop', () => {
+  it('parts and rejoins after MAX_ENFORCEMENTS (3) bot self-deops', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: { cycle_on_deop: true, cycle_delay_ms: 10 },
+        },
+      });
+      giveBotOps(freshBot, '#test');
+      freshBot.client.clearMessages();
+      // Three bot self-deops are required to reach MAX_ENFORCEMENTS (3)
+      for (let i = 0; i < 3; i++) {
+        simulateMode(freshBot, 'SomeOp', '#test', '-o', 'hexbot');
+      }
+      // Advance past cycle_delay_ms (10ms) + rejoin delay (2000ms)
+      await tick(2200);
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'part' && m.target === '#test'),
+      ).toBeDefined();
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'join' && m.target === '#test'),
+      ).toBeDefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Halfop enforcement: re-halfop a flagged user (mode-enforce.ts lines 192-200)
+// ---------------------------------------------------------------------------
+describe('chanmod plugin — halfop enforcement', () => {
+  it('re-halfopts a flagged user who is dehalfopped', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: { enforce_modes: true, halfop_flags: ['v'], enforce_delay_ms: 5 },
+        },
+      });
+      freshBot.permissions.addUser('alice', '*!alice@alice.host', 'v', 'test');
+      addToChannel(freshBot, 'Alice', 'alice', 'alice.host', '#test');
+      giveBotOps(freshBot, '#test');
+      freshBot.client.clearMessages();
+      simulateMode(freshBot, 'Badguy', '#test', '-h', 'Alice');
+      await tick(20);
+      expect(
+        freshBot.client.messages.find(
+          (m) => m.type === 'mode' && m.message === '+h' && m.args?.includes('Alice'),
+        ),
+      ).toBeDefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Rejoin window expiry reset (protection.ts line 86)
+// ---------------------------------------------------------------------------
+describe('chanmod plugin — rejoin window expiry reset', () => {
+  it('resets the rejoin counter after the attempt window expires', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: {
+            rejoin_on_kick: true,
+            rejoin_delay_ms: 10,
+            revenge_on_kick: false,
+            max_rejoin_attempts: 1,
+            rejoin_attempt_window_ms: 1000,
+          },
+        },
+      });
+
+      let now = 1_000_000_000;
+      const dateSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+
+      // First kick: count reaches max_rejoin_attempts (1) — bot rejoins
+      freshBot.client.simulateEvent('kick', {
+        nick: 'Op',
+        channel: '#test',
+        kicked: 'hexbot',
+        message: 'bye',
+      });
+      await tick(15);
+      freshBot.client.clearMessages();
+
+      // Advance past window expiry (1000ms)
+      now += 2000;
+      dateSpy.mockReturnValue(now);
+
+      // Second kick: window has expired → counter resets → bot rejoins again
+      freshBot.client.simulateEvent('kick', {
+        nick: 'Op',
+        channel: '#test',
+        kicked: 'hexbot',
+        message: 'bye',
+      });
+      await tick(15);
+      expect(freshBot.client.messages.find((m) => m.type === 'join')).toBeDefined();
+    } finally {
+      vi.restoreAllMocks();
+      freshBot.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stopnethack split window expiry (protection.ts line 235)
+// ---------------------------------------------------------------------------
+describe('chanmod plugin — stopnethack split window expiry', () => {
+  it('expires the split window and skips deop for +o events after split_timeout', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: { stopnethack_mode: 1, split_timeout_ms: 1000, enforce_delay_ms: 10 },
+        },
+      });
+
+      let now = 1_000_000_000;
+      const dateSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+
+      // Trigger split (3 split-quit messages)
+      for (let i = 0; i < 3; i++) {
+        freshBot.client.simulateEvent('quit', {
+          nick: `leaf${i}`,
+          ident: 'u',
+          hostname: 'h',
+          message: 'hub.example.net leaf.example.net',
+        });
+        await flush();
+      }
+
+      // Advance Date.now past split_timeout_ms (1000ms)
+      now += 2000;
+      dateSpy.mockReturnValue(now);
+
+      freshBot.permissions.addUser('noflag', '*!noflag@noflag.host', 'v', 'test');
+      addToChannel(freshBot, 'noflag', 'noflag', 'noflag.host', '#test');
+      giveBotOps(freshBot, '#test');
+      freshBot.client.clearMessages();
+
+      // +o during expired split window — should NOT deop (window expired → splitActive cleared)
+      simulateMode(freshBot, 'server.net', '#test', '+o', 'noflag');
+      await tick(20);
+
+      expect(
+        freshBot.client.messages.find(
+          (m) => m.type === 'mode' && m.message === '-o' && m.args?.includes('noflag'),
+        ),
+      ).toBeUndefined();
+    } finally {
+      vi.restoreAllMocks();
+      freshBot.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// channel_modes timer skips when bot has no ops (auto-op.ts line 17)
+// ---------------------------------------------------------------------------
+describe('chanmod plugin — channel_modes skips when bot has no ops at timer fire', () => {
+  it('does NOT set channel modes if bot has no ops when the timer fires', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: { enabled: true, config: { enforce_channel_modes: 'n', enforce_delay_ms: 5 } },
+      });
+      // Bot joins the channel but does NOT get +o (no giveBotOps call)
+      freshBot.client.simulateEvent('join', {
+        nick: 'hexbot',
+        ident: 'bot',
+        hostname: 'bot.host',
+        channel: '#newchan',
+      });
+      freshBot.client.clearMessages();
+      await tick(10);
+      // Bot had no ops when timer fired — should skip applying modes
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'raw' && m.message?.startsWith('MODE')),
+      ).toBeUndefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Mode enforcement skips when bot can't halfop (mode-enforce.ts line 192)
+// ---------------------------------------------------------------------------
+describe('chanmod plugin — halfop enforcement skips when bot has no halfop ability', () => {
+  it('does NOT re-halfop when bot has no +h or +o in the channel', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      // Bot has NO ops — don't call giveBotOps
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: { enforce_modes: true, halfop_flags: ['v'], enforce_delay_ms: 5 },
+        },
+      });
+      freshBot.permissions.addUser('alice', '*!alice@alice.host', 'v', 'test');
+      addToChannel(freshBot, 'Alice', 'alice', 'alice.host', '#test');
+      // Ensure bot is in channel but NOT opped
+      freshBot.client.simulateEvent('join', {
+        nick: 'hexbot',
+        ident: 'bot',
+        hostname: 'bot.host',
+        channel: '#test',
+      });
+      freshBot.client.clearMessages();
+      simulateMode(freshBot, 'Badguy', '#test', '-h', 'Alice');
+      await tick(20);
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'mode' && m.message === '+h'),
+      ).toBeUndefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Voice enforcement skips when bot has no ops (mode-enforce.ts line 203)
+// ---------------------------------------------------------------------------
+describe('chanmod plugin — voice enforcement skips when bot has no ops', () => {
+  it('does NOT re-voice when bot has no ops when -v fires', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      // Bot has NO ops — don't call giveBotOps
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: { enforce_modes: true, enforce_delay_ms: 5 },
+        },
+      });
+      freshBot.permissions.addUser('bob', '*!bob@bob.host', 'v', 'test');
+      addToChannel(freshBot, 'Bob', 'bob', 'bob.host', '#test');
+      freshBot.client.simulateEvent('join', {
+        nick: 'hexbot',
+        ident: 'bot',
+        hostname: 'bot.host',
+        channel: '#test',
+      });
+      freshBot.client.clearMessages();
+      simulateMode(freshBot, 'Badguy', '#test', '-v', 'Bob');
+      await tick(20);
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'mode' && m.message === '+v'),
+      ).toBeUndefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Revenge skipped when kicker is no longer in the channel (protection.ts line 112)
+// ---------------------------------------------------------------------------
+describe('chanmod plugin — revenge skipped when kicker left the channel', () => {
+  it('does NOT execute revenge when the kicker has left the channel before the timer fires', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      addToChannel(freshBot, 'Kicker', 'kicker', 'kicker.host', '#test');
+      const result = await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: {
+            rejoin_on_kick: true,
+            rejoin_delay_ms: 10,
+            revenge_on_kick: true,
+            revenge_action: 'deop',
+            revenge_delay_ms: 100,
+            revenge_exempt_flags: '',
+            max_rejoin_attempts: 3,
+            rejoin_attempt_window_ms: 300_000,
+          },
+        },
+      });
+      expect(result.status).toBe('ok');
+      addToChannel(freshBot, 'Kicker', 'kicker', 'kicker.host', '#test');
+      giveBotOps(freshBot, '#test');
+      freshBot.client.clearMessages();
+
+      // Bot is kicked
+      freshBot.client.simulateEvent('kick', {
+        nick: 'Kicker',
+        channel: '#test',
+        kicked: 'hexbot',
+        message: 'bye',
+      });
+      // Bot rejoins (rejoin_delay_ms = 10ms)
+      await tick(10);
+      giveBotOps(freshBot, '#test');
+
+      // Kicker parts the channel before the revenge timer fires
+      freshBot.client.simulateEvent('part', {
+        nick: 'Kicker',
+        channel: '#test',
+        message: 'leaving',
+      });
+      freshBot.client.clearMessages();
+
+      // Revenge timer fires (revenge_delay_ms = 100ms) — kicker not in channel → skip
+      await tick(100);
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'mode' && m.message === '-o'),
+      ).toBeUndefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stopnethack: non-+o mode and bot-target are ignored (protection.ts lines 230, 241)
+// ---------------------------------------------------------------------------
+describe('chanmod plugin — stopnethack mode-event guards', () => {
+  const triggerSplit = async (freshBot: MockBot) => {
+    for (let i = 0; i < 3; i++) {
+      freshBot.client.simulateEvent('quit', {
+        nick: `leaf${i}`,
+        ident: 'u',
+        hostname: 'h',
+        message: 'hub.example.net leaf.example.net',
+      });
+      await flush();
+    }
+  };
+
+  it('ignores non-+o mode events while split is active (line 230)', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: { stopnethack_mode: 1, split_timeout_ms: 60000, enforce_delay_ms: 10 },
+        },
+      });
+      await triggerSplit(freshBot);
+      freshBot.permissions.addUser('alice', '*!alice@host', 'v', 'test');
+      addToChannel(freshBot, 'alice', 'alice', 'host', '#test');
+      freshBot.client.clearMessages();
+
+      // Send +v (not +o) while split is active — should be ignored
+      simulateMode(freshBot, 'server.net', '#test', '+v', 'alice');
+      await tick(20);
+
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'mode' && m.message === '-o'),
+      ).toBeUndefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+
+  it('ignores +o targeting the bot itself while split is active (line 241)', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: { stopnethack_mode: 1, split_timeout_ms: 60000, enforce_delay_ms: 10 },
+        },
+      });
+      await triggerSplit(freshBot);
+      freshBot.client.clearMessages();
+
+      // Bot itself gets +o while split is active — should not deop itself
+      simulateMode(freshBot, 'server.net', '#test', '+o', 'hexbot');
+      await tick(20);
+
+      expect(
+        freshBot.client.messages.find(
+          (m) => m.type === 'mode' && m.message === '-o' && m.args?.includes('hexbot'),
+        ),
+      ).toBeUndefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stopnethack: non-split quit is ignored (protection.ts line 208)
+// ---------------------------------------------------------------------------
+describe('chanmod plugin — stopnethack ignores non-split quits', () => {
+  it('does not count a normal quit towards the split threshold', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: { stopnethack_mode: 1, split_timeout_ms: 60000, enforce_delay_ms: 10 },
+        },
+      });
+      // Fire non-split quits (normal "Quit: leaving" messages)
+      for (let i = 0; i < 5; i++) {
+        freshBot.client.simulateEvent('quit', {
+          nick: `user${i}`,
+          ident: 'u',
+          hostname: 'h',
+          message: 'Quit: leaving', // NOT a split quit
+        });
+        await flush();
+      }
+      freshBot.permissions.addUser('noflag', '*!noflag@noflag.host', 'v', 'test');
+      addToChannel(freshBot, 'noflag', 'noflag', 'noflag.host', '#test');
+      giveBotOps(freshBot, '#test');
+      freshBot.client.clearMessages();
+      // No split active — +o should not trigger deop
+      simulateMode(freshBot, 'server.net', '#test', '+o', 'noflag');
+      await tick(20);
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'mode' && m.message === '-o'),
+      ).toBeUndefined();
+    } finally {
+      freshBot.cleanup();
+    }
   });
 });

@@ -70,6 +70,14 @@ describe('irc-commands-admin', () => {
       expect(mockClient.say).toHaveBeenCalledWith('#test', 'evilPRIVMSG #other :pwned');
     });
 
+    it('should reject target with embedded control characters', async () => {
+      const ctx = makeCtx();
+      await handler.execute('.say foo\rbar message', ctx);
+
+      expect(mockClient.say).not.toHaveBeenCalled();
+      expect(ctx.reply).toHaveBeenCalledWith('Invalid target.');
+    });
+
     it('should show usage when message is empty after trim (space-only arg)', async () => {
       const ctx = makeCtx();
       // "#test " — has a space so spaceIdx != -1, but message after split is empty
@@ -216,6 +224,36 @@ describe('irc-commands-admin', () => {
 
       const output = ctx.reply.mock.calls[0][0];
       expect(output).toContain('(none)');
+    });
+
+    it('should include days in uptime when >= 1 day', async () => {
+      mockBotInfo.getUptime = () => 172_800_000 + 3_661_000; // 2d 1h 1m 1s
+      const ctx = makeCtx();
+      await handler.execute('.status', ctx);
+
+      const output = ctx.reply.mock.calls[0][0];
+      expect(output).toContain('2d');
+      expect(output).toContain('1h');
+    });
+
+    it('should omit minutes and hours when uptime is under a minute', async () => {
+      mockBotInfo.getUptime = () => 45_000; // 45s
+      const ctx = makeCtx();
+      await handler.execute('.status', ctx);
+
+      const output = ctx.reply.mock.calls[0][0];
+      expect(output).toContain('45s');
+      expect(output).not.toContain('m ');
+      expect(output).not.toContain('h ');
+    });
+
+    it('should show unknown nick when user object is absent', async () => {
+      (mockClient as AdminIRCClient & { user: unknown }).user = undefined;
+      const ctx = makeCtx();
+      await handler.execute('.status', ctx);
+
+      const output = ctx.reply.mock.calls[0][0];
+      expect(output).toContain('unknown');
     });
   });
 });

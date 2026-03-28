@@ -308,11 +308,8 @@ export class DCCSession {
       this.idleTimer = null;
     }
 
-    if (reason && !this.socket.destroyed) {
-      this.writeLine(`*** ${reason}`);
-    }
-
     if (!this.socket.destroyed) {
+      if (reason) this.socket.write(`*** ${reason}\r\n`);
       this.socket.destroy();
     }
 
@@ -435,9 +432,8 @@ export class DCCManager {
   // -------------------------------------------------------------------------
 
   private async onDccCtcp(ctx: HandlerContext): Promise<void> {
-    const { nick, ident, hostname } = ctx;
+    const { nick } = ctx;
 
-    // 1. Parse payload — must be a passive CHAT request
     this.logger?.debug(`DCC CTCP from ${nick}: args="${ctx.args}"`);
     const parsed = parseDccChatPayload(ctx.args);
     if (!parsed) {
@@ -456,47 +452,77 @@ export class DCCManager {
       return;
     }
 
-    // 2. Hostmask lookup
+    const user = await this.validateDccRequest(nick, ctx);
+    if (!user) return;
+
+    await this.acceptDccConnection(nick, ctx.ident, ctx.hostname, user, parsed);
+  }
+
+  /**
+   * Run the four guard checks for an incoming DCC CHAT request.
+   * Returns the matching UserRecord if all checks pass, or null if rejected
+   * (rejection notice already sent to the nick).
+   */
+  private async validateDccRequest(
+    nick: string,
+    ctx: HandlerContext,
+  ): Promise<import('../types').UserRecord | null> {
+    const { ident, hostname } = ctx;
+
+    // 1. Hostmask lookup
     const fullHostmask = `${nick}!${ident}@${hostname}`;
     const user = this.permissions.findByHostmask(fullHostmask);
     if (!user) {
       this.logger?.info(`DCC CHAT rejected (no hostmask match) for ${fullHostmask}`);
       this.client.notice(nick, 'DCC CHAT: your hostmask is not in the user database.');
-      return;
+      return null;
     }
 
-    // 3. Flag check — delegate to permissions so owner flag (n) implies all others
+    // 2. Flag check — delegate to permissions so owner flag (n) implies all others
     const requiredFlags = this.config.require_flags;
     if (!this.permissions.checkFlags(requiredFlags, ctx)) {
       this.logger?.info(
         `DCC CHAT rejected (insufficient flags) for ${nick}: has="${user.global}" needs="${requiredFlags}"`,
       );
       this.client.notice(nick, `DCC CHAT: insufficient flags (requires +${requiredFlags}).`);
-      return;
+      return null;
     }
 
-    // 4. Session limit
+    // 3. Session limit
     if (this.sessions.size >= this.config.max_sessions) {
       this.client.notice(nick, `DCC CHAT: maximum sessions (${this.config.max_sessions}) reached.`);
-      return;
+      return null;
     }
 
-    // 5. Already connected?
+    // 4. Already connected?
     if (this.sessions.has(ircLower(nick, this.casemapping))) {
       this.client.notice(nick, 'DCC CHAT: you already have an active session.');
-      return;
+      return null;
     }
 
-    // 6. NickServ verify (optional)
+    // 5. NickServ verify (optional) — must complete before port allocation
     if (this.config.nickserv_verify) {
       const result = await this.services.verifyUser(nick);
       if (!result.verified) {
         this.client.notice(nick, 'DCC CHAT: NickServ verification failed. Please identify first.');
-        return;
+        return null;
       }
     }
 
-    // 7. Allocate port
+    return user;
+  }
+
+  /**
+   * Allocate a TCP port, open the server, send the passive DCC reply, and
+   * wait for the user's client to connect.
+   */
+  private async acceptDccConnection(
+    nick: string,
+    ident: string,
+    hostname: string,
+    user: import('../types').UserRecord,
+    parsed: DccChatPayload,
+  ): Promise<void> {
     const port = this.allocatePort();
     if (port === null) {
       this.logger?.error(`DCC port range exhausted for ${nick}`);
@@ -504,19 +530,16 @@ export class DCCManager {
       return;
     }
 
-    // 8. Open TCP server
     const server = createServer();
     this.allocatedPorts.add(port);
 
     server.listen(port, '0.0.0.0', () => {
-      // 9. Send passive DCC CTCP reply
       const ipDecimal = ipToDecimal(this.config.ip);
       const token = parsed.token !== 0 ? parsed.token : Math.floor(Math.random() * 0xffff) + 1;
       this.client.ctcp(nick, 'DCC', `CHAT chat ${ipDecimal} ${port} ${token}`);
       this.logger?.info(`Passive DCC offered to ${nick} on port ${port}`);
     });
 
-    // 10. Accept timeout
     const pending: PendingDCC = {
       nick,
       user,
@@ -533,7 +556,6 @@ export class DCCManager {
     };
     this.pending.set(port, pending);
 
-    // 11. Accept connection
     server.once('connection', (socket: Socket) => {
       clearTimeout(pending.timer);
       server.close();

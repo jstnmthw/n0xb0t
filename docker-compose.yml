@@ -1,15 +1,7 @@
-networks:
-  irc-bots:
-    external: true
-
 services:
   hexbot:
     build: .
-    container_name: hexbot
     restart: unless-stopped
-    networks:
-      irc-bots:
-        ipv4_address: 172.30.0.10
     ports:
       - '49152-49171:49152-49171'
     volumes:

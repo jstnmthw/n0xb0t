@@ -8,6 +8,7 @@ import type { Logger } from './logger';
 import type { HandlerContext } from './types';
 import { isModeArray, toEventObject } from './utils/irc-event';
 import { sanitize } from './utils/sanitize';
+import { SlidingWindowCounter } from './utils/sliding-window';
 import { splitMessage } from './utils/split-message';
 
 // ---------------------------------------------------------------------------
@@ -77,7 +78,7 @@ export class IRCBridge {
   private channelState: ChannelStateProvider | null;
   private logger: Logger | null;
   private listeners: Array<{ event: string; fn: (...args: unknown[]) => void }> = [];
-  private ctcpRateLimiter: Map<string, number[]> = new Map();
+  private ctcpRateLimiter = new SlidingWindowCounter();
   private topicStartupGrace = false;
 
   constructor(options: IRCBridgeOptions) {
@@ -134,14 +135,9 @@ export class IRCBridge {
 
   /** Rate limit CTCP responses: max 3 per nick per 10 seconds. */
   private ctcpAllowed(nick: string): boolean {
-    const now = Date.now();
     const WINDOW_MS = 10_000;
     const MAX_RESPONSES = 3;
-    const times = (this.ctcpRateLimiter.get(nick) ?? []).filter((t) => now - t < WINDOW_MS);
-    if (times.length >= MAX_RESPONSES) return false;
-    times.push(now);
-    this.ctcpRateLimiter.set(nick, times);
-    return true;
+    return !this.ctcpRateLimiter.check(nick, WINDOW_MS, MAX_RESPONSES);
   }
 
   // -------------------------------------------------------------------------

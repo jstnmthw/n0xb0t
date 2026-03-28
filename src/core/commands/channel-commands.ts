@@ -24,7 +24,7 @@ export function registerChannelCommands(
     },
     (args, ctx) => {
       const parts = args.trim().split(/\s+/);
-      const channel = parts[0] ?? '';
+      const channel = parts[0];
 
       if (!channel || !/^[#&]/.test(channel)) {
         ctx.reply('Usage: .chanset #chan [+/-]key [value]');

@@ -2,6 +2,8 @@
 
 > A modular IRC bot framework for Node.js, inspired by Eggdrop's 30-year-old bind system but built for the modern stack. The name is a nod to "obnoxious" — fitting for a bot that'll eventually have an AI chat module annoying people in IRC channels.
 
+This document describes hexbot's stable architectural decisions. For current feature status, see [README.md](README.md). For implementation history, see [CHANGELOG.md](CHANGELOG.md). For planned features, see [docs/plans/](docs/plans/).
+
 ---
 
 ## 1. Project overview
@@ -47,29 +49,45 @@ hexbot/
 │   ├── plugin-loader.ts      # Discovers, loads, hot-reloads plugins
 │   ├── database.ts           # SQLite key-value store + mod_log, namespaced per plugin
 │   ├── repl.ts               # Attached REPL (--repl flag)
-│   ├── command-handler.ts    # Command router (used by REPL, IRC, future socket)
+│   ├── command-handler.ts    # Command router (used by REPL, IRC, DCC CHAT)
 │   ├── types.ts              # Shared interfaces (HandlerContext, PluginAPI, etc.)
+│   ├── event-bus.ts          # Typed EventEmitter for internal bot events
+│   ├── logger.ts             # Structured logging with levels and child loggers
 │   ├── utils/
-│   │   └── wildcard.ts       # Wildcard pattern matching (shared by dispatcher + permissions)
+│   │   ├── wildcard.ts       # Wildcard pattern matching (shared by dispatcher + permissions)
+│   │   ├── sanitize.ts       # Strip \r\n for IRC injection prevention
+│   │   ├── split-message.ts  # Word-boundary message splitting for IRC line limits
+│   │   ├── strip-formatting.ts  # Remove IRC control codes
+│   │   └── irc-event.ts      # Type guards for irc-framework event payloads
 │   └── core/                 # Core modules (always loaded)
 │       ├── permissions.ts    # Eggdrop-style n/m/o/v flags, hostmask matching
 │       ├── services.ts       # NickServ/ChanServ integration, SASL
 │       ├── irc-commands.ts   # Helpers: join, part, kick, ban, mode
 │       ├── channel-state.ts  # Track users, modes, hostmasks per channel
+│       ├── channel-settings.ts  # Per-channel typed setting registry (DB-backed)
 │       ├── dcc.ts            # DCC CHAT + console (shared admin sessions)
+│       ├── help-registry.ts  # Stores/retrieves command help entries
+│       ├── message-queue.ts  # Token-bucket flood protection for outgoing messages
 │       └── commands/         # Command groups (each module registers its own)
 │           ├── permission-commands.ts
 │           ├── dispatcher-commands.ts
 │           ├── irc-commands-admin.ts
-│           └── plugin-commands.ts
+│           ├── plugin-commands.ts
+│           └── channel-commands.ts   # .chanset, .chaninfo
 ├── plugins/                  # Optional plugins (user-installable)
-│   ├── greeter/
-│   │   ├── index.ts
-│   │   ├── config.json       # Plugin-specific defaults
-│   │   └── README.md
-│   ├── seen/
-│   ├── 8ball/
-│   └── auto-op/              # MVP plugin
+│   ├── 8ball/                # Magic 8-ball command
+│   ├── chanmod/              # Channel moderation: auto-op/voice, mode enforcement, bans
+│   ├── ctcp/                 # CTCP VERSION/PING/TIME responder
+│   ├── flood/                # Flood detection and auto-action escalation
+│   ├── greeter/              # Configurable join greeting
+│   ├── help/                 # Help system (!help command)
+│   ├── seen/                 # Last-seen tracking (!seen command)
+│   └── topic/                # Topic rotation and themed messages
+├── types/                    # Exported TypeScript declarations
+│   ├── index.d.ts
+│   ├── config.d.ts
+│   ├── events.d.ts
+│   └── plugin-api.d.ts
 ├── tsconfig.json
 └── package.json
 ```
@@ -472,73 +490,19 @@ What differs between networks and how we handle it:
 
 ---
 
-## 4. MVP scope (Phase 1)
+## 4. Current state
 
-The MVP is: **a bot that connects, loads plugins with hot-reload, has a working REPL, and ships with a useful auto-op plugin.**
+All core infrastructure is implemented and production-ready. See [CHANGELOG.md](CHANGELOG.md) for a full implementation history.
 
-### 4.1 What's in the MVP
+**Shipped plugins:** `8ball`, `chanmod`, `ctcp`, `flood`, `greeter`, `help`, `seen`, `topic`
 
-- Bot core: connect to IRC, handle reconnection, SASL auth
-- Event dispatcher with full bind type support
-- Plugin loader with hot-reload (load/unload/reload)
-- All four core modules (permissions, services, irc-commands, channel-state)
-- Attached REPL (`--repl`)
-- Command handler (shared between REPL and IRC)
-- SQLite database with namespaced key-value store
-- Config system (bot.json + plugins.json + per-plugin defaults)
-- Internal event bus
-- Mod action logging
+**Planned features** (design documents in `docs/plans/`):
 
-**MVP plugins:**
-
-- `auto-op` — User joins → bot checks flags → ops/voices them. Verifies via NickServ ACC if configured.
-- `greeter` — Configurable join greeting.
-- `seen` — Tracks last-seen times. `!seen <nick>` to look up.
-- `8ball` — Magic 8-ball. Simple demo plugin.
-
-### 4.2 What's NOT in the MVP
-
-- Web admin panel (Phase 3)
-- AI chat module (Phase 4)
-- Flood protection / advanced moderation (Phase 2 — separate plugins)
-- Multi-bot / multi-identity support
-- Bot linking (multi-bot mesh; current console is single-bot only)
-
----
-
-## 5. Roadmap
-
-### Phase 1: Core + plugin system (MVP)
-
-Everything in section 4.1.
-
-### Phase 2: Channel protection plugins
-
-- Flood detection (message rate, repeat, caps, nick-change spam)
-- Auto-actions: configurable escalation (warn → kick → ban)
-- Bad-word filter, anti-spam link detection
-- Join/part flood protection
-- Timed bans (auto-expire)
-
-### Phase 3: Admin web panel
-
-- Express/Fastify + Socket.IO
-- Live log streaming
-- Plugin toggle UI
-- Channel config editor
-- User/permission management
-- Real-time channel viewer
-- Auth (JWT or session-based)
-
-### Phase 4: AI chat module
-
-- Provider adapter pattern (Gemini → Claude → OpenAI swappable)
-- Per-user token budget with daily/hourly caps
-- Per-channel rate limiting (cooldown between responses)
-- Sliding context window (last N messages per channel)
-- Output filtering / abuse protection
-- Cost dashboard in web panel
-- System prompt configuration per channel
+- [`ai-chat-plugin.md`](docs/plans/ai-chat-plugin.md) — AI chat integration (Gemini/Claude/OpenAI adapter)
+- [`bot-linking.md`](docs/plans/bot-linking.md) — Multi-bot mesh networking
+- [`deployment.md`](docs/plans/deployment.md) — Docker, systemd, GitHub Actions
+- [`xdcc-plugin.md`](docs/plans/xdcc-plugin.md) — XDCC file serving
+- [`idlerpg-plugin.md`](docs/plans/idlerpg-plugin.md) — IdleRPG game plugin
 
 ---
 
@@ -642,4 +606,4 @@ ngircd -n  # foreground mode
 
 ---
 
-_This document represents the design as of the start of development. It will evolve as the project matures._
+_This document describes hexbot's stable architectural decisions. It is updated as the architecture evolves, not as individual features ship._

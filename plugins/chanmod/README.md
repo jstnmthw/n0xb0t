@@ -1,6 +1,6 @@
 # chanmod
 
-Channel operator tools: auto-op/halfop/voice on join, mode enforcement, timed bans, Eggdrop-style channel protection, and manual moderation commands.
+Channel operator tools: auto-op/halfop/voice on join, mode enforcement, timed bans, channel protection, and manual moderation commands.
 
 ## Commands
 
@@ -58,7 +58,7 @@ Rate-limited to 2 punishments per setter per 30 seconds to avoid escalation. Nic
 
 ## Enforcebans
 
-With `enforcebans: true`, the bot kicks any users already in the channel whose hostmask matches a newly-set ban mask. This mirrors Eggdrop's `+enforcebans` and ensures that setting `+b *!*@evil.host` actually removes the matching user rather than just preventing them from rejoining.
+With `enforcebans: true`, the bot kicks any users already in the channel whose hostmask matches a newly-set ban mask. This ensures that setting `+b *!*@evil.host` actually removes the matching user rather than just preventing them from rejoining.
 
 The ban mask is tested against `nick!ident@hostname` using IRC-aware wildcard matching (`*` and `?`). The bot itself is never kicked.
 
@@ -99,21 +99,6 @@ Cloaked hosts (containing `/`) always use type 1 regardless of the setting.
 ## Cycle on deop
 
 With `cycle_on_deop: true`, if the bot itself is deopped three times within 10 seconds in a channel (without invite-only mode set), it will part and rejoin after `cycle_delay_ms` to attempt to regain ops via ChanServ. This is a recovery mechanism for channels with auto-op services.
-
-## Eggdrop comparison
-
-| Eggdrop setting        | chanmod equivalent                                 | Default        |
-| ---------------------- | -------------------------------------------------- | -------------- |
-| `+protectops` (re-op)  | `enforce_modes`                                    | `false`        |
-| `+protectops` (punish) | `punish_deop`                                      | `false`        |
-| `+bitch`               | `bitch`                                            | `false`        |
-| `+enforcebans`         | `enforcebans`                                      | `false`        |
-| `+cycle`               | `cycle_on_deop`                                    | `false`        |
-| bot kick → rejoin      | `rejoin_on_kick`                                   | `true`         |
-| `+revengebot` mode 0   | `revenge_on_kick: true, revenge_action: "deop"`    | —              |
-| `+revengebot` mode 2   | `revenge_on_kick: true, revenge_action: "kick"`    | —              |
-| `+revengebot` mode 3   | `revenge_on_kick: true, revenge_action: "kickban"` | —              |
-| `+nodesynch`           | `nodesynch_nicks`                                  | `["ChanServ"]` |
 
 ## Config
 

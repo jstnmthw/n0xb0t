@@ -63,6 +63,8 @@ interface LoadedPlugin {
   description: string;
   filePath: string;
   teardown?: () => void | Promise<void>;
+  /** True if teardown() threw an error — resources may not have been released cleanly. */
+  teardownFailed?: boolean;
 }
 
 /** Dependencies injected into the plugin loader. */
@@ -297,7 +299,11 @@ export class PluginLoader {
           await result;
         }
       } catch (err) {
-        this.logger?.error(`Teardown error for ${pluginName}:`, err);
+        plugin.teardownFailed = true;
+        this.logger?.error(
+          `[plugin-loader] WARNING: teardown() for ${pluginName} threw — some resources may not have been released. Recommend restarting the bot if behavior is unstable.`,
+          err,
+        );
       }
     }
 
@@ -357,66 +363,10 @@ export class PluginLoader {
 
   private createPluginApi(pluginId: string, config: Record<string, unknown>): PluginAPI {
     const pluginLogger = this.rootLogger?.child(`plugin:${pluginId}`) ?? null;
-    const dispatcher = this.dispatcher;
-    const db = this.db;
-    const ircClient = this.ircClient;
-    const messageQueue = this.messageQueue;
-    const channelState = this.channelState;
-    const ircCommands = this.ircCommands;
-    const permissions = this.permissions;
-    const services = this.services;
-    const helpRegistry = this.helpRegistry;
-    const channelSettings = this.channelSettings;
-    const getCasemapping = this.getCasemapping;
-    const getServerSupports = this.getServerSupports;
 
-    // Scoped database API
-    const pluginDb: PluginDB = db
-      ? Object.freeze({
-          get(key: string): string | undefined {
-            return db.get(pluginId, key) ?? undefined;
-          },
-          set(key: string, value: string): void {
-            db.set(pluginId, key, value);
-          },
-          del(key: string): void {
-            db.del(pluginId, key);
-          },
-          list(prefix?: string): Array<{ key: string; value: string }> {
-            return db.list(pluginId, prefix);
-          },
-        })
-      : Object.freeze({
-          get(): string | undefined {
-            return undefined;
-          },
-          set(): void {},
-          del(): void {},
-          list(): Array<{ key: string; value: string }> {
-            return [];
-          },
-        });
-
-    // Read-only permissions API
-    const pluginPermissions: PluginPermissions = Object.freeze({
-      findByHostmask(hostmask: string) {
-        return permissions.findByHostmask(hostmask);
-      },
-      checkFlags(requiredFlags: string, ctx: HandlerContext) {
-        return permissions.checkFlags(requiredFlags, ctx);
-      },
-    });
-
-    // Services API (read-only verification)
-    const pluginServicesApi: PluginServices = Object.freeze({
-      async verifyUser(nick: string) {
-        if (!services) return { verified: false, account: null };
-        return services.verifyUser(nick);
-      },
-      isAvailable() {
-        return services?.isAvailable() ?? false;
-      },
-    });
+    const pluginDb = createPluginDbApi(this.db, pluginId);
+    const pluginPermissions = createPluginPermissionsApi(this.permissions);
+    const pluginServicesApi = createPluginServicesApi(this.services);
 
     // Build the plugin-facing bot config as a typed variable so TypeScript can verify
     // the shape before freezing — avoids the `as unknown as PluginBotConfig` double cast.
@@ -436,6 +386,16 @@ export class PluginLoader {
       // database and pluginDir intentionally omitted — plugins don't need filesystem paths
       logging: { ...this.botConfig.logging },
     };
+
+    const dispatcher = this.dispatcher;
+    const ircClient = this.ircClient;
+    const messageQueue = this.messageQueue;
+    const channelState = this.channelState;
+    const ircCommands = this.ircCommands;
+    const helpRegistry = this.helpRegistry;
+    const channelSettings = this.channelSettings;
+    const getCasemapping = this.getCasemapping;
+    const getServerSupports = this.getServerSupports;
 
     const api: PluginAPI = {
       pluginId,
@@ -781,4 +741,68 @@ export class PluginLoader {
     const last = parts[parts.length - 1];
     return last.replace(/\.(ts|js)$/, '');
   }
+}
+
+// ---------------------------------------------------------------------------
+// Plugin API sub-factories
+// These are module-level (not class members) to keep createPluginApi() short.
+// ---------------------------------------------------------------------------
+
+function createPluginDbApi(
+  db: import('./database').BotDatabase | null,
+  pluginId: string,
+): PluginDB {
+  if (db) {
+    return Object.freeze({
+      get(key: string): string | undefined {
+        return db.get(pluginId, key) ?? undefined;
+      },
+      set(key: string, value: string): void {
+        db.set(pluginId, key, value);
+      },
+      del(key: string): void {
+        db.del(pluginId, key);
+      },
+      list(prefix?: string): Array<{ key: string; value: string }> {
+        return db.list(pluginId, prefix);
+      },
+    });
+  }
+  return Object.freeze({
+    get(): string | undefined {
+      return undefined;
+    },
+    set(): void {},
+    del(): void {},
+    list(): Array<{ key: string; value: string }> {
+      return [];
+    },
+  });
+}
+
+function createPluginPermissionsApi(
+  permissions: import('./core/permissions').Permissions,
+): PluginPermissions {
+  return Object.freeze({
+    findByHostmask(hostmask: string) {
+      return permissions.findByHostmask(hostmask);
+    },
+    checkFlags(requiredFlags: string, ctx: HandlerContext) {
+      return permissions.checkFlags(requiredFlags, ctx);
+    },
+  });
+}
+
+function createPluginServicesApi(
+  services: import('./core/services').Services | null,
+): PluginServices {
+  return Object.freeze({
+    async verifyUser(nick: string) {
+      if (!services) return { verified: false, account: null };
+      return services.verifyUser(nick);
+    },
+    isAvailable() {
+      return services?.isAvailable() ?? false;
+    },
+  });
 }

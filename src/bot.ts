@@ -315,111 +315,115 @@ export class Bot {
   // -------------------------------------------------------------------------
 
   private connect(): Promise<void> {
-    return new Promise<void>((resolvePromise, reject) => {
-      const cfg = this.config.irc;
+    const options = this.buildClientOptions();
+    this.botLogger.info(`Connecting to ${this.config.irc.host}:${this.config.irc.port}...`);
+    return new Promise<void>((resolve, reject) => {
+      this.registerConnectionEvents(resolve, reject);
+      this.client.connect(options);
+    });
+  }
 
-      const connectOptions: Record<string, unknown> = {
-        host: cfg.host,
-        port: cfg.port,
-        tls: cfg.tls,
-        nick: cfg.nick,
-        username: cfg.username,
-        gecos: cfg.realname,
-        auto_reconnect: true,
-        auto_reconnect_max_wait: 30000,
-        auto_reconnect_max_retries: 10,
-        // Disable irc-framework's built-in CTCP VERSION reply —
-        // we handle it ourselves in irc-bridge.ts via the dispatcher
-        version: null,
-        // IRCv3: request chghost capability so channel-state receives real-time hostmask updates.
-        // account-notify and extended-join are requested automatically by irc-framework.
-        enable_chghost: true,
-      };
+  /** Build the irc-framework connection options from the bot config. Pure config read — no side effects. */
+  private buildClientOptions(): Record<string, unknown> {
+    const cfg = this.config.irc;
 
-      // SASL config
-      const saslMechanism = this.config.services.sasl_mechanism ?? 'PLAIN';
-      if (this.config.services.sasl) {
-        if (saslMechanism === 'EXTERNAL') {
-          // SASL EXTERNAL: authenticate via TLS client certificate (CertFP).
-          // No password is needed — the server authenticates from the cert fingerprint.
-          connectOptions.sasl_mechanism = 'EXTERNAL';
-          if (cfg.tls_cert) {
-            connectOptions.tls_cert = cfg.tls_cert;
-          }
-          if (cfg.tls_key) {
-            connectOptions.tls_key = cfg.tls_key;
-          }
-          this.botLogger.info('SASL EXTERNAL (CertFP) authentication enabled');
-        } else if (this.config.services.password) {
-          // SASL PLAIN: username + password over TLS
-          connectOptions.account = {
-            account: cfg.nick,
-            password: this.config.services.password,
-          };
-        }
+    const options: Record<string, unknown> = {
+      host: cfg.host,
+      port: cfg.port,
+      tls: cfg.tls,
+      nick: cfg.nick,
+      username: cfg.username,
+      gecos: cfg.realname,
+      auto_reconnect: true,
+      auto_reconnect_max_wait: 30000,
+      auto_reconnect_max_retries: 10,
+      // Disable irc-framework's built-in CTCP VERSION reply —
+      // we handle it ourselves in irc-bridge.ts via the dispatcher
+      version: null,
+      // IRCv3: request chghost capability so channel-state receives real-time hostmask updates.
+      // account-notify and extended-join are requested automatically by irc-framework.
+      enable_chghost: true,
+    };
+
+    // SASL config
+    const saslMechanism = this.config.services.sasl_mechanism ?? 'PLAIN';
+    if (this.config.services.sasl) {
+      if (saslMechanism === 'EXTERNAL') {
+        // SASL EXTERNAL: authenticate via TLS client certificate (CertFP).
+        // No password is needed — the server authenticates from the cert fingerprint.
+        options.sasl_mechanism = 'EXTERNAL';
+        if (cfg.tls_cert) options.tls_cert = cfg.tls_cert;
+        if (cfg.tls_key) options.tls_key = cfg.tls_key;
+        this.botLogger.info('SASL EXTERNAL (CertFP) authentication enabled');
+      } else if (this.config.services.password) {
+        // SASL PLAIN: username + password over TLS
+        options.account = { account: cfg.nick, password: this.config.services.password };
+      }
+    }
+
+    // Proxy config
+    if (this.config.proxy?.enabled) {
+      options.socks = buildSocksOptions(this.config.proxy);
+      this.botLogger.info(
+        `Using SOCKS5 proxy: ${this.config.proxy.host}:${this.config.proxy.port}`,
+      );
+    }
+
+    return options;
+  }
+
+  /** Register all IRC connection lifecycle event listeners. */
+  private registerConnectionEvents(resolve: () => void, reject: (err: Error) => void): void {
+    const cfg = this.config.irc;
+    let registered = false;
+
+    this.client.on('registered', () => {
+      registered = true;
+      this.botLogger.info(`Connected to ${cfg.host}:${cfg.port} as ${cfg.nick}`);
+      this.eventBus.emit('bot:connected');
+
+      // Read CASEMAPPING from ISUPPORT (available after 005)
+      const cm = this.client.network.supports('CASEMAPPING');
+      if (cm === 'ascii' || cm === 'strict-rfc1459' || cm === 'rfc1459') {
+        this._casemapping = cm;
+      } else {
+        this._casemapping = 'rfc1459'; // safe fallback for unknown values
+      }
+      this.botLogger.info(`CASEMAPPING: ${this._casemapping}`);
+
+      // Propagate to modules that use IRC nick/channel key comparison
+      this.channelState.setCasemapping(this._casemapping);
+      this.permissions.setCasemapping(this._casemapping);
+      this.dispatcher.setCasemapping(this._casemapping);
+      this.services.setCasemapping(this._casemapping);
+      if (this._dccManager) this._dccManager.setCasemapping(this._casemapping);
+
+      // Join configured channels
+      for (const channel of this.configuredChannels) {
+        this.client.join(channel);
+        this.botLogger.info(`Joining ${channel}`);
       }
 
-      // Proxy config
-      if (this.config.proxy?.enabled) {
-        connectOptions.socks = buildSocksOptions(this.config.proxy);
-        this.botLogger.info(
-          `Using SOCKS5 proxy: ${this.config.proxy.host}:${this.config.proxy.port}`,
-        );
+      resolve();
+    });
+
+    this.client.on('close', () => {
+      this.botLogger.info('Connection closed');
+      this.eventBus.emit('bot:disconnected', 'connection closed');
+    });
+
+    this.client.on('reconnecting', () => {
+      this.messageQueue.clear();
+      this.botLogger.info('Reconnecting...');
+    });
+
+    this.client.on('socket error', (err: unknown) => {
+      const error = err instanceof Error ? err : new Error(String(err));
+      this.botLogger.error('Socket error:', error.message);
+      this.eventBus.emit('bot:error', error);
+      if (!registered) {
+        reject(error);
       }
-
-      let registered = false;
-
-      this.client.on('registered', () => {
-        registered = true;
-        this.botLogger.info(`Connected to ${cfg.host}:${cfg.port} as ${cfg.nick}`);
-        this.eventBus.emit('bot:connected');
-
-        // Read CASEMAPPING from ISUPPORT (available after 005)
-        const cm = this.client.network.supports('CASEMAPPING');
-        if (cm === 'ascii' || cm === 'strict-rfc1459' || cm === 'rfc1459') {
-          this._casemapping = cm;
-        } else {
-          this._casemapping = 'rfc1459'; // safe fallback for unknown values
-        }
-        this.botLogger.info(`CASEMAPPING: ${this._casemapping}`);
-
-        // Propagate to modules that use IRC nick/channel key comparison
-        this.channelState.setCasemapping(this._casemapping);
-        this.permissions.setCasemapping(this._casemapping);
-        this.dispatcher.setCasemapping(this._casemapping);
-        this.services.setCasemapping(this._casemapping);
-        if (this._dccManager) this._dccManager.setCasemapping(this._casemapping);
-
-        // Join configured channels
-        for (const channel of this.configuredChannels) {
-          this.client.join(channel);
-          this.botLogger.info(`Joining ${channel}`);
-        }
-
-        resolvePromise();
-      });
-
-      this.client.on('close', () => {
-        this.botLogger.info('Connection closed');
-        this.eventBus.emit('bot:disconnected', 'connection closed');
-      });
-
-      this.client.on('reconnecting', () => {
-        this.messageQueue.clear();
-        this.botLogger.info('Reconnecting...');
-      });
-
-      this.client.on('socket error', (err: unknown) => {
-        const error = err instanceof Error ? err : new Error(String(err));
-        this.botLogger.error('Socket error:', error.message);
-        this.eventBus.emit('bot:error', error);
-        if (!registered) {
-          reject(error);
-        }
-      });
-
-      this.botLogger.info(`Connecting to ${cfg.host}:${cfg.port}...`);
-      this.client.connect(connectOptions);
     });
   }
 

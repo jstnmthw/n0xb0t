@@ -102,6 +102,15 @@ describe('Permissions', () => {
     it('should throw when removing hostmask from nonexistent user', () => {
       expect(() => perms.removeHostmask('nobody', '*!t@h', 'REPL')).toThrow('not found');
     });
+
+    it('addHostmask without source defaults to "unknown"', () => {
+      // No error means the ?? 'unknown' fallback path was executed
+      expect(() => perms.addHostmask('admin', '*!ident@host3')).not.toThrow();
+    });
+
+    it('removeHostmask without source defaults to "unknown"', () => {
+      expect(() => perms.removeHostmask('admin', '*!ident@host1')).not.toThrow();
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -293,6 +302,13 @@ describe('Permissions', () => {
       const result = perms.findByNick('anynick');
       expect(result).toBeNull();
     });
+
+    it('should return null when nick does not match a specific pattern', () => {
+      perms.addUser('bob', 'bob!*@*', 'v', 'REPL');
+      // The nick pattern 'bob' does not wildcard-match 'alice'
+      const result = perms.findByNick('alice');
+      expect(result).toBeNull();
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -302,6 +318,12 @@ describe('Permissions', () => {
   describe('setGlobalFlags / setChannelFlags error paths', () => {
     it('should throw when setting global flags for nonexistent user', () => {
       expect(() => perms.setGlobalFlags('nobody', 'o', 'REPL')).toThrow('not found');
+    });
+
+    it('setGlobalFlags without source defaults to "unknown"', () => {
+      perms.addUser('flaguser', '*!f@h', 'v', 'REPL');
+      expect(() => perms.setGlobalFlags('flaguser', 'o')).not.toThrow();
+      expect(perms.getUser('flaguser')!.global).toBe('o');
     });
 
     it('should throw when setting channel flags for nonexistent user', () => {

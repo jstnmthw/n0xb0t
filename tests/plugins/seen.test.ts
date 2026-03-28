@@ -1,5 +1,15 @@
 import { resolve } from 'node:path';
-import { type Mock, afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import {
+  type Mock,
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 
 import { Permissions } from '../../src/core/permissions';
 import { BotDatabase } from '../../src/database';
@@ -294,5 +304,70 @@ describe('seen plugin', () => {
 
     const response = ctx.reply.mock.calls[0][0];
     expect(response).toMatch(/\d+d \d+h ago/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Hourly cleanup via time bind
+// ---------------------------------------------------------------------------
+
+describe('seen plugin — hourly cleanup', () => {
+  let dispatcher: EventDispatcher;
+  let loader: PluginLoader;
+  let db: BotDatabase;
+
+  // Fake timers must be installed BEFORE the plugin loads so the setInterval
+  // created by the 'time' bind is captured by vitest's fake timer system.
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    db = new BotDatabase(':memory:');
+    db.open();
+    dispatcher = new EventDispatcher();
+    const eventBus = new BotEventBus();
+    loader = new PluginLoader({
+      pluginDir: resolve('./plugins'),
+      dispatcher,
+      eventBus,
+      db,
+      permissions: new Permissions(db),
+      botConfig: MINIMAL_BOT_CONFIG,
+      ircClient: null,
+    });
+    const result = await loader.load(resolve('./plugins/seen/index.ts'));
+    expect(result.status).toBe('ok');
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    if (loader.isLoaded('seen')) await loader.unload('seen');
+    db.close();
+  });
+
+  it('removes expired entries when the time bind fires', () => {
+    // Insert an entry that is older than maxAge (365 days)
+    const maxAgeMs = 365 * 24 * 60 * 60 * 1000;
+    const expiredRecord = JSON.stringify({
+      nick: 'olduser',
+      channel: '#test',
+      text: 'hi',
+      time: Date.now() - maxAgeMs - 1000,
+    });
+    db.set('seen', 'seen:olduser', expiredRecord);
+    expect(db.get('seen', 'seen:olduser')).toBeTruthy();
+
+    // Advance 1 hour to fire the time bind (3600s = 3_600_000ms)
+    vi.advanceTimersByTime(3_600_000);
+
+    // Expired entry should be removed by cleanupStale
+    expect(db.get('seen', 'seen:olduser')).toBeNull();
+  });
+
+  it('removes corrupt entries when the time bind fires', () => {
+    db.set('seen', 'seen:baduser', 'NOT VALID JSON');
+    expect(db.get('seen', 'seen:baduser')).toBeTruthy();
+
+    vi.advanceTimersByTime(3_600_000);
+
+    expect(db.get('seen', 'seen:baduser')).toBeNull();
   });
 });

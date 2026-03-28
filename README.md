@@ -1,5 +1,7 @@
 # Hexbot
 
+![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/jstnmthw/a6a0db4c8be3dc633b01d08cb045d03a/raw/hexbot-coverage.json)
+
 Modular IRC bot written in TypeScript with multi-network bind, hot-reloadable plugin, and hostmask-based permission systems.
 
 ## Quick start

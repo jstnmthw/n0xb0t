@@ -9,7 +9,7 @@ export interface AdminIRCClient {
   join(channel: string): void;
   part(channel: string, message?: string): void;
   connected: boolean;
-  user: { nick: string };
+  user?: { nick: string };
 }
 
 /** Minimal bot interface for status reporting. */
@@ -44,10 +44,6 @@ export function registerIRCAdminCommands(
       }
       const target = _args.substring(0, spaceIdx).trim();
       const message = _args.substring(spaceIdx + 1).trim();
-      if (!target || !message) {
-        ctx.reply('Usage: .say <target> <message>');
-        return;
-      }
       // Validate target looks like a channel or nick (no spaces, starts with # or alphanumeric)
       if (!target || !/^[#&]?[^\s\r\n]+$/.test(target)) {
         ctx.reply('Invalid target.');
@@ -116,10 +112,6 @@ export function registerIRCAdminCommands(
       const rawTarget = _args.substring(0, spaceIdx);
       const target = rawTarget.trim();
       const message = _args.substring(spaceIdx + 1).trim();
-      if (!target || !message) {
-        ctx.reply('Usage: .msg <target> <message>');
-        return;
-      }
       if (!/^[^\s\r\n]+$/.test(rawTarget)) {
         ctx.reply('Invalid target.');
         return;

@@ -683,6 +683,19 @@ describe('ChannelState', () => {
       expect(state.getUser('#test', 'Alice')!.accountName).toBeNull();
     });
 
+    it('stores null when extended-join account is null', () => {
+      client.simulateEvent('join', {
+        nick: 'Alice',
+        ident: 'alice',
+        hostname: 'host.com',
+        channel: '#test',
+        account: null,
+      });
+
+      expect(state.getAccountForNick('Alice')).toBeNull();
+      expect(state.getUser('#test', 'Alice')!.accountName).toBeNull();
+    });
+
     it('returns undefined for a nick with no account-notify/extended-join data', () => {
       client.simulateEvent('join', {
         nick: 'Alice',

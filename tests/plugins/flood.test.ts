@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { type MockBot, createMockBot } from '../helpers/mock-bot';
 
@@ -387,6 +387,61 @@ describe('flood plugin — join flood', () => {
     }
     await flush();
     expect(bot.client.messages.find((m) => m.type === 'notice')).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Timed ban cleanup (time bind fires every 60s)
+// ---------------------------------------------------------------------------
+
+describe('flood plugin — time bind ban cleanup', () => {
+  let bot: MockBot;
+
+  // Fake timers must be installed BEFORE the plugin loads so the setInterval
+  // created by the 'time' bind is captured by vitest's fake timer system.
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    bot = createMockBot({ botNick: 'hexbot' });
+    giveBotOps(bot, '#test');
+    const result = await bot.pluginLoader.load(PLUGIN_PATH, {
+      flood: {
+        enabled: true,
+        channels: ['#test'],
+        config: {
+          msg_threshold: 5,
+          msg_window_secs: 3,
+          actions: ['warn', 'kick', 'tempban'],
+          ban_duration_minutes: 10,
+        },
+      },
+    });
+    expect(result.status).toBe('ok');
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    bot.cleanup();
+  });
+
+  it('lifts expired bans when the 60s time bind fires', () => {
+    // Insert an already-expired ban record directly into the flood plugin's db namespace
+    const mask = '*!bad@bad.host';
+    const expiredRecord = JSON.stringify({
+      mask,
+      channel: '#test',
+      ts: Date.now() - 11 * 60_000,
+      expires: Date.now() - 60_000, // expired 1 minute ago
+    });
+    bot.db.set('flood', `ban:#test:${mask}`, expiredRecord);
+    expect(bot.db.get('flood', `ban:#test:${mask}`)).toBeTruthy();
+
+    // Fire the time bind (every 60 seconds)
+    vi.advanceTimersByTime(60_000);
+
+    // Bot has ops in #test, so the ban should be lifted and record deleted
+    const unbanCmd = bot.client.messages.find((m) => m.type === 'raw' && m.message?.includes('-b'));
+    expect(unbanCmd).toBeDefined();
+    expect(bot.db.get('flood', `ban:#test:${mask}`)).toBeNull();
   });
 });
 

@@ -62,5 +62,14 @@ describe('dispatcher-commands', () => {
       const output = ctx.reply.mock.calls[0][0];
       expect(output).toContain('No active binds');
     });
+
+    it('should include plugin name in message when filtered and no binds found', async () => {
+      const ctx = makeCtx();
+      await handler.execute('.binds nonexistent-plugin', ctx);
+
+      const output = ctx.reply.mock.calls[0][0];
+      expect(output).toContain('nonexistent-plugin');
+      expect(output).toContain('No active binds');
+    });
   });
 });

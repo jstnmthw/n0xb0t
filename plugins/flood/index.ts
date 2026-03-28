@@ -2,6 +2,7 @@
 // Detects message floods, join/part spam, and nick-change spam.
 // Escalating responses: warn → kick → tempban (configurable).
 import type { HandlerContext, PluginAPI } from '../../src/types';
+import { SlidingWindowCounter } from '../../src/utils/sliding-window';
 
 export const name = 'flood';
 export const version = '1.0.0';
@@ -12,11 +13,6 @@ let api: PluginAPI;
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-interface WindowEntry {
-  count: number;
-  windowStart: number;
-}
 
 interface OffenceEntry {
   count: number;
@@ -32,11 +28,13 @@ interface BanRecord {
 
 // ---------------------------------------------------------------------------
 // State (reset on each init)
+// Intentional module-level mutable state: plugin is single-instance per process;
+// state lives at module scope for performance (avoids per-call allocations).
 // ---------------------------------------------------------------------------
 
-let msgTracker: Map<string, WindowEntry>; // `${nick}@${channel}`
-let joinTracker: Map<string, WindowEntry>; // `${hostmask}`
-let nickTracker: Map<string, WindowEntry>; // `${hostmask}`
+let msgTracker: SlidingWindowCounter;
+let joinTracker: SlidingWindowCounter;
+let nickTracker: SlidingWindowCounter;
 let offenceTracker: Map<string, OffenceEntry>; // `${nick}@${channel}` or `${hostmask}`
 
 // ---------------------------------------------------------------------------
@@ -82,23 +80,6 @@ function buildFloodBanMask(hostmask: string): string | null {
   return `*!*@${host}`;
 }
 
-/** Check a sliding window counter and return true if threshold is exceeded. */
-function checkWindow(
-  tracker: Map<string, WindowEntry>,
-  key: string,
-  windowMs: number,
-  threshold: number,
-): boolean {
-  const now = Date.now();
-  const entry = tracker.get(key);
-  if (!entry || now - entry.windowStart > windowMs) {
-    tracker.set(key, { count: 1, windowStart: now });
-    return false;
-  }
-  entry.count++;
-  return entry.count > threshold;
-}
-
 // ---------------------------------------------------------------------------
 // Timed ban helpers (self-contained in flood plugin namespace)
 // ---------------------------------------------------------------------------
@@ -128,6 +109,64 @@ function liftExpiredFloodBans(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Offence tracking
+// ---------------------------------------------------------------------------
+
+function getAction(actions: string[], offenceCount: number): string {
+  if (actions.length === 0) return 'warn';
+  return actions[Math.min(offenceCount, actions.length - 1)];
+}
+
+function recordOffence(actions: string[], offenceWindowMs: number, key: string): string {
+  const now = Date.now();
+  const entry = offenceTracker.get(key);
+  if (entry && now - entry.lastSeen < offenceWindowMs) {
+    entry.count++;
+    entry.lastSeen = now;
+    return getAction(actions, entry.count - 1);
+  }
+  offenceTracker.set(key, { count: 1, lastSeen: now });
+  return getAction(actions, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Flood actions
+// ---------------------------------------------------------------------------
+
+async function applyAction(
+  banDurationMinutes: number,
+  action: string,
+  channel: string,
+  nick: string,
+  reason: string,
+): Promise<void> {
+  if (!botHasOps(channel)) return;
+
+  if (action === 'warn') {
+    api.notice(nick, `[flood] ${reason}`);
+    api.log(`Warned ${nick} in ${channel}: ${reason}`);
+  } else if (action === 'kick') {
+    api.kick(channel, nick, `[flood] ${reason}`);
+    api.log(`Kicked ${nick} from ${channel}: ${reason}`);
+  } else if (action === 'tempban') {
+    const hostmask = api.getUserHostmask(channel, nick);
+    if (!hostmask) {
+      api.kick(channel, nick, `[flood] ${reason}`);
+      return;
+    }
+    const banMask = buildFloodBanMask(hostmask);
+    if (!banMask) {
+      api.kick(channel, nick, `[flood] ${reason}`);
+      return;
+    }
+    api.ban(channel, banMask);
+    storeFloodBan(channel, banMask, banDurationMinutes);
+    api.kick(channel, nick, `[flood] ${reason}`);
+    api.log(`Tempbanned ${nick} (${banMask}) from ${channel}: ${reason}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
 
@@ -135,9 +174,9 @@ export function init(pluginApi: PluginAPI): void {
   api = pluginApi;
 
   // Fresh state on each load/reload
-  msgTracker = new Map();
-  joinTracker = new Map();
-  nickTracker = new Map();
+  msgTracker = new SlidingWindowCounter();
+  joinTracker = new SlidingWindowCounter();
+  nickTracker = new SlidingWindowCounter();
   offenceTracker = new Map();
 
   const msgThreshold = (api.config.msg_threshold as number | undefined) ?? 5;
@@ -149,79 +188,21 @@ export function init(pluginApi: PluginAPI): void {
   const banDurationMinutes = (api.config.ban_duration_minutes as number | undefined) ?? 10;
   const ignoreOps = (api.config.ignore_ops as boolean | undefined) ?? true;
   const actions = (api.config.actions as string[] | undefined) ?? ['warn', 'kick', 'tempban'];
-  const offenceWindowMs = (api.config.offence_window_ms as number | undefined) ?? 300_000; // 5 min
+  const offenceWindowMs = (api.config.offence_window_ms as number | undefined) ?? 300_000;
 
   const msgWindowMs = msgWindowSecs * 1000;
   const joinWindowMs = joinWindowSecs * 1000;
   const nickWindowMs = nickWindowSecs * 1000;
 
-  /** Pick the action for the current offence count (0-indexed). */
-  function getAction(offenceCount: number): string {
-    if (actions.length === 0) return 'warn';
-    return actions[Math.min(offenceCount, actions.length - 1)];
-  }
-
-  /** Record an offence and return the action to take. */
-  function recordOffence(key: string): string {
-    const now = Date.now();
-    const entry = offenceTracker.get(key);
-    if (entry && now - entry.lastSeen < offenceWindowMs) {
-      entry.count++;
-      entry.lastSeen = now;
-      return getAction(entry.count - 1);
-    }
-    offenceTracker.set(key, { count: 1, lastSeen: now });
-    return getAction(0);
-  }
-
-  /** Apply a flood action to a user. */
-  async function applyAction(
-    action: string,
-    channel: string,
-    nick: string,
-    reason: string,
-  ): Promise<void> {
-    if (!botHasOps(channel)) return;
-
-    if (action === 'warn') {
-      api.notice(nick, `[flood] ${reason}`);
-      api.log(`Warned ${nick} in ${channel}: ${reason}`);
-    } else if (action === 'kick') {
-      api.kick(channel, nick, `[flood] ${reason}`);
-      api.log(`Kicked ${nick} from ${channel}: ${reason}`);
-    } else if (action === 'tempban') {
-      const hostmask = api.getUserHostmask(channel, nick);
-      if (!hostmask) {
-        api.kick(channel, nick, `[flood] ${reason}`);
-        return;
-      }
-      const banMask = buildFloodBanMask(hostmask);
-      if (!banMask) {
-        api.kick(channel, nick, `[flood] ${reason}`);
-        return;
-      }
-      api.ban(channel, banMask);
-      storeFloodBan(channel, banMask, banDurationMinutes);
-      api.kick(channel, nick, `[flood] ${reason}`);
-      api.log(`Tempbanned ${nick} (${banMask}) from ${channel}: ${reason}`);
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Message flood detection
-  // ---------------------------------------------------------------------------
-
   api.bind('pubm', '-', '*', async (ctx: HandlerContext) => {
     if (!ctx.channel) return;
     if (isBotNick(ctx.nick)) return;
     if (isPrivileged(ctx.nick, ctx.channel, ignoreOps)) return;
-
     const key = `${api.ircLower(ctx.nick)}@${api.ircLower(ctx.channel ?? '')}`;
-    const flooded = checkWindow(msgTracker, key, msgWindowMs, msgThreshold);
-    if (!flooded) return;
-
-    const action = recordOffence(key);
+    if (!msgTracker.check(key, msgWindowMs, msgThreshold)) return;
+    const action = recordOffence(actions, offenceWindowMs, key);
     await applyAction(
+      banDurationMinutes,
       action,
       ctx.channel,
       ctx.nick,
@@ -229,25 +210,16 @@ export function init(pluginApi: PluginAPI): void {
     );
   });
 
-  // ---------------------------------------------------------------------------
-  // Join flood detection
-  // ---------------------------------------------------------------------------
-
   api.bind('join', '-', '*', (ctx: HandlerContext) => {
     if (!ctx.channel) return;
     if (isBotNick(ctx.nick)) return;
-
-    const { ident, hostname } = ctx;
-    const hostmask = `${ctx.nick}!${ident}@${hostname}`;
+    const hostmask = `${ctx.nick}!${ctx.ident}@${ctx.hostname}`;
     const key = `join:${api.ircLower(hostmask)}`;
-
-    const flooded = checkWindow(joinTracker, key, joinWindowMs, joinThreshold);
-    if (!flooded) return;
+    if (!joinTracker.check(key, joinWindowMs, joinThreshold)) return;
     if (isPrivileged(ctx.nick, ctx.channel, ignoreOps)) return;
-
-    const offenceKey = `join:${api.ircLower(hostmask)}`;
-    const action = recordOffence(offenceKey);
+    const action = recordOffence(actions, offenceWindowMs, key);
     applyAction(
+      banDurationMinutes,
       action,
       ctx.channel,
       ctx.nick,
@@ -255,33 +227,21 @@ export function init(pluginApi: PluginAPI): void {
     ).catch((err) => api.error('Join flood action error:', err));
   });
 
-  // ---------------------------------------------------------------------------
-  // Nick-change spam detection
-  // ---------------------------------------------------------------------------
-
   api.bind('nick', '-', '*', (ctx: HandlerContext) => {
     const { ident, hostname } = ctx;
     if (!ident && !hostname) return; // Incomplete hostmask data — skip
-
     const hostmask = `${ctx.nick}!${ident}@${hostname}`;
     const key = `nick:${api.ircLower(hostmask)}`;
-
-    const flooded = checkWindow(nickTracker, key, nickWindowMs, nickThreshold);
-    if (!flooded) return;
-
+    if (!nickTracker.check(key, nickWindowMs, nickThreshold)) return;
     // Use the new nick (ctx.args) for channel lookup and punishment — the old nick is gone
     const newNick = ctx.args || ctx.nick;
-
-    // Nick changes are global — find channels the user is in
-    // Punish in the first channel where we have ops
-    const channels = api.botConfig.irc.channels;
-    for (const channel of channels) {
+    // Nick changes are global — punish in the first channel where we have ops
+    for (const channel of api.botConfig.irc.channels) {
       if (isPrivileged(newNick, channel, ignoreOps)) return;
       if (!botHasOps(channel)) continue;
-
-      const offenceKey = `nick:${api.ircLower(hostmask)}`;
-      const action = recordOffence(offenceKey);
+      const action = recordOffence(actions, offenceWindowMs, key);
       applyAction(
+        banDurationMinutes,
         action,
         channel,
         newNick,
@@ -290,10 +250,6 @@ export function init(pluginApi: PluginAPI): void {
       break;
     }
   });
-
-  // ---------------------------------------------------------------------------
-  // Timed ban cleanup (every 60 seconds)
-  // ---------------------------------------------------------------------------
 
   api.bind('time', '-', '60', () => {
     liftExpiredFloodBans();
@@ -305,8 +261,8 @@ export function init(pluginApi: PluginAPI): void {
 // ---------------------------------------------------------------------------
 
 export function teardown(): void {
-  msgTracker.clear();
-  joinTracker.clear();
-  nickTracker.clear();
+  msgTracker.reset();
+  joinTracker.reset();
+  nickTracker.reset();
   offenceTracker.clear();
 }

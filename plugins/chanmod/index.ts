@@ -1,5 +1,4 @@
-// chanmod — Channel operator tools: auto-op/halfop/voice, mode enforcement, timed bans,
-//           kick/ban commands, and Eggdrop-style channel protection.
+// chanmod — Channel operator tools: auto-op/halfop/voice, mode enforcement, timed bans, kick/ban commands, and channel protection.
 import type { PluginAPI } from '../../src/types';
 import { setupAutoOp } from './auto-op';
 import { setupBans } from './bans';

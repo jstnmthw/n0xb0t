@@ -1,3 +1,4 @@
+import { Duplex } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -475,5 +476,289 @@ describe('DCCManager', () => {
 
     manager.detach('test shutdown');
     expect(closeSpy).toHaveBeenCalledWith('test shutdown');
+  });
+
+  it('removeSession deletes by nick', () => {
+    const fakeSession = {
+      handle: 'alice',
+      nick: 'alice',
+      writeLine: vi.fn(),
+      connectedAt: Date.now(),
+    } as unknown as DCCSession;
+    (manager as unknown as { sessions: Map<string, DCCSession> }).sessions.set(
+      'alice',
+      fakeSession,
+    );
+    expect(manager.getSessionList().length).toBe(1);
+    manager.removeSession('alice');
+    expect(manager.getSessionList().length).toBe(0);
+  });
+
+  it('setCasemapping changes session key lookup', () => {
+    manager.setCasemapping('ascii');
+    const fakeSession = {
+      handle: 'bob',
+      nick: 'bob',
+      writeLine: vi.fn(),
+      connectedAt: Date.now(),
+    } as unknown as DCCSession;
+    (manager as unknown as { sessions: Map<string, DCCSession> }).sessions.set('bob', fakeSession);
+    manager.removeSession('bob');
+    expect(manager.getSessionList().length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DCCSession — unit tests using a mock Duplex socket
+// ---------------------------------------------------------------------------
+
+function makeMockSocket(): {
+  socket: import('node:net').Socket;
+  written: string[];
+  duplex: Duplex;
+} {
+  const written: string[] = [];
+  const duplex = new Duplex({
+    read() {},
+    write(chunk, _enc, cb) {
+      written.push(Buffer.isBuffer(chunk) ? chunk.toString() : String(chunk));
+      cb();
+    },
+  });
+  return { socket: duplex as unknown as import('node:net').Socket, written, duplex };
+}
+
+function makeMockManagerForSession(
+  overrides: Partial<{
+    sessionList: Array<{ handle: string; nick: string; connectedAt: number }>;
+  }> = {},
+) {
+  return {
+    getSessionList: vi.fn().mockReturnValue(overrides.sessionList ?? []),
+    broadcast: vi.fn(),
+    removeSession: vi.fn(),
+    announce: vi.fn(),
+  } as unknown as DCCManager;
+}
+
+function buildSession(
+  socket: import('node:net').Socket,
+  overrides: {
+    manager?: DCCManager;
+    commandHandler?: import('../../src/command-handler.js').CommandHandler;
+    idleTimeoutMs?: number;
+    user?: UserRecord;
+  } = {},
+): DCCSession {
+  return new DCCSession({
+    manager: overrides.manager ?? makeMockManagerForSession(),
+    user: overrides.user ?? makeUser(),
+    nick: 'testnick',
+    ident: 'test',
+    hostname: 'test.host',
+    socket,
+    commandHandler: overrides.commandHandler ?? makeCommandHandler(),
+    idleTimeoutMs: overrides.idleTimeoutMs ?? 60000,
+  });
+}
+
+async function flushAsync(ticks = 2): Promise<void> {
+  for (let i = 0; i < ticks; i++) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+}
+
+describe('DCCSession', () => {
+  it('writeLine appends CRLF', () => {
+    const { socket, written } = makeMockSocket();
+    const session = buildSession(socket);
+    session.writeLine('hello');
+    expect(written.join('')).toContain('hello\r\n');
+  });
+
+  it('writeLine is a no-op after socket is destroyed', () => {
+    const { socket, written, duplex } = makeMockSocket();
+    duplex.destroy();
+    const session = buildSession(socket);
+    session.writeLine('should not appear');
+    expect(written.join('')).not.toContain('should not appear');
+  });
+
+  it('close sends reason line and destroys socket', () => {
+    const { socket, written, duplex } = makeMockSocket();
+    const session = buildSession(socket);
+    session.close('Goodbye');
+    expect(written.join('')).toContain('*** Goodbye');
+    expect(duplex.destroyed).toBe(true);
+  });
+
+  it('close without reason destroys socket without extra write', () => {
+    const { socket, written, duplex } = makeMockSocket();
+    const session = buildSession(socket);
+    const before = written.length;
+    session.close();
+    expect(duplex.destroyed).toBe(true);
+    expect(written.length).toBe(before);
+  });
+
+  it('close is idempotent', () => {
+    const { socket, written } = makeMockSocket();
+    const session = buildSession(socket);
+    session.close('first');
+    const len = written.length;
+    session.close('second');
+    expect(written.length).toBe(len);
+  });
+
+  it('start sends banner including bot name and prompt', async () => {
+    const { socket, written } = makeMockSocket();
+    const session = buildSession(socket);
+    session.start('1.0.0', 'hexbot');
+    await flushAsync();
+    const output = written.join('');
+    expect(output).toContain('hexbot');
+    expect(output).toContain('testuser');
+    expect(output).toContain('hexbot>');
+    session.close();
+  });
+
+  it('start shows owner-only message for +n flag', async () => {
+    const { socket, written } = makeMockSocket();
+    const session = buildSession(socket, { user: makeUser('owner', 'nm') });
+    session.start('1.0.0', 'hexbot');
+    await flushAsync();
+    expect(written.join('')).toContain('owner of this bot');
+    session.close();
+  });
+
+  it('.quit closes the session', async () => {
+    const { socket, duplex } = makeMockSocket();
+    const session = buildSession(socket);
+    session.start('1.0.0', 'hexbot');
+    duplex.push('.quit\n');
+    await flushAsync(3);
+    expect(duplex.destroyed).toBe(true);
+  });
+
+  it('.exit closes the session', async () => {
+    const { socket, duplex } = makeMockSocket();
+    const session = buildSession(socket);
+    session.start('1.0.0', 'hexbot');
+    duplex.push('.exit\n');
+    await flushAsync(3);
+    expect(duplex.destroyed).toBe(true);
+  });
+
+  it('.console with no sessions reports empty', async () => {
+    const { socket, written, duplex } = makeMockSocket();
+    const session = buildSession(socket);
+    session.start('1.0.0', 'hexbot');
+    duplex.push('.console\n');
+    await flushAsync(3);
+    expect(written.join('')).toContain('No users on the console');
+    session.close();
+  });
+
+  it('.who is an alias for .console', async () => {
+    const { socket, written, duplex } = makeMockSocket();
+    const session = buildSession(socket);
+    session.start('1.0.0', 'hexbot');
+    duplex.push('.who\n');
+    await flushAsync(3);
+    expect(written.join('')).toContain('No users on the console');
+    session.close();
+  });
+
+  it('.console with other sessions lists them', async () => {
+    const { socket, written, duplex } = makeMockSocket();
+    const mgr = makeMockManagerForSession({
+      sessionList: [{ handle: 'alice', nick: 'alice', connectedAt: Date.now() - 5000 }],
+    });
+    const session = buildSession(socket, { manager: mgr });
+    session.start('1.0.0', 'hexbot');
+    duplex.push('.console\n');
+    await flushAsync(3);
+    const output = written.join('');
+    expect(output).toContain('Console (1)');
+    expect(output).toContain('alice');
+    session.close();
+  });
+
+  it('bot command routes to commandHandler', async () => {
+    const { socket, duplex } = makeMockSocket();
+    const cmdHandler = makeCommandHandler();
+    const session = buildSession(socket, { commandHandler: cmdHandler });
+    session.start('1.0.0', 'hexbot');
+    duplex.push('.help\n');
+    await flushAsync(3);
+    expect(cmdHandler.execute).toHaveBeenCalledWith(
+      '.help',
+      expect.objectContaining({ source: 'dcc', nick: 'testnick' }),
+    );
+    session.close();
+  });
+
+  it('commandHandler reply callback splits on newlines', async () => {
+    const { socket, written, duplex } = makeMockSocket();
+    const cmdHandler = makeCommandHandler();
+    (cmdHandler.execute as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_cmd: string, ctx: { reply: (m: string) => void }) => {
+        ctx.reply('line1\nline2');
+      },
+    );
+    const session = buildSession(socket, { commandHandler: cmdHandler });
+    session.start('1.0.0', 'hexbot');
+    duplex.push('.test\n');
+    await flushAsync(3);
+    const output = written.join('');
+    expect(output).toContain('line1');
+    expect(output).toContain('line2');
+    session.close();
+  });
+
+  it('plain text broadcasts to the party line', async () => {
+    const { socket, duplex } = makeMockSocket();
+    const mgr = makeMockManagerForSession();
+    const session = buildSession(socket, { manager: mgr });
+    session.start('1.0.0', 'hexbot');
+    duplex.push('hello world\n');
+    await flushAsync(3);
+    expect(mgr.broadcast).toHaveBeenCalledWith('testuser', 'hello world');
+    session.close();
+  });
+
+  it('empty / whitespace-only line does not broadcast', async () => {
+    const { socket, duplex } = makeMockSocket();
+    const mgr = makeMockManagerForSession();
+    const session = buildSession(socket, { manager: mgr });
+    session.start('1.0.0', 'hexbot');
+    duplex.push('   \n');
+    await flushAsync(3);
+    expect(mgr.broadcast).not.toHaveBeenCalled();
+    session.close();
+  });
+
+  it('socket close event triggers session cleanup', async () => {
+    const { socket, duplex } = makeMockSocket();
+    const mgr = makeMockManagerForSession();
+    const session = buildSession(socket, { manager: mgr });
+    session.start('1.0.0', 'hexbot');
+    duplex.destroy();
+    await flushAsync(3);
+    expect(mgr.removeSession).toHaveBeenCalledWith('testnick');
+    expect(mgr.announce).toHaveBeenCalledWith(expect.stringContaining('has left the console'));
+  });
+
+  it('idle timeout fires and closes session', () => {
+    vi.useFakeTimers();
+    try {
+      const { socket, duplex } = makeMockSocket();
+      const session = buildSession(socket, { idleTimeoutMs: 1000 });
+      session.start('1.0.0', 'hexbot');
+      vi.advanceTimersByTime(1001);
+      expect(duplex.destroyed).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

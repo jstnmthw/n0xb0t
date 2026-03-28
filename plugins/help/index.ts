@@ -70,14 +70,12 @@ export function init(api: PluginAPI): void {
         (e) => e.flags === '-' || api.permissions.checkFlags(e.flags, ctx),
       );
       const categoryEntries = visible.filter(
-        (e) =>
-          (e.category ?? e.pluginId ?? api.pluginId).toLowerCase() === normalized.toLowerCase(),
+        (e) => (e.category ?? e.pluginId!).toLowerCase() === normalized.toLowerCase(),
       );
 
       if (categoryEntries.length > 0) {
         // Category view — always private to nick
-        const actualCategory =
-          categoryEntries[0].category ?? categoryEntries[0].pluginId ?? api.pluginId;
+        const actualCategory = categoryEntries[0].category ?? categoryEntries[0].pluginId!;
         api.notice(ctx.nick, `\x02[${actualCategory}]\x02`);
         for (const e of categoryEntries) {
           api.notice(ctx.nick, `  ${boldTrigger(e.usage)} — ${e.description}`);
@@ -112,7 +110,7 @@ export function init(api: PluginAPI): void {
     // Group by category
     const groups = new Map<string, HelpEntry[]>();
     for (const entry of visible) {
-      const cat = entry.category ?? entry.pluginId ?? api.pluginId;
+      const cat = entry.category ?? entry.pluginId!;
       const list = groups.get(cat) ?? [];
       list.push(entry);
       groups.set(cat, list);

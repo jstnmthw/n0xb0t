@@ -55,26 +55,22 @@ export function init(api: PluginAPI): void {
       return;
     }
 
-    try {
-      const record = JSON.parse(raw) as {
-        nick: string;
-        channel: string;
-        text: string;
-        time: number;
-      };
-      const age = Date.now() - record.time;
+    const record = JSON.parse(raw) as {
+      nick: string;
+      channel: string;
+      text: string;
+      time: number;
+    };
+    const age = Date.now() - record.time;
 
-      if (age > maxAgeMs) {
-        api.db.del(`seen:${api.ircLower(targetNick)}`);
-        ctx.reply(`I haven't seen ${targetNick}.`);
-        return;
-      }
-
-      const ago = formatRelativeTime(age);
-      ctx.reply(`${record.nick} was last seen ${ago} in ${record.channel} saying: ${record.text}`);
-    } catch {
+    if (age > maxAgeMs) {
+      api.db.del(`seen:${api.ircLower(targetNick)}`);
       ctx.reply(`I haven't seen ${targetNick}.`);
+      return;
     }
+
+    const ago = formatRelativeTime(age);
+    ctx.reply(`${record.nick} was last seen ${ago} in ${record.channel} saying: ${record.text}`);
   });
 
   // Hourly cleanup of stale entries

@@ -65,12 +65,28 @@ describe('channel-commands', () => {
       expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('ON'));
     });
 
-    it('-key unsets the flag (reverts to default)', async () => {
+    it('-key unsets the flag (reverts to default OFF)', async () => {
       cs.set('#test', 'protect_topic', true);
       const ctx = makeCtx();
       await handler.execute('.chanset #test -protect_topic', ctx);
       expect(cs.isSet('#test', 'protect_topic')).toBe(false);
       expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('reverted'));
+      expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('OFF'));
+    });
+
+    it('-key on a flag with default ON shows ON in revert message', async () => {
+      cs.register('tmp', [{ key: 'active', type: 'flag', default: true, description: 'Active' }]);
+      cs.set('#test', 'active', false);
+      const ctx = makeCtx();
+      await handler.execute('.chanset #test -active', ctx);
+      expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('ON'));
+    });
+
+    it('-key on non-flag reverts to default string', async () => {
+      cs.set('#test', 'greet_msg', 'custom');
+      const ctx = makeCtx();
+      await handler.execute('.chanset #test -greet_msg', ctx);
+      expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('Welcome!'));
     });
 
     it('+key on non-flag def → type error reply', async () => {
@@ -85,6 +101,19 @@ describe('channel-commands', () => {
       await handler.execute('.chanset #test protect_topic true', ctx);
       expect(cs.isSet('#test', 'protect_topic')).toBe(false);
       expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('+protect_topic'));
+    });
+
+    it('show current flag value (false/OFF)', async () => {
+      const ctx = makeCtx();
+      await handler.execute('.chanset #test protect_topic', ctx);
+      expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('OFF'));
+    });
+
+    it('show current flag value (true/ON)', async () => {
+      cs.set('#test', 'protect_topic', true);
+      const ctx = makeCtx();
+      await handler.execute('.chanset #test protect_topic', ctx);
+      expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('ON'));
     });
   });
 
@@ -161,6 +190,12 @@ describe('channel-commands', () => {
       await handler.execute('.chanset #test', ctx);
       expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('Usage'));
     });
+
+    it('empty key after stripping prefix → usage error', async () => {
+      const ctx = makeCtx();
+      await handler.execute('.chanset #test +', ctx);
+      expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('Usage'));
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -209,6 +244,34 @@ describe('channel-commands', () => {
       const calls = ctx.reply.mock.calls.map((c: string[]) => c[0]);
       const settingsHeader = calls.find((l: string) => l.includes('Channel settings'));
       expect(settingsHeader).toBeUndefined();
+    });
+
+    it('shows OFF for an unset flag (default=false)', async () => {
+      const ctx = makeCtx();
+      await handler.execute('.chaninfo #test', ctx);
+      const calls = ctx.reply.mock.calls.map((c: string[]) => c[0]);
+      const protectLine = calls.find((l: string) => l.includes('protect_topic'));
+      expect(protectLine).toContain('OFF');
+    });
+
+    it('shows (default) for a string setting with empty-string default', async () => {
+      cs.register('tmpplugin', [
+        { key: 'prefix', type: 'string', default: '', description: 'Prefix' },
+      ]);
+      const ctx = makeCtx();
+      await handler.execute('.chaninfo #test', ctx);
+      const calls = ctx.reply.mock.calls.map((c: string[]) => c[0]);
+      const prefixLine = calls.find((l: string) => l.includes('prefix'));
+      expect(prefixLine).toContain('(default)');
+    });
+
+    it('shows (not set) for a string explicitly set to empty', async () => {
+      cs.set('#test', 'greet_msg', '');
+      const ctx = makeCtx();
+      await handler.execute('.chaninfo #test', ctx);
+      const calls = ctx.reply.mock.calls.map((c: string[]) => c[0]);
+      const greetLine = calls.find((l: string) => l.includes('greet_msg'));
+      expect(greetLine).toContain('(not set)');
     });
   });
 });

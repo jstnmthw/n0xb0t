@@ -197,7 +197,10 @@ export class Services {
       return;
     }
 
-    // Detect "Unknown command" and retry with the other method
+    // Detect "Unknown command" and retry with the other method.
+    // Some IRC networks (e.g. Anope) don't support the ACC command (Atheme-style)
+    // and respond with "Unknown command ACC". In that case we fall back to STATUS,
+    // and vice versa for networks that don't support STATUS.
     const unknownCmd = message.match(/^Unknown command (\S+)/i);
     if (unknownCmd) {
       const failedCmd = unknownCmd[1].toUpperCase();

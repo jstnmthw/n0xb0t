@@ -218,10 +218,6 @@ export function setupCommands(
       ctx.reply('Usage: !kick <nick> [reason]');
       return;
     }
-    if (!isValidNick(target)) {
-      ctx.reply('Invalid nick.');
-      return;
-    }
     if (isBotNick(api, target)) {
       ctx.reply('I cannot kick myself.');
       return;
@@ -253,10 +249,6 @@ export function setupCommands(
     const target = hasDuration ? parts.slice(0, -1).join(' ') : parts.join(' ');
 
     if (target.includes('!') || target.includes('@')) {
-      if (/[\r\n]/.test(target)) {
-        ctx.reply('Invalid ban mask.');
-        return;
-      }
       api.ban(ctx.channel, target);
       storeBan(api, ctx.channel, target, ctx.nick, durationMinutes);
       const durStr = durationMinutes === 0 ? 'permanent' : `${durationMinutes}m`;
@@ -279,8 +271,7 @@ export function setupCommands(
       return;
     }
 
-    const fullHostmask = hostmask.includes('!') ? hostmask : `${target}!${hostmask}`;
-    const banMask = buildBanMask(fullHostmask, config.default_ban_type);
+    const banMask = buildBanMask(hostmask, config.default_ban_type);
     if (!banMask) {
       ctx.reply(`Cannot build ban mask from hostmask: ${hostmask}`);
       return;
@@ -303,11 +294,6 @@ export function setupCommands(
       ctx.reply('Usage: !unban <nick|mask>');
       return;
     }
-    if (/[\r\n]/.test(arg)) {
-      ctx.reply('Invalid argument.');
-      return;
-    }
-
     if (arg.includes('!') || arg.includes('@')) {
       api.mode(ctx.channel, '-b', arg);
       removeBanRecord(api, ctx.channel, arg);
@@ -315,10 +301,6 @@ export function setupCommands(
       return;
     }
 
-    if (!isValidNick(arg)) {
-      ctx.reply('Invalid nick.');
-      return;
-    }
     const hostmask = api.getUserHostmask(ctx.channel, arg);
     if (!hostmask) {
       ctx.reply(
@@ -326,9 +308,8 @@ export function setupCommands(
       );
       return;
     }
-    const fullHostmask = hostmask.includes('!') ? hostmask : `${arg}!${hostmask}`;
     const candidates = [1, 2, 3]
-      .map((t) => buildBanMask(fullHostmask, t))
+      .map((t) => buildBanMask(hostmask, t))
       .filter((m): m is string => m !== null);
     const records = getChannelBanRecords(api, ctx.channel);
     const storedMasks = new Set(records.map((r) => r.mask));
@@ -357,10 +338,6 @@ export function setupCommands(
       ctx.reply('Usage: !kickban <nick> [reason]');
       return;
     }
-    if (!isValidNick(target)) {
-      ctx.reply('Invalid nick.');
-      return;
-    }
     if (isBotNick(api, target)) {
       ctx.reply('I cannot ban myself.');
       return;
@@ -374,8 +351,7 @@ export function setupCommands(
       return;
     }
 
-    const fullHostmask = hostmask.includes('!') ? hostmask : `${target}!${hostmask}`;
-    const banMask = buildBanMask(fullHostmask, config.default_ban_type);
+    const banMask = buildBanMask(hostmask, config.default_ban_type);
     if (!banMask) {
       ctx.reply(`Cannot build ban mask from hostmask: ${hostmask}`);
       return;

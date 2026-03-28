@@ -471,6 +471,57 @@ describe('EventDispatcher', () => {
 
       expect(handler).not.toHaveBeenCalled();
     });
+
+    it('should recover when a timer handler throws synchronously', () => {
+      vi.useFakeTimers();
+      const d = new EventDispatcher();
+
+      let callCount = 0;
+      d.bind(
+        'time',
+        '-',
+        '15',
+        () => {
+          callCount++;
+          throw new Error('timer crash');
+        },
+        'test-plugin',
+      );
+
+      // Should not throw — error is caught internally
+      expect(() => vi.advanceTimersByTime(15_100)).not.toThrow();
+      expect(callCount).toBe(1);
+
+      d.unbindAll('test-plugin');
+      vi.useRealTimers();
+    });
+
+    it('should recover when a timer handler returns a rejected promise', async () => {
+      vi.useFakeTimers();
+      const d = new EventDispatcher();
+
+      let callCount = 0;
+      d.bind(
+        'time',
+        '-',
+        '15',
+        async () => {
+          callCount++;
+          throw new Error('async timer crash');
+        },
+        'test-plugin',
+      );
+
+      vi.advanceTimersByTime(15_100);
+      // Flush the rejected promise
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(callCount).toBe(1);
+
+      d.unbindAll('test-plugin');
+      vi.useRealTimers();
+    });
   });
 
   // -------------------------------------------------------------------------

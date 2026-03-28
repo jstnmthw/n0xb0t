@@ -11,7 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Phase 0 — Scaffolding**: project structure, `package.json`, `tsconfig.json`, ESLint config, Vitest setup
 - **Phase 1 — Database and dispatcher**:
   - SQLite database wrapper (`src/database.ts`) with namespaced key-value store and mod_log table
-  - Event dispatcher (`src/dispatcher.ts`) with Eggdrop-style `bind(type, flags, mask, handler)` system
+  - Event dispatcher (`src/dispatcher.ts`) with `bind(type, flags, mask, handler)` system
   - All 13 bind types: `pub`, `pubm`, `msg`, `msgm`, `join`, `part`, `kick`, `nick`, `mode`, `raw`, `time`, `ctcp`, `notice`
   - Non-stackable (`pub`, `msg`) and stackable bind type support
   - Timer binds via `setInterval` with automatic cleanup
@@ -76,7 +76,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Husky pre-commit hook running lint-staged (format check) and typecheck
 - `pnpm format` / `pnpm format:check` scripts
 - Plugin hot-reload: multi-file plugin support — loader now recursively discovers all local `.ts` modules and creates uniquely-named temp copies for cache-busting, replacing the prior approach that only worked for single-file plugins; orphaned temp files are cleaned up on `loadAll()`
-- `chanmod` v2 — refactored into focused module files and extended with Eggdrop-style protection features:
+- `chanmod` v2 — refactored into focused module files and extended with protection features:
   - **Rejoin on kick** (`rejoin_on_kick`) — bot rejoins after being kicked, with configurable delay and rate-limiting (`max_rejoin_attempts` per `rejoin_attempt_window_ms`)
   - **Revenge** (`revenge_on_kick`) — optionally deops, kicks, or kickbans the kicker after rejoining; skips if kicker has left, bot has no ops, or kicker has an exempt flag (`revenge_exempt_flags`)
   - **Bitch mode** (`bitch`) — strips `+o`/`+h` from anyone who receives them without the appropriate permission flag; nodesynch nicks exempt
@@ -85,7 +85,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - ACC/STATUS fallback for NickServ verification (supports Atheme and Anope)
 - Deployment plan (`docs/plans/deployment.md`) — Docker + docker-compose, GitHub Actions CI/CD, systemd unit guide
 - REPL mirrors incoming private messages and notices (e.g. from ChanServ/NickServ) to the console using IRC-conventional `<nick>` / `-nick-` formatting
-- **DCC CHAT + Botnet** (`src/core/dcc.ts`) — Eggdrop-style passive DCC CHAT for remote administration:
+- **DCC CHAT + Botnet** (`src/core/dcc.ts`) — Passive DCC CHAT for remote administration:
   - Passive DCC only (bot opens port, user connects) — no NAT issues for VPS deployments
   - Hostmask + flag authentication; optional NickServ ACC verification before accepting session
   - Multi-user party line ("botnet"): plain text broadcasts to all connected admins; `.command` routes through CommandHandler with real flag enforcement

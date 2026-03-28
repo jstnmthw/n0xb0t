@@ -197,6 +197,25 @@ describe('MessageQueue', () => {
     q.stop();
   });
 
+  it('clear() on already-empty queue does not log', () => {
+    const debugMsgs: string[] = [];
+    const mockLogger = {
+      debug: (msg: string) => debugMsgs.push(msg),
+      warn: () => {},
+      info: () => {},
+      error: () => {},
+      child: function () {
+        return this;
+      },
+    } as unknown as import('../../src/logger').Logger;
+
+    const q = new MessageQueue({ rate: 1, burst: 0, logger: mockLogger });
+    expect(q.pending).toBe(0);
+    q.clear();
+    expect(debugMsgs).toHaveLength(0);
+    q.stop();
+  });
+
   it('logs warning on queue full when logger is provided', () => {
     const warnMsgs: string[] = [];
     const mockLogger = {

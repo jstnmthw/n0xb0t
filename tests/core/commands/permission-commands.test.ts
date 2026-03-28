@@ -3,6 +3,7 @@ import { type Mock, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type CommandContext, CommandHandler } from '../../../src/command-handler';
 import { registerPermissionCommands } from '../../../src/core/commands/permission-commands';
 import { Permissions } from '../../../src/core/permissions';
+import { BotDatabase } from '../../../src/database';
 
 /** Helper: create a minimal CommandContext with a typed reply mock. */
 function makeCtx(
@@ -223,5 +224,76 @@ describe('permission-commands', () => {
       expect(calls[0][0]).toContain('legend');
       expect(calls[1][0]).toContain('Usage');
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // (none) display in flags view and users list
+  // -------------------------------------------------------------------------
+
+  describe('empty global flags display', () => {
+    it('should show (none) in flags view for user with no global flags', async () => {
+      const ctx = makeCtx();
+      await handler.execute('.adduser noflags *!nf@host -', ctx);
+
+      const viewCtx = makeCtx();
+      await handler.execute('.flags noflags', viewCtx);
+
+      expect(viewCtx.reply).toHaveBeenCalledWith(expect.stringContaining('(none)'));
+    });
+
+    it('should show (none) in users list for user with no global flags', async () => {
+      const ctx = makeCtx();
+      await handler.execute('.adduser noflags *!nf@host -', ctx);
+
+      const listCtx = makeCtx();
+      await handler.execute('.users', listCtx);
+
+      expect(listCtx.reply.mock.calls[0][0]).toContain('(none)');
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// IRC-source commands (cover ctx.nick branch in source ternary)
+// ---------------------------------------------------------------------------
+
+describe('permission-commands (IRC source)', () => {
+  let db: BotDatabase;
+  let perms: Permissions;
+  let handler: CommandHandler;
+
+  beforeEach(() => {
+    db = new BotDatabase(':memory:');
+    db.open();
+    perms = new Permissions(db);
+    // Owner-level user so all permission checks pass
+    perms.addUser('owner', '*!owner@host', 'n', 'setup');
+    handler = new CommandHandler(perms);
+    registerPermissionCommands(handler, perms);
+  });
+
+  it('adduser from IRC uses ctx.nick as the audit source', async () => {
+    const ctx = makeCtx({ source: 'irc', nick: 'owner', ident: 'owner', hostname: 'host' });
+    await handler.execute('.adduser newuser *!new@h o', ctx);
+
+    expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('added'));
+    expect(perms.getUser('newuser')).not.toBeNull();
+  });
+
+  it('deluser from IRC uses ctx.nick as the audit source', async () => {
+    perms.addUser('todel', '*!td@h', 'o', 'setup');
+    const ctx = makeCtx({ source: 'irc', nick: 'owner', ident: 'owner', hostname: 'host' });
+    await handler.execute('.deluser todel', ctx);
+
+    expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('removed'));
+    expect(perms.getUser('todel')).toBeNull();
+  });
+
+  it('flags set from IRC uses ctx.nick as the audit source', async () => {
+    perms.addUser('target', '*!t@h', 'o', 'setup');
+    const ctx = makeCtx({ source: 'irc', nick: 'owner', ident: 'owner', hostname: 'host' });
+    await handler.execute('.flags target +mo', ctx);
+
+    expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('Global flags'));
   });
 });
