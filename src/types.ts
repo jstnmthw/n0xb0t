@@ -161,6 +161,8 @@ export interface PluginAPI {
   ban(channel: string, mask: string): void;
   mode(channel: string, modes: string, ...params: string[]): void;
   topic(channel: string, text: string): void;
+  /** Change the bot's own IRC nick (e.g. for nick recovery). */
+  changeNick(nick: string): void;
 
   // Channel state
   getChannel(name: string): ChannelState | undefined;
@@ -421,6 +423,8 @@ export interface HelpEntry {
   description: string; // one-line description
   detail?: string[]; // extra lines shown only in !help <command>
   category?: string; // grouping label, defaults to pluginId
+  /** Populated automatically by the help registry — do not set manually. */
+  pluginId?: string;
 }
 
 // ---------------------------------------------------------------------------

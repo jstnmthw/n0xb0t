@@ -91,6 +91,7 @@ export interface IRCClientForPlugins {
   notice(target: string, message: string): void;
   action(target: string, message: string): void;
   ctcpResponse(target: string, type: string, ...params: string[]): void;
+  raw?(line: string): void;
 }
 
 /** Safe plugin name pattern. */
@@ -521,6 +522,9 @@ export class PluginLoader {
       part(channel: string, message?: string): void {
         ircCommands?.part(channel, message);
       },
+      changeNick(nick: string): void {
+        ircClient?.raw?.(`NICK ${sanitize(nick)}`);
+      },
 
       // Channel state
       getChannel(name: string) {
@@ -688,8 +692,9 @@ export class PluginLoader {
     const allFiles = new Map<string, string>(); // abs path -> source
     this.collectLocalModules(absPath, dir, allFiles);
 
-    if (allFiles.size === 1) {
-      // Entry-only plugin (no local value imports) — simple query-string cache-bust
+    if (allFiles.size === 1 || process.env.VITEST) {
+      // Single-file plugins or test environments (where hot-reload isn't needed):
+      // simple query-string cache-bust so V8 coverage can track original file paths.
       const fileUrl = pathToFileURL(absPath).href + `?t=${ts}`;
       return (await import(fileUrl)) as Record<string, unknown>;
     }

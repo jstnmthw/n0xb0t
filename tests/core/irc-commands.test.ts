@@ -82,6 +82,14 @@ describe('IRCCommands', () => {
     expect(raw!.args[0]).toBe('KICK #test Alice :bad behavior');
   });
 
+  it('should send KICK without reason (covers reason ?? fallback branches)', () => {
+    irc.kick('#test', 'Alice');
+
+    const raw = client.sent.find((m) => m.type === 'raw');
+    expect(raw).toBeDefined();
+    expect(raw!.args[0]).toBe('KICK #test Alice :');
+  });
+
   it('should send correct +b MODE for ban()', () => {
     irc.ban('#test', '*!*@evil.host');
 

@@ -26,12 +26,12 @@ export function init(api: PluginAPI): void {
   /**
    * Send a message to the appropriate target based on reply_type.
    * For channel_notice: sends NOTICE to channel if available, else to nick.
-   * Pass forcePrivate=true to always send to nick (used for detail and category views).
+   * Detail and category views always call api.notice(ctx.nick, ...) directly.
    */
-  function send(ctx: HandlerContext, text: string, forcePrivate = false): void {
+  function send(ctx: HandlerContext, text: string): void {
     if (replyType === 'privmsg') {
       api.say(ctx.nick, text);
-    } else if (replyType === 'channel_notice' && !forcePrivate && ctx.channel) {
+    } else if (replyType === 'channel_notice' && ctx.channel) {
       api.notice(ctx.channel, text);
     } else {
       api.notice(ctx.nick, text);
@@ -70,12 +70,14 @@ export function init(api: PluginAPI): void {
         (e) => e.flags === '-' || api.permissions.checkFlags(e.flags, ctx),
       );
       const categoryEntries = visible.filter(
-        (e) => (e.category ?? api.pluginId).toLowerCase() === normalized.toLowerCase(),
+        (e) =>
+          (e.category ?? e.pluginId ?? api.pluginId).toLowerCase() === normalized.toLowerCase(),
       );
 
       if (categoryEntries.length > 0) {
         // Category view — always private to nick
-        const actualCategory = categoryEntries[0].category ?? api.pluginId;
+        const actualCategory =
+          categoryEntries[0].category ?? categoryEntries[0].pluginId ?? api.pluginId;
         api.notice(ctx.nick, `\x02[${actualCategory}]\x02`);
         for (const e of categoryEntries) {
           api.notice(ctx.nick, `  ${boldTrigger(e.usage)} — ${e.description}`);
@@ -110,7 +112,7 @@ export function init(api: PluginAPI): void {
     // Group by category
     const groups = new Map<string, HelpEntry[]>();
     for (const entry of visible) {
-      const cat = entry.category ?? api.pluginId;
+      const cat = entry.category ?? entry.pluginId ?? api.pluginId;
       const list = groups.get(cat) ?? [];
       list.push(entry);
       groups.set(cat, list);

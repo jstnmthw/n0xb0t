@@ -335,6 +335,111 @@ describe('Permissions', () => {
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('SECURITY'));
       warnSpy.mockRestore();
     });
+
+    it('should not warn when hostmask has no ! separator (covers bangIdx === -1 branch)', () => {
+      const logger = createLogger('debug');
+      const warnSpy = vi.spyOn(logger.constructor.prototype, 'warn');
+      const permsWithLogger = new Permissions(null, logger);
+      // Hostmask without '!' — warnInsecureHostmask returns early at bangIdx === -1
+      permsWithLogger.addUser('noBang', 'justahostname', 'o', 'REPL');
+
+      expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('SECURITY'));
+      warnSpy.mockRestore();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Channel owner flag and null channel branches
+  // -------------------------------------------------------------------------
+
+  describe('channel owner flag and null channel in userHasFlag', () => {
+    it('should grant all flags when user has owner flag (n) in channel-specific flags', () => {
+      perms.addUser('chanowner', '*!chanowner@host', '', 'REPL');
+      perms.setChannelFlags('chanowner', '#vip', 'n', 'REPL');
+
+      const ctx = {
+        nick: 'chanowner',
+        ident: 'chanowner',
+        hostname: 'host',
+        channel: '#vip',
+        text: '',
+        command: '',
+        args: '',
+        reply: () => {},
+        replyPrivate: () => {},
+      };
+      // Owner flag in channel implies all flags for that channel (covers line 303 true branch)
+      expect(perms.checkFlags('+o', ctx)).toBe(true);
+      expect(perms.checkFlags('+m', ctx)).toBe(true);
+    });
+
+    it('should skip channel flag check when channel is null (covers false branch of if(channel))', () => {
+      // User has NO global flags but DOES have channel flags — so global check falls through
+      // With channel=null, the channel block is skipped entirely → returns false
+      perms.addUser('chanonly', '*!chanonly@host', '', 'REPL');
+      perms.setChannelFlags('chanonly', '#vip', 'o', 'REPL');
+
+      const ctx = {
+        nick: 'chanonly',
+        ident: 'chanonly',
+        hostname: 'host',
+        channel: null,
+        text: '',
+        command: '',
+        args: '',
+        reply: () => {},
+        replyPrivate: () => {},
+      };
+      // channel is null → if(channel) is false → no channel flag checked → false
+      expect(perms.checkFlags('+o', ctx)).toBe(false);
+    });
+
+    it('returns false when channelFlags exist but do not include the requested flag', () => {
+      // User has 'v' in #test but we check '+o' → channelFlags.includes('o') is false
+      perms.addUser('voiceonly', '*!vo@host', '', 'REPL');
+      perms.setChannelFlags('voiceonly', '#test', 'v', 'REPL');
+
+      const ctx = {
+        nick: 'voiceonly',
+        ident: 'vo',
+        hostname: 'host',
+        channel: '#test',
+        text: '',
+        command: '',
+        args: '',
+        reply: () => {},
+        replyPrivate: () => {},
+      };
+      // channelFlags='v', checking '+o': channelFlags.includes('o') → false → covers line 304 false branch
+      expect(perms.checkFlags('+o', ctx)).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // normalizeFlags with invalid characters
+  // -------------------------------------------------------------------------
+
+  describe('normalizeFlags strips invalid characters', () => {
+    it('should strip invalid flag characters (covers false branch in normalizeFlags loop)', () => {
+      // 'x', 'z' are not in VALID_FLAGS ('nmov') — they should be stripped
+      perms.addUser('flagtest', '*!ft@host', 'nxoz', 'REPL');
+      const user = perms.getUser('flagtest');
+      // Only valid flags remain: n and o
+      expect(user!.global).toBe('no');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // loadFromDb with no database
+  // -------------------------------------------------------------------------
+
+  describe('loadFromDb with no database', () => {
+    it('does nothing when no database is configured (covers if(!this.db) early return)', () => {
+      // perms from beforeEach has no db — loadFromDb should return immediately
+      expect(() => perms.loadFromDb()).not.toThrow();
+      // No users loaded since no db
+      expect(perms.listUsers()).toHaveLength(0);
+    });
   });
 
   // -------------------------------------------------------------------------

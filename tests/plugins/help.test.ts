@@ -480,6 +480,47 @@ describe('help plugin', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Entries without explicit category (fallback to pluginId)
+  // ---------------------------------------------------------------------------
+
+  it('compact index: entry without category falls back to pluginId', async () => {
+    await loadHelp({ help: { enabled: true, config: { cooldown_ms: 0 } } });
+    const noCategory: HelpEntry = {
+      command: '!foo',
+      flags: '-',
+      usage: '!foo',
+      description: 'A command with no category',
+      // category intentionally omitted
+    };
+    helpRegistry.register('myplugin', [noCategory]);
+
+    const ctx = makeCtx();
+    await dispatcher.dispatch('pub', ctx);
+
+    const messages = mockNotice.mock.calls.map((c) => c[1]);
+    // The pluginId 'myplugin' should be used as the category label
+    expect(messages.some((m) => m.includes('myplugin'))).toBe(true);
+  });
+
+  it('!help <category> works for entry without explicit category (pluginId as fallback)', async () => {
+    await loadHelp({ help: { enabled: true, config: { cooldown_ms: 0 } } });
+    const noCategory: HelpEntry = {
+      command: '!foo',
+      flags: '-',
+      usage: '!foo',
+      description: 'A command with no category',
+    };
+    helpRegistry.register('myplugin', [noCategory]);
+
+    const ctx = makeCtx({ args: 'myplugin' });
+    await dispatcher.dispatch('pub', ctx);
+
+    const messages = mockNotice.mock.calls.map((c) => c[1]);
+    expect(messages[0]).toBe('\x02[myplugin]\x02');
+    expect(messages.some((m) => m.includes('\x02!foo\x02'))).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------------
   // Cooldown
   // ---------------------------------------------------------------------------
 

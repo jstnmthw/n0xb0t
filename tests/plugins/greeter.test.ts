@@ -347,6 +347,27 @@ describe('greeter plugin', () => {
       expect(ctx.replyPrivate).toHaveBeenCalledWith('Custom greet removed.');
     });
 
+    it('!greet del rejects unregistered user', async () => {
+      const ctx = makePubCtx('stranger', 'stranger.com', '#test', 'del');
+      await dispatcher.dispatch('pub', ctx);
+
+      expect(ctx.replyPrivate).toHaveBeenCalledWith(
+        'You must be a registered user to remove a greet.',
+      );
+    });
+
+    it('!greet del rejects user with insufficient flag', async () => {
+      // min_flag is 'v' but user has no flags
+      permissions.addUser('lowpriv', '*!user@host.com', '');
+
+      const ctx = makePubCtx('lowpriv', 'host.com', '#test', 'del');
+      await dispatcher.dispatch('pub', ctx);
+
+      expect(ctx.replyPrivate).toHaveBeenCalledWith(
+        'You need at least +v to remove a custom greet.',
+      );
+    });
+
     it('!greet <unknown subcommand> shows usage hint', async () => {
       const ctx = makePubCtx('user1', 'host.com', '#test', 'foobar');
       await dispatcher.dispatch('pub', ctx);

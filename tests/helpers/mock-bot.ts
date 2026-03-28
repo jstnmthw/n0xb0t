@@ -50,8 +50,11 @@ export function createSilentLogger(): Logger {
  * Uses a real database (in-memory), real dispatcher, real permissions,
  * and a mock IRC client.
  */
-export function createMockBot(options?: { botNick?: string }): MockBot {
+export function createMockBot(options?: { botNick?: string; currentNick?: string }): MockBot {
   const botNick = options?.botNick ?? 'testbot';
+  // currentNick is the bot's active IRC nick (defaults to botNick / config nick).
+  // Set it differently from botNick to test nick-recovery scenarios.
+  const currentNick = options?.currentNick ?? botNick;
   const logger = createSilentLogger();
 
   const db = new BotDatabase(':memory:', logger);
@@ -62,14 +65,14 @@ export function createMockBot(options?: { botNick?: string }): MockBot {
   const commandHandler = new CommandHandler(permissions);
   const eventBus = new BotEventBus();
   const client = new MockIRCClient();
-  client.user.nick = botNick;
+  client.user.nick = currentNick;
 
   // Wire up bridge
   const bridge = new IRCBridge({
     client,
     dispatcher,
     eventBus,
-    botNick,
+    botNick: currentNick,
     logger,
   });
   bridge.attach();

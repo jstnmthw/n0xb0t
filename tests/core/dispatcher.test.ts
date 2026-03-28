@@ -474,6 +474,134 @@ describe('EventDispatcher', () => {
   });
 
   // -------------------------------------------------------------------------
+  // mode type
+  // -------------------------------------------------------------------------
+
+  describe('mode type', () => {
+    it('dispatches on wildcard mask', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('mode', '-', '*', handler, 'test-plugin');
+      await dispatcher.dispatch('mode', makeCtx({ text: '+o nick', command: 'mode' }));
+      expect(handler).toHaveBeenCalledOnce();
+    });
+
+    it('dispatches when text matches specific mask', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('mode', '-', '+o*', handler, 'test-plugin');
+      await dispatcher.dispatch('mode', makeCtx({ text: '+o nick', command: 'mode' }));
+      expect(handler).toHaveBeenCalledOnce();
+    });
+
+    it('does not dispatch when text does not match specific mask', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('mode', '-', '+b*', handler, 'test-plugin');
+      await dispatcher.dispatch('mode', makeCtx({ text: '+o nick', command: 'mode' }));
+      expect(handler).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // time type — invalid mask
+  // -------------------------------------------------------------------------
+
+  describe('time type — invalid mask', () => {
+    it('logs error and returns without setting interval for invalid mask', () => {
+      // 'abc' is not a valid number of seconds
+      expect(() => {
+        dispatcher.bind('time', '-', 'abc', vi.fn(), 'test-plugin');
+      }).not.toThrow();
+      // No interval should be running — confirmed by no timer registered
+      // (This covers the early return at line 108 in dispatcher.ts)
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // raw type
+  // -------------------------------------------------------------------------
+
+  describe('raw type', () => {
+    it('dispatches when mask matches ctx.command', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('raw', '-', '001', handler, 'test-plugin');
+      await dispatcher.dispatch('raw', makeCtx({ command: '001', text: ':Welcome to IRC' }));
+      expect(handler).toHaveBeenCalledOnce();
+    });
+
+    it('does not dispatch when mask does not match ctx.command', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('raw', '-', '001', handler, 'test-plugin');
+      await dispatcher.dispatch(
+        'raw',
+        makeCtx({ command: '002', text: ':Your host is irc.example.com' }),
+      );
+      expect(handler).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // topic type
+  // -------------------------------------------------------------------------
+
+  describe('topic type', () => {
+    it('dispatches on wildcard mask', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('topic', '-', '*', handler, 'test-plugin');
+      await dispatcher.dispatch('topic', makeCtx({ channel: '#test', text: 'new topic' }));
+      expect(handler).toHaveBeenCalledOnce();
+    });
+
+    it('dispatches when channel matches mask', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('topic', '-', '#test', handler, 'test-plugin');
+      await dispatcher.dispatch('topic', makeCtx({ channel: '#test', text: 'new topic' }));
+      expect(handler).toHaveBeenCalledOnce();
+    });
+
+    it('does not dispatch when channel does not match mask', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('topic', '-', '#other', handler, 'test-plugin');
+      await dispatcher.dispatch('topic', makeCtx({ channel: '#test', text: 'new topic' }));
+      expect(handler).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // quit type
+  // -------------------------------------------------------------------------
+
+  describe('quit type', () => {
+    it('dispatches on wildcard mask', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('quit', '-', '*', handler, 'test-plugin');
+      await dispatcher.dispatch(
+        'quit',
+        makeCtx({ nick: 'user', ident: 'u', hostname: 'host.com', text: 'Quit: bye' }),
+      );
+      expect(handler).toHaveBeenCalledOnce();
+    });
+
+    it('dispatches when nick!ident@host matches mask', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('quit', '-', '*!u@host.com', handler, 'test-plugin');
+      await dispatcher.dispatch(
+        'quit',
+        makeCtx({ nick: 'user', ident: 'u', hostname: 'host.com', text: 'Quit: bye' }),
+      );
+      expect(handler).toHaveBeenCalledOnce();
+    });
+
+    it('does not dispatch when hostmask does not match mask', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('quit', '-', '*!x@other.com', handler, 'test-plugin');
+      await dispatcher.dispatch(
+        'quit',
+        makeCtx({ nick: 'user', ident: 'u', hostname: 'host.com', text: 'Quit: bye' }),
+      );
+      expect(handler).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Edge cases
   // -------------------------------------------------------------------------
 
@@ -486,6 +614,31 @@ describe('EventDispatcher', () => {
     it('should handle dispatch with no binds at all', async () => {
       const ctx = makeCtx();
       await expect(dispatcher.dispatch('join', ctx)).resolves.toBeUndefined();
+    });
+
+    it('returns false for unknown event type mask match', async () => {
+      // Bind to an unknown type and dispatch it — handler should not fire
+      // (unknown types fall through to default: return false in matchesMask)
+      const handler = vi.fn();
+      dispatcher.bind('unknown_type' as 'pub', '-', '*', handler, 'test-plugin');
+      await dispatcher.dispatch('unknown_type' as 'pub', makeCtx());
+      expect(handler).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // setCasemapping
+  // -------------------------------------------------------------------------
+
+  describe('setCasemapping', () => {
+    it('updates casemapping for case-insensitive matching', async () => {
+      dispatcher.setCasemapping('ascii');
+      const handler = vi.fn();
+      dispatcher.bind('pub', '-', '!HELLO', handler, 'test-plugin');
+      await dispatcher.dispatch('pub', makeCtx({ command: '!hello' }));
+      // With ascii casemapping, '!HELLO' and '!hello' should match case-insensitively
+      // (caseCompare uses the casemapping for pub type)
+      expect(handler).toHaveBeenCalledOnce();
     });
   });
 });

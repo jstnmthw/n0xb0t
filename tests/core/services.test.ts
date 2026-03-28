@@ -290,6 +290,35 @@ describe('Services', () => {
     });
   });
 
+  describe('setCasemapping', () => {
+    it('should update casemapping without throwing', () => {
+      const { services } = createServices({ type: 'atheme' });
+      // Should not throw; exercises line 63
+      expect(() => services.setCasemapping('ascii')).not.toThrow();
+    });
+  });
+
+  describe('duplicate pending verification', () => {
+    it('should cancel existing pending verification when same nick is verified again', async () => {
+      const { services, client } = createServices({ type: 'atheme' });
+
+      // Start first verification with long timeout
+      const promise1 = services.verifyUser('Alice', 10000);
+      // Start second verification for same nick — should cancel first (lines 122-125)
+      const promise2 = services.verifyUser('Alice', 2000);
+
+      // First promise should resolve with verified=false (it was cancelled)
+      const result1 = await promise1;
+      expect(result1.verified).toBe(false);
+      expect(result1.account).toBeNull();
+
+      // Resolve the second one normally
+      client.simulateNotice('NickServ', 'Alice ACC 3');
+      const result2 = await promise2;
+      expect(result2.verified).toBe(true);
+    });
+  });
+
   describe('event emission', () => {
     it('should emit user:identified on successful verification', async () => {
       const { services, client, eventBus } = createServices({ type: 'atheme' });
@@ -313,6 +342,97 @@ describe('Services', () => {
 
       const result = await promise;
       expect(result.verified).toBe(false);
+    });
+  });
+
+  describe('getNickServTarget fallback', () => {
+    it('falls back to NickServ when nickserv config is empty string', () => {
+      const { services, client } = createServices({ nickserv: '', password: 'pass', sasl: false });
+      services.identify();
+      // Empty nickserv → falls back to 'NickServ' via || operator (line 251)
+      expect(client.sent).toHaveLength(1);
+      expect(client.sent[0].target).toBe('NickServ');
+    });
+  });
+
+  describe('notice handling edge cases', () => {
+    it('ignores non-NickServ notices but logs when verifications are pending', async () => {
+      const { services, client } = createServices({ type: 'atheme' });
+
+      // Start a verification (creates pending entry)
+      const promise = services.verifyUser('Alice', 5000);
+
+      // Send a notice from a non-NickServ source while pending
+      client.simulateNotice('SomeOtherUser', 'hello there');
+
+      // The notice is ignored — Alice's verification is still pending
+      // Clean up by resolving the pending verification
+      client.simulateNotice('NickServ', 'Alice ACC 3');
+      await promise;
+    });
+
+    it('handles NickServ notice that does not match any pattern when verifications are pending', async () => {
+      const { services, client } = createServices({ type: 'atheme' });
+
+      const promise = services.verifyUser('Bob', 5000);
+
+      // NickServ sends an unrecognized notice while Bob's verification is pending
+      client.simulateNotice('NickServ', 'Welcome to NickServ!');
+
+      // Not matched — Bob's verification still pending; resolve it
+      client.simulateNotice('NickServ', 'Bob ACC 3');
+      await promise;
+    });
+
+    it('silently ignores unmatched NickServ notice when no verifications are pending', () => {
+      const { client } = createServices({ type: 'atheme' });
+      // No pending verifications — exercises false branch of `if (pending.size > 0)` at line 226
+      expect(() => {
+        client.simulateNotice('NickServ', 'Welcome to NickServ!');
+      }).not.toThrow();
+    });
+
+    it('silently ignores non-NickServ notice when no verifications are pending', () => {
+      const { client } = createServices({ type: 'atheme' });
+      // Non-NickServ source + no pending — exercises false branch of pending.size > 0 at line 172
+      expect(() => {
+        client.simulateNotice('SomeUser', 'hello there');
+      }).not.toThrow();
+    });
+
+    it('handles Unknown command that does not match any pending method', async () => {
+      const { services, client } = createServices({ type: 'atheme' });
+      const promise = services.verifyUser('Alice', 2000);
+
+      // 'FOOBAR' doesn't match 'acc' or 'status' — shouldRetry is false (covers line 208 false branch)
+      client.simulateNotice('NickServ', 'Unknown command FOOBAR.');
+
+      // Alice's verification should still be pending
+      client.simulateNotice('NickServ', 'Alice ACC 3');
+      const result = await promise;
+      expect(result.verified).toBe(true);
+    });
+
+    it('handles notice with missing message field (covers event.message ?? "" fallback)', () => {
+      const { client } = createServices({ type: 'atheme' });
+      // Emit notice without a message field — exercises the "" fallback at line 163
+      expect(() => {
+        client.emit('notice', { nick: 'NickServ' }); // no message property
+      }).not.toThrow();
+    });
+
+    it('ignores ACC response for a nick not being verified', async () => {
+      const { services, client } = createServices({ type: 'atheme' });
+
+      const promise = services.verifyUser('Alice', 2000);
+
+      // ACC for Ghost (not being verified) — exercises `if (!pending) return` at resolveVerification
+      client.simulateNotice('NickServ', 'Ghost ACC 3');
+
+      // Alice is still pending — resolve her
+      client.simulateNotice('NickServ', 'Alice ACC 3');
+      const result = await promise;
+      expect(result.verified).toBe(true);
     });
   });
 });

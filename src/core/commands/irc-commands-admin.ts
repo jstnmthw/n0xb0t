@@ -113,13 +113,14 @@ export function registerIRCAdminCommands(
         ctx.reply('Usage: .msg <target> <message>');
         return;
       }
-      const target = _args.substring(0, spaceIdx).trim();
+      const rawTarget = _args.substring(0, spaceIdx);
+      const target = rawTarget.trim();
       const message = _args.substring(spaceIdx + 1).trim();
       if (!target || !message) {
         ctx.reply('Usage: .msg <target> <message>');
         return;
       }
-      if (!/^[^\s\r\n]+$/.test(target)) {
+      if (!/^[^\s\r\n]+$/.test(rawTarget)) {
         ctx.reply('Invalid target.');
         return;
       }

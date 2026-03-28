@@ -180,4 +180,41 @@ describe('MessageQueue', () => {
     expect(q.pending).toBe(2);
     q.stop();
   });
+
+  it('drops messages when queue reaches MAX_DEPTH (500)', () => {
+    const q = new MessageQueue({ rate: 2, burst: 0 });
+    const sent: number[] = [];
+
+    // Enqueue 501 messages — first 500 queue up, 501st is dropped
+    for (let i = 0; i < 501; i++) {
+      q.enqueue(() => sent.push(i));
+    }
+
+    // None sent yet (no tokens, no time elapsed)
+    expect(sent).toEqual([]);
+    // Queue should be capped at MAX_DEPTH
+    expect(q.pending).toBe(500);
+    q.stop();
+  });
+
+  it('logs warning on queue full when logger is provided', () => {
+    const warnMsgs: string[] = [];
+    const mockLogger = {
+      warn: (msg: string) => warnMsgs.push(msg),
+      debug: () => {},
+      info: () => {},
+      error: () => {},
+      child: () => mockLogger,
+    } as unknown as import('../../src/logger').Logger;
+
+    const q = new MessageQueue({ rate: 2, burst: 0, logger: mockLogger });
+
+    for (let i = 0; i < 501; i++) {
+      q.enqueue(() => {});
+    }
+
+    expect(warnMsgs).toHaveLength(1);
+    expect(warnMsgs[0]).toContain('Message queue full');
+    q.stop();
+  });
 });

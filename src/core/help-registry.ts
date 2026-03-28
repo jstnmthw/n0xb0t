@@ -7,7 +7,10 @@ export class HelpRegistry {
 
   /** Register (or replace) all help entries for a plugin. */
   register(pluginId: string, entries: HelpEntry[]): void {
-    this.entries.set(pluginId, [...entries]);
+    this.entries.set(
+      pluginId,
+      entries.map((e) => ({ ...e, pluginId })),
+    );
   }
 
   /** Remove all help entries for a plugin. */

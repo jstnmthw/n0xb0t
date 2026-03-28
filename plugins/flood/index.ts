@@ -269,11 +269,14 @@ export function init(pluginApi: PluginAPI): void {
     const flooded = checkWindow(nickTracker, key, nickWindowMs, nickThreshold);
     if (!flooded) return;
 
+    // Use the new nick (ctx.args) for channel lookup and punishment — the old nick is gone
+    const newNick = ctx.args || ctx.nick;
+
     // Nick changes are global — find channels the user is in
     // Punish in the first channel where we have ops
     const channels = api.botConfig.irc.channels;
     for (const channel of channels) {
-      if (isPrivileged(ctx.nick, channel, ignoreOps)) return;
+      if (isPrivileged(newNick, channel, ignoreOps)) return;
       if (!botHasOps(channel)) continue;
 
       const offenceKey = `nick:${api.ircLower(hostmask)}`;
@@ -281,7 +284,7 @@ export function init(pluginApi: PluginAPI): void {
       applyAction(
         action,
         channel,
-        ctx.nick,
+        newNick,
         `nick-change spam (${nickThreshold}+ changes/${nickWindowSecs}s)`,
       ).catch((err) => api.error('Nick flood action error:', err));
       break;

@@ -35,9 +35,9 @@ describe('HelpRegistry', () => {
 
     const all = reg.getAll();
     expect(all).toHaveLength(3);
-    expect(all).toContainEqual(entryA);
-    expect(all).toContainEqual(entryB);
-    expect(all).toContainEqual(entryC);
+    expect(all).toContainEqual(expect.objectContaining(entryA));
+    expect(all).toContainEqual(expect.objectContaining(entryB));
+    expect(all).toContainEqual(expect.objectContaining(entryC));
   });
 
   it('unregisters only the target plugin entries', () => {
@@ -49,30 +49,30 @@ describe('HelpRegistry', () => {
 
     const all = reg.getAll();
     expect(all).toHaveLength(1);
-    expect(all).toContainEqual(entryC);
+    expect(all).toContainEqual(expect.objectContaining(entryC));
   });
 
   it('get() finds an entry by exact command name', () => {
     const reg = new HelpRegistry();
     reg.register('chanmod', [entryA, entryB]);
 
-    expect(reg.get('!op')).toEqual(entryA);
-    expect(reg.get('!kick')).toEqual(entryB);
+    expect(reg.get('!op')).toMatchObject(entryA);
+    expect(reg.get('!kick')).toMatchObject(entryB);
   });
 
   it('get() finds an entry without the leading !', () => {
     const reg = new HelpRegistry();
     reg.register('chanmod', [entryA]);
 
-    expect(reg.get('op')).toEqual(entryA);
+    expect(reg.get('op')).toMatchObject(entryA);
   });
 
   it('get() is case-insensitive', () => {
     const reg = new HelpRegistry();
     reg.register('chanmod', [entryA]);
 
-    expect(reg.get('!OP')).toEqual(entryA);
-    expect(reg.get('Op')).toEqual(entryA);
+    expect(reg.get('!OP')).toMatchObject(entryA);
+    expect(reg.get('Op')).toMatchObject(entryA);
   });
 
   it('get() returns undefined for unknown commands', () => {
@@ -89,7 +89,7 @@ describe('HelpRegistry', () => {
 
     const all = reg.getAll();
     expect(all).toHaveLength(1);
-    expect(all[0]).toEqual(entryB);
+    expect(all[0]).toMatchObject(entryB);
   });
 
   it('getAll() returns empty array when no entries are registered', () => {

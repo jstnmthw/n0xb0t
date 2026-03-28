@@ -201,6 +201,254 @@ describe('chanmod plugin — auto-op', () => {
       disabledBot.cleanup();
     }
   });
+
+  it('should halfop a user with a configured halfop flag', async () => {
+    const halfopBot = createMockBot({ botNick: 'hexbot' });
+    giveBotOps(halfopBot, '#test');
+    try {
+      await halfopBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: { enabled: true, config: { halfop_flags: ['v'] } },
+      });
+      halfopBot.permissions.addUser('huser', '*!huser@huser.host', 'v', 'test');
+      simulateJoin(halfopBot, 'HUser', 'huser', 'huser.host', '#test');
+      await tick();
+      expect(
+        halfopBot.client.messages.find(
+          (m) => m.type === 'mode' && m.message === '+h' && m.args?.includes('HUser'),
+        ),
+      ).toBeDefined();
+    } finally {
+      halfopBot.cleanup();
+    }
+  });
+
+  it('should not halfop when bot has no +h or +o in channel', async () => {
+    const noOpsBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      await noOpsBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: { enabled: true, config: { halfop_flags: ['v'] } },
+      });
+      noOpsBot.permissions.addUser('huser', '*!huser@huser.host', 'v', 'test');
+      simulateJoin(noOpsBot, 'HUser', 'huser', 'huser.host', '#test');
+      await tick();
+      expect(noOpsBot.client.messages.find((m) => m.type === 'mode')).toBeUndefined();
+    } finally {
+      noOpsBot.cleanup();
+    }
+  });
+
+  it('should not voice when bot has no ops', async () => {
+    const noOpsBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      await noOpsBot.pluginLoader.load(PLUGIN_PATH);
+      noOpsBot.permissions.addUser('vuser', '*!vuser@vuser.host', 'v', 'test');
+      simulateJoin(noOpsBot, 'VUser', 'vuser', 'vuser.host', '#test');
+      await tick();
+      expect(noOpsBot.client.messages.find((m) => m.type === 'mode')).toBeUndefined();
+    } finally {
+      noOpsBot.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Command tests (!op, !deop, !kick, !voice, !bans, !halfop)
+// ---------------------------------------------------------------------------
+
+describe('chanmod plugin — commands', () => {
+  let bot: MockBot;
+
+  beforeAll(async () => {
+    bot = createMockBot({ botNick: 'hexbot' });
+    giveBotOps(bot, '#test');
+    const result = await bot.pluginLoader.load(PLUGIN_PATH);
+    expect(result.status).toBe('ok');
+    bot.permissions.addUser('opuser', '*!opuser@op.host', 'o', 'test');
+  });
+
+  afterAll(() => {
+    bot.cleanup();
+  });
+
+  beforeEach(() => {
+    bot.client.clearMessages();
+  });
+
+  it('!op sends mode +o for target nick', async () => {
+    simulatePrivmsg(bot, 'OpUser', 'opuser', 'op.host', '#test', '!op SomeNick');
+    await flush();
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'mode' && m.message === '+o' && m.args?.includes('SomeNick'),
+      ),
+    ).toBeDefined();
+  });
+
+  it('!deop sends mode -o for target nick', async () => {
+    simulatePrivmsg(bot, 'OpUser', 'opuser', 'op.host', '#test', '!deop SomeNick');
+    await flush();
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'mode' && m.message === '-o' && m.args?.includes('SomeNick'),
+      ),
+    ).toBeDefined();
+  });
+
+  it('!deop refuses to deop the bot itself', async () => {
+    simulatePrivmsg(bot, 'OpUser', 'opuser', 'op.host', '#test', '!deop hexbot');
+    await flush();
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'say' && m.message?.includes('cannot deop myself'),
+      ),
+    ).toBeDefined();
+  });
+
+  it('!voice sends mode +v for target nick', async () => {
+    simulatePrivmsg(bot, 'OpUser', 'opuser', 'op.host', '#test', '!voice SomeNick');
+    await flush();
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'mode' && m.message === '+v' && m.args?.includes('SomeNick'),
+      ),
+    ).toBeDefined();
+  });
+
+  it('!devoice sends mode -v for target nick', async () => {
+    simulatePrivmsg(bot, 'OpUser', 'opuser', 'op.host', '#test', '!devoice SomeNick');
+    await flush();
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'mode' && m.message === '-v' && m.args?.includes('SomeNick'),
+      ),
+    ).toBeDefined();
+  });
+
+  it('!halfop sends mode +h for target nick', async () => {
+    simulatePrivmsg(bot, 'OpUser', 'opuser', 'op.host', '#test', '!halfop SomeNick');
+    await flush();
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'mode' && m.message === '+h' && m.args?.includes('SomeNick'),
+      ),
+    ).toBeDefined();
+  });
+
+  it('!dehalfop sends mode -h for target nick', async () => {
+    simulatePrivmsg(bot, 'OpUser', 'opuser', 'op.host', '#test', '!dehalfop SomeNick');
+    await flush();
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'mode' && m.message === '-h' && m.args?.includes('SomeNick'),
+      ),
+    ).toBeDefined();
+  });
+
+  it('!dehalfop refuses to dehalfop the bot itself', async () => {
+    simulatePrivmsg(bot, 'OpUser', 'opuser', 'op.host', '#test', '!dehalfop hexbot');
+    await flush();
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'say' && m.message?.includes('cannot dehalfop myself'),
+      ),
+    ).toBeDefined();
+  });
+
+  it('!kick sends KICK raw command', async () => {
+    simulatePrivmsg(bot, 'OpUser', 'opuser', 'op.host', '#test', '!kick BadUser flooding');
+    await flush();
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'raw' && m.message?.includes('KICK') && m.message?.includes('BadUser'),
+      ),
+    ).toBeDefined();
+  });
+
+  it('!kick uses default reason when none given', async () => {
+    simulatePrivmsg(bot, 'OpUser', 'opuser', 'op.host', '#test', '!kick BadUser');
+    await flush();
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'raw' && m.message?.includes('KICK') && m.message?.includes('BadUser'),
+      ),
+    ).toBeDefined();
+  });
+
+  it('!bans reports no tracked bans', async () => {
+    simulatePrivmsg(bot, 'OpUser', 'opuser', 'op.host', '#test', '!bans');
+    await flush();
+    expect(
+      bot.client.messages.find((m) => m.type === 'say' && m.message?.includes('No tracked bans')),
+    ).toBeDefined();
+  });
+
+  it('!ban with explicit mask sends mode +b', async () => {
+    simulatePrivmsg(bot, 'OpUser', 'opuser', 'op.host', '#test', '!ban *!*@bad.host');
+    await flush();
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'mode' && m.message === '+b' && m.args?.includes('*!*@bad.host'),
+      ),
+    ).toBeDefined();
+  });
+
+  it('!bans lists a tracked ban', async () => {
+    // First ban someone explicitly to create a record
+    simulatePrivmsg(bot, 'OpUser', 'opuser', 'op.host', '#test', '!ban *!*@listed.host 60');
+    await flush();
+    bot.client.clearMessages();
+
+    // Now !bans should list it
+    simulatePrivmsg(bot, 'OpUser', 'opuser', 'op.host', '#test', '!bans');
+    await flush();
+    expect(
+      bot.client.messages.find((m) => m.type === 'say' && m.message?.includes('*!*@listed.host')),
+    ).toBeDefined();
+  });
+
+  it('!ban resolves nick in channel to ban mask', async () => {
+    // Add a target user to the channel so getUserHostmask works
+    addToChannel(bot, 'BadUser', 'bad', 'bad.host', '#test');
+    bot.client.clearMessages();
+
+    simulatePrivmsg(bot, 'OpUser', 'opuser', 'op.host', '#test', '!ban BadUser');
+    await flush();
+    expect(bot.client.messages.find((m) => m.type === 'mode' && m.message === '+b')).toBeDefined();
+  });
+
+  it('!kick refuses to kick the bot itself', async () => {
+    simulatePrivmsg(bot, 'OpUser', 'opuser', 'op.host', '#test', '!kick hexbot');
+    await flush();
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'say' && m.message?.includes('cannot kick myself'),
+      ),
+    ).toBeDefined();
+  });
+
+  it('!bans shows "expires in Xm" for short-duration ban', async () => {
+    // 30-minute ban → formatExpiry shows "expires in 30m" (mins < 60 branch)
+    simulatePrivmsg(bot, 'OpUser', 'opuser', 'op.host', '#test', '!ban *!*@short.host 30');
+    await flush();
+    bot.client.clearMessages();
+    simulatePrivmsg(bot, 'OpUser', 'opuser', 'op.host', '#test', '!bans');
+    await flush();
+    expect(
+      bot.client.messages.find((m) => m.type === 'say' && m.message?.includes('*!*@short.host')),
+    ).toBeDefined();
+  });
+
+  it('!bans shows "expires in XhYm" for > 1-hour ban', async () => {
+    // 90-minute ban → formatExpiry shows "expires in 1h 30m" (rem > 0 branch)
+    simulatePrivmsg(bot, 'OpUser', 'opuser', 'op.host', '#test', '!ban *!*@medium.host 90');
+    await flush();
+    bot.client.clearMessages();
+    simulatePrivmsg(bot, 'OpUser', 'opuser', 'op.host', '#test', '!bans');
+    await flush();
+    expect(
+      bot.client.messages.find((m) => m.type === 'say' && m.message?.includes('*!*@medium.host')),
+    ).toBeDefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1476,5 +1724,322 @@ describe('chanmod plugin — enforcebans', () => {
         (m) => m.type === 'raw' && m.message?.startsWith('KICK') && m.message.includes('hexbot'),
       ),
     ).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Nick recovery
+// ---------------------------------------------------------------------------
+
+describe('chanmod plugin — nick recovery', () => {
+  let bot: MockBot;
+
+  beforeAll(async () => {
+    bot = createMockBot({ botNick: 'hexbot' });
+    const result = await bot.pluginLoader.load(PLUGIN_PATH, {
+      chanmod: {
+        enabled: true,
+        config: { nick_recovery: true },
+      },
+    });
+    expect(result.status).toBe('ok');
+  });
+
+  afterAll(() => bot.cleanup());
+  beforeEach(() => bot.client.clearMessages());
+
+  it('sends NICK when holder changes their nick', async () => {
+    bot.client.simulateEvent('nick', {
+      nick: 'hexbot',
+      ident: 'u',
+      hostname: 'h',
+      new_nick: 'hexbot_old',
+    });
+    await flush();
+    expect(
+      bot.client.messages.find((m) => m.type === 'raw' && m.message === 'NICK hexbot'),
+    ).toBeDefined();
+  });
+
+  it('sends NICK when holder quits', async () => {
+    // Bot is using hexbot_ (currentNick) but wants to reclaim hexbot (botNick = config nick)
+    const freshBot = createMockBot({ botNick: 'hexbot', currentNick: 'hexbot_' });
+    try {
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: { enabled: true, config: { nick_recovery: true } },
+      });
+      // Simulate the holder of 'hexbot' quitting — bridge won't filter it (bot is 'hexbot_')
+      freshBot.client.simulateEvent('quit', {
+        nick: 'hexbot',
+        ident: 'u',
+        hostname: 'h',
+        message: 'bye',
+      });
+      await flush();
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'raw' && m.message === 'NICK hexbot'),
+      ).toBeDefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+
+  it('does not send NICK for unrelated nick changes', async () => {
+    bot.client.simulateEvent('nick', {
+      nick: 'alice',
+      ident: 'a',
+      hostname: 'a.host',
+      new_nick: 'alice_',
+    });
+    await flush();
+    expect(
+      bot.client.messages.find((m) => m.type === 'raw' && m.message === 'NICK hexbot'),
+    ).toBeUndefined();
+  });
+
+  it('respects 30s backoff — only attempts once in window', async () => {
+    bot.client.simulateEvent('nick', {
+      nick: 'hexbot',
+      ident: 'u',
+      hostname: 'h',
+      new_nick: 'hexbot2',
+    });
+    await flush();
+    bot.client.clearMessages();
+    // Second attempt within 30s window should be suppressed
+    bot.client.simulateEvent('quit', { nick: 'hexbot', ident: 'u', hostname: 'h', message: 'bye' });
+    await flush();
+    expect(
+      bot.client.messages.find((m) => m.type === 'raw' && m.message === 'NICK hexbot'),
+    ).toBeUndefined();
+  });
+
+  it('no-op when nick_recovery is false', async () => {
+    const noRecoveryBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      await noRecoveryBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: { enabled: true, config: { nick_recovery: false } },
+      });
+      noRecoveryBot.client.simulateEvent('nick', {
+        nick: 'hexbot',
+        ident: 'u',
+        hostname: 'h',
+        new_nick: 'hexbot_old',
+      });
+      await flush();
+      expect(
+        noRecoveryBot.client.messages.find((m) => m.type === 'raw' && m.message === 'NICK hexbot'),
+      ).toBeUndefined();
+    } finally {
+      noRecoveryBot.cleanup();
+    }
+  });
+
+  it('sends GHOST + deferred NICK when ghost mode is enabled', async () => {
+    const ghostBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      await ghostBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: {
+            nick_recovery: true,
+            nick_recovery_ghost: true,
+            nick_recovery_password: 's3cr3t',
+          },
+        },
+      });
+      ghostBot.client.simulateEvent('nick', {
+        nick: 'hexbot',
+        ident: 'u',
+        hostname: 'h',
+        new_nick: 'hexbot_old',
+      });
+      await flush();
+      // GHOST via NickServ
+      expect(
+        ghostBot.client.messages.find(
+          (m) => m.type === 'say' && m.target === 'NickServ' && m.message?.includes('GHOST'),
+        ),
+      ).toBeDefined();
+      // NICK sent after 2s delay
+      await tick(2100);
+      expect(
+        ghostBot.client.messages.find((m) => m.type === 'raw' && m.message === 'NICK hexbot'),
+      ).toBeDefined();
+    } finally {
+      ghostBot.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stopnethack
+// ---------------------------------------------------------------------------
+
+describe('chanmod plugin — stopnethack mode 1 (isoptest)', () => {
+  let bot: MockBot;
+
+  beforeAll(async () => {
+    bot = createMockBot({ botNick: 'hexbot' });
+    giveBotOps(bot, '#test');
+    const result = await bot.pluginLoader.load(PLUGIN_PATH, {
+      chanmod: {
+        enabled: true,
+        config: { stopnethack_mode: 1, split_timeout_ms: 60000, enforce_delay_ms: 10 },
+      },
+    });
+    expect(result.status).toBe('ok');
+  });
+
+  afterAll(() => bot.cleanup());
+  beforeEach(() => {
+    bot.client.clearMessages();
+    // Reset split state between tests
+    bot.db.del('chanset', '#test:bitch');
+  });
+
+  const triggerSplit = async () => {
+    for (let i = 0; i < 3; i++) {
+      bot.client.simulateEvent('quit', {
+        nick: `leaf${i}`,
+        ident: 'u',
+        hostname: 'h',
+        message: 'hub.example.net leaf.example.net',
+      });
+      await flush();
+    }
+  };
+
+  it('deops user without op flags during split', async () => {
+    await triggerSplit();
+    bot.permissions.addUser('noflag', '*!noflag@noflag.host', 'v', 'test');
+    addToChannel(bot, 'noflag', 'noflag', 'noflag.host', '#test');
+    simulateMode(bot, 'server.net', '#test', '+o', 'noflag');
+    await tick(20);
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'mode' && m.message === '-o' && m.args?.includes('noflag'),
+      ),
+    ).toBeDefined();
+  });
+
+  it('keeps user with op flags during split', async () => {
+    await triggerSplit();
+    bot.permissions.addUser('opuser', '*!opuser@opuser.host', 'o', 'test');
+    addToChannel(bot, 'opuser', 'opuser', 'opuser.host', '#test');
+    simulateMode(bot, 'server.net', '#test', '+o', 'opuser');
+    await tick(20);
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'mode' && m.message === '-o' && m.args?.includes('opuser'),
+      ),
+    ).toBeUndefined();
+  });
+
+  it('does not deop when split is not active (below threshold)', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: { stopnethack_mode: 1, split_timeout_ms: 60000, enforce_delay_ms: 10 },
+        },
+      });
+      // Only 2 split quits — below threshold of 3
+      for (let i = 0; i < 2; i++) {
+        freshBot.client.simulateEvent('quit', {
+          nick: `leaf${i}`,
+          ident: 'u',
+          hostname: 'h',
+          message: 'hub.example.net leaf.example.net',
+        });
+        await flush();
+      }
+      freshBot.client.clearMessages();
+      freshBot.permissions.addUser('anyone', '*!anyone@host', 'v', 'test');
+      addToChannel(freshBot, 'anyone', 'anyone', 'host', '#test');
+      simulateMode(freshBot, 'server.net', '#test', '+o', 'anyone');
+      await tick(20);
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'mode' && m.message === '-o'),
+      ).toBeUndefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+});
+
+describe('chanmod plugin — stopnethack mode 2 (wasoptest)', () => {
+  let bot: MockBot;
+
+  beforeAll(async () => {
+    bot = createMockBot({ botNick: 'hexbot' });
+    giveBotOps(bot, '#test');
+    const result = await bot.pluginLoader.load(PLUGIN_PATH, {
+      chanmod: {
+        enabled: true,
+        config: { stopnethack_mode: 2, split_timeout_ms: 60000, enforce_delay_ms: 10 },
+      },
+    });
+    expect(result.status).toBe('ok');
+  });
+
+  afterAll(() => bot.cleanup());
+  beforeEach(() => bot.client.clearMessages());
+
+  it('keeps user who had ops before split (snapshot)', async () => {
+    // Give alice ops before split
+    addToChannel(bot, 'alice', 'alice', 'alice.host', '#test');
+    simulateMode(bot, 'ChanServ', '#test', '+o', 'alice');
+    await flush();
+    bot.client.clearMessages();
+
+    // Trigger split (3 split quits → snapshot taken, alice should be in it)
+    for (let i = 0; i < 3; i++) {
+      bot.client.simulateEvent('quit', {
+        nick: `leaf${i}`,
+        ident: 'u',
+        hostname: 'h',
+        message: 'hub.net leaf.net',
+      });
+      await flush();
+    }
+
+    // alice rejoins and gets +o from server during split
+    simulateMode(bot, 'server.net', '#test', '+o', 'alice');
+    await tick(20);
+    // alice was in snapshot → not deopped
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'mode' && m.message === '-o' && m.args?.includes('alice'),
+      ),
+    ).toBeUndefined();
+  });
+
+  it('deops user who did NOT have ops before split', async () => {
+    // bob was NOT opped before split
+    addToChannel(bot, 'bob', 'bob', 'bob.host', '#test');
+    bot.client.clearMessages();
+
+    // Trigger split
+    for (let i = 0; i < 3; i++) {
+      bot.client.simulateEvent('quit', {
+        nick: `server${i}`,
+        ident: 'u',
+        hostname: 'h',
+        message: 'hub.net leaf.net',
+      });
+      await flush();
+    }
+
+    // bob gets +o from server during split
+    simulateMode(bot, 'server.net', '#test', '+o', 'bob');
+    await tick(20);
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'mode' && m.message === '-o' && m.args?.includes('bob'),
+      ),
+    ).toBeDefined();
   });
 });

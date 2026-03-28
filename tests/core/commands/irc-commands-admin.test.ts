@@ -69,6 +69,73 @@ describe('irc-commands-admin', () => {
 
       expect(mockClient.say).toHaveBeenCalledWith('#test', 'evilPRIVMSG #other :pwned');
     });
+
+    it('should show usage when message is empty after trim (space-only arg)', async () => {
+      const ctx = makeCtx();
+      // "#test " — has a space so spaceIdx != -1, but message after split is empty
+      await handler.execute('.say #test ', ctx);
+
+      expect(mockClient.say).not.toHaveBeenCalled();
+      expect(ctx.reply).toHaveBeenCalledWith('Usage: .say <target> <message>');
+    });
+
+    it('should show usage when target is empty before the space', async () => {
+      const ctx = makeCtx();
+      // " hello" — space at index 0 so target.trim() is empty
+      await handler.execute('.say  hello', ctx);
+
+      expect(mockClient.say).not.toHaveBeenCalled();
+      expect(ctx.reply).toHaveBeenCalledWith('Usage: .say <target> <message>');
+    });
+  });
+
+  describe('.msg', () => {
+    it('should send a PRIVMSG to a nick', async () => {
+      const ctx = makeCtx();
+      await handler.execute('.msg SomeNick Hello there', ctx);
+
+      expect(mockClient.say).toHaveBeenCalledWith('SomeNick', 'Hello there');
+      expect(ctx.reply).toHaveBeenCalledWith('Message sent to SomeNick');
+    });
+
+    it('should show usage when no args provided', async () => {
+      const ctx = makeCtx();
+      await handler.execute('.msg', ctx);
+
+      expect(mockClient.say).not.toHaveBeenCalled();
+      expect(ctx.reply).toHaveBeenCalledWith('Usage: .msg <target> <message>');
+    });
+
+    it('should show usage when only target provided (no space)', async () => {
+      const ctx = makeCtx();
+      await handler.execute('.msg SomeNick', ctx);
+
+      expect(mockClient.say).not.toHaveBeenCalled();
+    });
+
+    it('should show usage when message is empty after trim', async () => {
+      const ctx = makeCtx();
+      await handler.execute('.msg SomeNick ', ctx);
+
+      expect(mockClient.say).not.toHaveBeenCalled();
+      expect(ctx.reply).toHaveBeenCalledWith('Usage: .msg <target> <message>');
+    });
+
+    it('should strip newlines from messages', async () => {
+      const ctx = makeCtx();
+      await handler.execute('.msg SomeNick evil\r\nPRIVMSG #other :pwned', ctx);
+
+      expect(mockClient.say).toHaveBeenCalledWith('SomeNick', 'evilPRIVMSG #other :pwned');
+    });
+
+    it('should reject target containing control characters', async () => {
+      const ctx = makeCtx();
+      // Target with embedded \r fails the /^[^\s\r\n]+$/ regex
+      await handler.execute('.msg nick\r hello', ctx);
+
+      expect(mockClient.say).not.toHaveBeenCalled();
+      expect(ctx.reply).toHaveBeenCalledWith('Invalid target.');
+    });
   });
 
   describe('.join', () => {

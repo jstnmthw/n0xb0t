@@ -12,6 +12,12 @@ export interface SharedState {
   cycleScheduled: Set<string>;
   enforcementTimers: ReturnType<typeof setTimeout>[];
   startupTimer: ReturnType<typeof setTimeout> | null;
+  // Stopnethack
+  splitActive: boolean;
+  splitExpiry: number;
+  splitOpsSnapshot: Map<string, Set<string>>; // ircLower(channel) → set of ircLower nicks with ops
+  splitQuitCount: number;
+  splitQuitWindowStart: number;
 }
 
 export const INTENTIONAL_TTL_MS = 5000;
@@ -26,6 +32,11 @@ export function createState(): SharedState {
     cycleScheduled: new Set(),
     enforcementTimers: [],
     startupTimer: null,
+    splitActive: false,
+    splitExpiry: 0,
+    splitOpsSnapshot: new Map(),
+    splitQuitCount: 0,
+    splitQuitWindowStart: 0,
   };
 }
 
@@ -70,6 +81,7 @@ export interface ChanmodConfig {
   topic_protect: boolean;
   nick_recovery: boolean;
   nick_recovery_ghost: boolean;
+  nick_recovery_password: string;
   stopnethack_mode: number;
   split_timeout_ms: number;
 }
@@ -114,6 +126,7 @@ export function readConfig(api: PluginAPI): ChanmodConfig {
     topic_protect: cfg(c, 'topic_protect', false),
     nick_recovery: cfg(c, 'nick_recovery', true),
     nick_recovery_ghost: cfg(c, 'nick_recovery_ghost', false),
+    nick_recovery_password: cfg(c, 'nick_recovery_password', ''),
     stopnethack_mode: cfg(c, 'stopnethack_mode', 0),
     split_timeout_ms: cfg(c, 'split_timeout_ms', 300_000),
   };

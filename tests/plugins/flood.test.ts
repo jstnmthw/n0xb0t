@@ -30,7 +30,7 @@ function simulateJoin(
   bot.client.simulateEvent('join', { nick, ident, hostname, channel });
 }
 
-function _simulateNick(
+function simulateNick(
   bot: MockBot,
   nick: string,
   ident: string,
@@ -227,6 +227,166 @@ describe('flood plugin — tempban storage', () => {
     expect(bans.length).toBeGreaterThan(0);
     const record = JSON.parse(bans[0].value) as { expires: number };
     expect(record.expires).toBeGreaterThan(Date.now());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Nick-change spam tests
+// ---------------------------------------------------------------------------
+
+describe('flood plugin — nick-change spam', () => {
+  let bot: MockBot;
+
+  beforeAll(async () => {
+    bot = createMockBot({ botNick: 'hexbot' });
+    giveBotOps(bot, '#test');
+    const result = await bot.pluginLoader.load(PLUGIN_PATH, {
+      flood: {
+        enabled: true,
+        channels: ['#test'],
+        config: {
+          nick_threshold: 3,
+          nick_window_secs: 60,
+          actions: ['warn', 'kick'],
+          ignore_ops: false,
+        },
+      },
+    });
+    expect(result.status).toBe('ok');
+  });
+
+  afterAll(() => {
+    bot.cleanup();
+  });
+
+  beforeEach(() => {
+    bot.client.clearMessages();
+  });
+
+  it('warns on nick-change flood', async () => {
+    // Exceed threshold of 3 nick changes
+    for (let i = 0; i < 4; i++) {
+      simulateNick(bot, 'NickSpammer', 'spam', 'spam.host', `NickSpammer${i}`);
+    }
+    await flush();
+
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'notice' && m.target === 'NickSpammer3' && m.message?.includes('flood'),
+      ),
+    ).toBeDefined();
+  });
+
+  it('skips punishment when bot has no ops in any config channel', async () => {
+    const bot2 = createMockBot({ botNick: 'hexbot' });
+    // Do NOT give bot ops
+    await bot2.pluginLoader.load(PLUGIN_PATH, {
+      flood: {
+        enabled: true,
+        channels: ['#test'],
+        config: { nick_threshold: 2, nick_window_secs: 60, actions: ['kick'] },
+      },
+    });
+
+    for (let i = 0; i < 4; i++) {
+      simulateNick(bot2, 'NickFlooder', 'f', 'f.host', `NickFlooder${i}`);
+    }
+    await flush();
+
+    expect(
+      bot2.client.messages.find((m) => m.type === 'raw' && m.message?.includes('KICK')),
+    ).toBeUndefined();
+    bot2.cleanup();
+  });
+
+  it('skips when hostmask data is incomplete', async () => {
+    // ident and hostname both empty — handler returns early
+    bot.client.simulateEvent('nick', {
+      nick: 'Ghost',
+      ident: '',
+      hostname: '',
+      new_nick: 'Ghost2',
+    });
+    bot.client.simulateEvent('nick', {
+      nick: 'Ghost',
+      ident: '',
+      hostname: '',
+      new_nick: 'Ghost3',
+    });
+    bot.client.simulateEvent('nick', {
+      nick: 'Ghost',
+      ident: '',
+      hostname: '',
+      new_nick: 'Ghost4',
+    });
+    bot.client.simulateEvent('nick', {
+      nick: 'Ghost',
+      ident: '',
+      hostname: '',
+      new_nick: 'Ghost5',
+    });
+    await flush();
+
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'notice' || (m.type === 'raw' && m.message?.includes('KICK')),
+      ),
+    ).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Join flood tests
+// ---------------------------------------------------------------------------
+
+describe('flood plugin — join flood', () => {
+  let bot: MockBot;
+
+  beforeAll(async () => {
+    bot = createMockBot({ botNick: 'hexbot' });
+    giveBotOps(bot, '#test');
+    const result = await bot.pluginLoader.load(PLUGIN_PATH, {
+      flood: {
+        enabled: true,
+        channels: ['#test'],
+        config: {
+          join_threshold: 2,
+          join_window_secs: 60,
+          actions: ['warn', 'kick'],
+          ignore_ops: false,
+        },
+      },
+    });
+    expect(result.status).toBe('ok');
+  });
+
+  afterAll(() => {
+    bot.cleanup();
+  });
+
+  beforeEach(() => {
+    bot.client.clearMessages();
+  });
+
+  it('warns on join flood exceeding threshold', async () => {
+    // Same hostmask joins 3 times — threshold is 2, 3rd triggers flood
+    for (let i = 0; i < 3; i++) {
+      simulateJoin(bot, 'JoinFlooder', 'bad', 'bad.host', '#test');
+    }
+    await flush();
+    expect(
+      bot.client.messages.find(
+        (m) => m.type === 'notice' && m.target === 'JoinFlooder' && m.message?.includes('flood'),
+      ),
+    ).toBeDefined();
+  });
+
+  it("ignores the bot's own join events", async () => {
+    for (let i = 0; i < 5; i++) {
+      simulateJoin(bot, 'hexbot', 'bot', 'bot.host', '#test');
+    }
+    await flush();
+    expect(bot.client.messages.find((m) => m.type === 'notice')).toBeUndefined();
   });
 });
 

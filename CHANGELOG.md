@@ -101,6 +101,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - `!halfop` / `!dehalfop` manual commands (require `+o` flag)
 - `halfop(channel, nick)` / `dehalfop(channel, nick)` added to `IRCCommands` and `PluginAPI`
 - User documentation for DCC CHAT: `docs/DCC.md`
+- **Docker deployment**: `Dockerfile` + `docker-compose.yml` with bind mounts for config/plugins/data; `build` and `start:prod` scripts in `package.json`; data directory auto-created on startup
+- **GitHub Actions CI**: typecheck, lint, and test on every push and PR
+- **Greeter custom greets** (`greeter` v2.2.0): registered users can set a personal greeting with `!greet set <message>` (fires instead of the default), `!greet` to view, `!greet del` to remove; `min_flag` config controls minimum privilege level (`n`/`m`/`o`/`v`); uses `meetsMinFlag()` helper with proper flag hierarchy
+- **Greeter delivery modes** (`greeter` v2.1.0): `delivery: "say"` (default) or `"channel_notice"` (NOTICE to channel); `join_notice` — independent private NOTICE sent directly to the joining user, with `{channel}`/`{nick}` substitution and `\r\n` stripping
+- **Help system** (`help` plugin, v1.0.0): `!help` command sends permission-filtered command list via NOTICE; supports `!help <command>` for detail view and grouped category listing; configurable `reply_type` (`notice`/`privmsg`/`channel_notice`) and per-user cooldown; `HelpRegistry` core module (`src/core/help-registry.ts`) auto-cleared on plugin unload; `registerHelp()` / `getHelpEntries()` added to PluginAPI
+- **Channel settings system**: `ChannelSettings` registry with per-channel key/value store (flag, string, int types); `.chanset <channel> <key> [value]` and `.chaninfo <channel>` commands for runtime channel configuration; `m` flag required
+- **DCC console banner overhauled**: ASCII logo placeholder, greeting, flags display, and help text shown on connect
+- **IRCv3 identity caps** (`e0a0440`):
+  - `extended-join`, `account-notify`, `chghost` caps negotiated on connect; `ChannelState` tracks network-wide nick→account map in real time
+  - Dispatcher ACC enforcement — privileged handlers automatically gated on NickServ identity via `VerificationProvider`; plugin authors no longer call `verifyUser()` manually
+  - SASL EXTERNAL / CertFP support: `services.sasl_mechanism: "PLAIN" | "EXTERNAL"`, `irc.tls_cert`, `irc.tls_key` config fields
+  - `api.stripFormatting(text)` added to PluginAPI; shared utility at `src/utils/strip-formatting.ts`; greeter migrated from local copy
+- **Declaration files** (`types/`): `events.d.ts`, `plugin-api.d.ts`, `config.d.ts`, `index.d.ts` generated for plugin authors with rich JSDoc, `@example` tags, and per-bind-type field semantics table; `ChannelUser.accountName?: string | null` exposes IRCv3 account status to plugins
 
 ### Changed
 
@@ -111,6 +124,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Vitest config excludes `.claude/worktrees/` to prevent duplicate test runs
 - `chanmod` refactored into focused module files (`state.ts`, `helpers.ts`, `bans.ts`, `auto-op.ts`, `mode-enforce.ts`, `commands.ts`, `protection.ts`) using a shared-state dependency-injection pattern; each module exports a `setup*()` function returning a teardown callback
 - Plugin tests: `chanmod` and `topic` switched to `vi.useFakeTimers` + `advanceTimersByTimeAsync`; `8ball` and `seen` switched from `beforeEach` to `beforeAll` for shared setup — total ~2 s saved per run
+- `chanmod` `enforce_channel_modes` migrated from plugin config to per-channel `channelSettings`
+- `chanmod` test suite loads plugin once per suite instead of per test (~5× speedup)
+- `!help` output reformatted: compact grouped index with bold triggers; `!help <category>` drill-down for category listings
+- Switch to `bundler` module resolution in `tsconfig.json`; all `.js` extensions removed from relative imports across `src/`, `plugins/`, and `tests/`
+- Node.js minimum requirement raised from v20 to v24 (current LTS)
+- docker-compose: named network, explicit container name, DCC port mappings added
 - `auto-op` plugin replaced by `chanmod` — subsumes auto-op/voice behavior and adds manual moderation commands and mode enforcement
 - CTCP handlers moved from irc-bridge core into the standalone `ctcp` plugin
 - Plugin API reference renamed from `docs/plugin-api.md` to `docs/PLUGIN_API.md`
@@ -151,6 +170,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - All `.toLowerCase()` calls for nick/channel comparison replaced with `api.ircLower()` in `seen`, `greeter`, `flood`, and `chanmod` plugins
 - **DCC CHAT feature renamed from "botnet" to "console"**: `.botnet` → `.console`, join/leave announcements, banner text, docs, and plan files updated
 - `api.raw()` removed from `PluginAPI` — no callers; reduces attack surface (`IRCCommands` internal `raw()` usage unaffected)
+- Mode strings sanitized before `raw()` in `irc-commands` to prevent protocol injection; channel keys IRC-lowered in `chanmod` flag lookups; filesystem paths removed from plugin-facing `botConfig`
+- `isModeEntry` relaxed to accept entries without a `mode` field — fixes silent event drops in `onMode` when a server omits the mode key
+- SOCKS5 proxy now requires `proxy.enabled = true` to activate — previously enabled whenever the config block existed, risking silent traffic redirection
+- DCC CHAT rejection logging: raw args, active-DCC refusal (ip/port), hostmask mismatch, and insufficient flags all logged so the console shows exactly why a session was denied
+- Passive DCC detection accepts mIRC-style requests (port=0 only) — mIRC sends a real IP with port=0 rather than both zeroed; previously these were silently rejected
+- **Type safety**: `PluginBotConfig`/`PluginIrcConfig` typed readonly views replace `Record<string,unknown>` botConfig; `src/utils/irc-event.ts` adds `toEventObject()`, `isModeArray()`, `isObjectArray()` type guards; `cfg<T>()` helper in `chanmod/state.ts` collapses unsafe per-property casts
 - `deepblue2` topic theme: missing background color on opening decorator
 - `chanmod` commands now check that the bot holds ops before executing mode changes
 - `!unban` in `chanmod` now accepts a nick in addition to an explicit ban mask — resolves the user's hostmask from channel state, builds all standard mask candidates, and falls back to removing all candidate masks if no stored ban record is found

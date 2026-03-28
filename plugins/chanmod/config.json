@@ -30,6 +30,7 @@
   "topic_protect": false,
   "nick_recovery": true,
   "nick_recovery_ghost": false,
+  "nick_recovery_password": "",
   "stopnethack_mode": 0,
   "split_timeout_ms": 300000
 }

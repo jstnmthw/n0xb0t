@@ -113,10 +113,15 @@ function makeCtx(nick = 'testnick', args = 'CHAT chat 0 0 42'): HandlerContext {
 
 class MockIRCClient implements DCCIRCClient {
   notices: Array<{ target: string; message: string }> = [];
+  ctcpMessages: Array<{ target: string; type: string; params: string[] }> = [];
   ctcpResponses: Array<{ target: string; type: string; params: string[] }> = [];
 
   notice(target: string, message: string): void {
     this.notices.push({ target, message });
+  }
+
+  ctcp(target: string, type: string, ...params: string[]): void {
+    this.ctcpMessages.push({ target, type, params });
   }
 
   ctcpResponse(target: string, type: string, ...params: string[]): void {
@@ -370,5 +375,105 @@ describe('DCCManager', () => {
 
     await handler(makeCtx('testnick'));
     expect(client.notices.some((n) => n.message.includes('maximum sessions'))).toBe(true);
+  });
+
+  it('rejects already-connected nick', async () => {
+    const dispatcher = makeDispatcher();
+    let handler!: (ctx: HandlerContext) => Promise<void>;
+    (dispatcher.bind as ReturnType<typeof vi.fn>).mockImplementation(
+      (_t: string, _f: string, _m: string, fn: (ctx: HandlerContext) => Promise<void>) => {
+        handler = fn;
+      },
+    );
+    const m = new DCCManager({
+      client,
+      dispatcher,
+      permissions: makePermissions(makeUser()),
+      services: makeServices(),
+      commandHandler: makeCommandHandler(),
+      config: makeConfig(),
+      version: '1.0.0',
+      botNick: 'hexbot',
+    });
+    m.attach();
+
+    const fakeSession = {
+      handle: 'testuser',
+      nick: 'testnick',
+      writeLine: vi.fn(),
+      close: vi.fn(),
+    } as unknown as DCCSession;
+    (m as unknown as { sessions: Map<string, DCCSession> }).sessions.set('testnick', fakeSession);
+
+    await handler(makeCtx('testnick'));
+    expect(client.notices.some((n) => n.message.includes('active session'))).toBe(true);
+  });
+
+  it('rejects when NickServ verification fails', async () => {
+    const dispatcher = makeDispatcher();
+    let handler!: (ctx: HandlerContext) => Promise<void>;
+    (dispatcher.bind as ReturnType<typeof vi.fn>).mockImplementation(
+      (_t: string, _f: string, _m: string, fn: (ctx: HandlerContext) => Promise<void>) => {
+        handler = fn;
+      },
+    );
+    const m = new DCCManager({
+      client,
+      dispatcher,
+      permissions: makePermissions(makeUser()),
+      services: makeServices(false), // verification fails
+      commandHandler: makeCommandHandler(),
+      config: makeConfig({ nickserv_verify: true }),
+      version: '1.0.0',
+      botNick: 'hexbot',
+    });
+    m.attach();
+
+    await handler(makeCtx());
+    expect(client.notices.some((n) => n.message.includes('NickServ verification failed'))).toBe(
+      true,
+    );
+  });
+
+  it('rejects when port range is exhausted (in handler)', async () => {
+    const dispatcher = makeDispatcher();
+    let handler!: (ctx: HandlerContext) => Promise<void>;
+    (dispatcher.bind as ReturnType<typeof vi.fn>).mockImplementation(
+      (_t: string, _f: string, _m: string, fn: (ctx: HandlerContext) => Promise<void>) => {
+        handler = fn;
+      },
+    );
+    const m = new DCCManager({
+      client,
+      dispatcher,
+      permissions: makePermissions(makeUser()),
+      services: makeServices(),
+      commandHandler: makeCommandHandler(),
+      config: makeConfig({ port_range: [50000, 50000] }),
+      version: '1.0.0',
+      botNick: 'hexbot',
+    });
+    m.attach();
+    (m as unknown as { allocatedPorts: Set<number> }).allocatedPorts.add(50000);
+
+    await handler(makeCtx());
+    expect(client.notices.some((n) => n.message.includes('no ports available'))).toBe(true);
+  });
+
+  it('detach closes all active sessions', () => {
+    const closeSpy = vi.fn();
+    const fakeSession = {
+      handle: 'alice',
+      nick: 'alice',
+      writeLine: vi.fn(),
+      close: closeSpy,
+    } as unknown as DCCSession;
+    (manager as unknown as { sessions: Map<string, DCCSession> }).sessions.set(
+      'alice',
+      fakeSession,
+    );
+
+    manager.detach('test shutdown');
+    expect(closeSpy).toHaveBeenCalledWith('test shutdown');
   });
 });
