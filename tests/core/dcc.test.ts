@@ -121,7 +121,7 @@ class MockIRCClient implements DCCIRCClient {
     this.notices.push({ target, message });
   }
 
-  ctcp(target: string, type: string, ...params: string[]): void {
+  ctcpRequest(target: string, type: string, ...params: string[]): void {
     this.ctcpMessages.push({ target, type, params });
   }
 

@@ -54,7 +54,7 @@ declare module 'irc-framework' {
     part(channel: string, message?: string): void;
     mode(target: string, mode: string, ...params: string[]): void;
     raw(line: string): void;
-    ctcp(target: string, type: string, ...params: string[]): void;
+    ctcpRequest(target: string, type: string, ...params: string[]): void;
     ctcpResponse(target: string, type: string, ...params: string[]): void;
     whois(nick: string): void;
     who(target: string): void;

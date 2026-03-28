@@ -27,7 +27,7 @@ import type { Services } from './services';
 /** Minimal IRC client interface needed by DCCManager. */
 export interface DCCIRCClient {
   notice(target: string, message: string): void;
-  ctcp(target: string, type: string, ...params: string[]): void;
+  ctcpRequest(target: string, type: string, ...params: string[]): void;
   ctcpResponse(target: string, type: string, ...params: string[]): void;
 }
 
@@ -535,7 +535,7 @@ export class DCCManager {
     server.listen(port, '0.0.0.0', () => {
       const ipDecimal = ipToDecimal(this.config.ip);
       const token = parsed.token !== 0 ? parsed.token : Math.floor(Math.random() * 0xffff) + 1;
-      this.client.ctcp(nick, 'DCC', `CHAT chat ${ipDecimal} ${port} ${token}`);
+      this.client.ctcpRequest(nick, 'DCC', `CHAT chat ${ipDecimal} ${port} ${token}`);
       this.logger?.info(`Passive DCC offered to ${nick} on port ${port}`);
     });
 
