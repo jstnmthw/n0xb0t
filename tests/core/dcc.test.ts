@@ -270,10 +270,12 @@ describe('DCCManager', () => {
         handler = fn;
       },
     );
+    const perms = makePermissions(makeUser('voiceonly', 'v'));
+    (perms.checkFlags as ReturnType<typeof vi.fn>).mockReturnValue(false); // voice flag fails 'm' check
     const m = new DCCManager({
       client,
       dispatcher,
-      permissions: makePermissions(makeUser('voiceonly', 'v')), // only voice flag
+      permissions: perms,
       services: makeServices(),
       commandHandler: makeCommandHandler(),
       config: makeConfig({ require_flags: 'm' }),

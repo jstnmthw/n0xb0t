@@ -8,6 +8,7 @@ import {
   buildBanMask,
   getBotNick,
   getUserFlags,
+  hasAnyFlag,
   isBotNick,
   markIntentional,
   parseModesSet,
@@ -101,10 +102,8 @@ export function setupModeEnforce(
         const targetFlags = getUserFlags(api, channel, target);
         const isAuthorized =
           modeStr === '+o'
-            ? targetFlags && config.op_flags.some((f) => targetFlags.includes(f))
-            : targetFlags &&
-              config.halfop_flags.length > 0 &&
-              config.halfop_flags.some((f) => targetFlags.includes(f));
+            ? hasAnyFlag(targetFlags, config.op_flags)
+            : config.halfop_flags.length > 0 && hasAnyFlag(targetFlags, config.halfop_flags);
 
         if (!isAuthorized) {
           api.log(`Bitch: stripping ${modeStr} from ${target} in ${channel} (not flagged)`);
@@ -168,7 +167,7 @@ export function setupModeEnforce(
 
     if (modeStr === '-o') {
       if (!botHasOps(api, channel)) return;
-      const shouldBeOpped = config.op_flags.some((f) => flags.includes(f));
+      const shouldBeOpped = hasAnyFlag(flags, config.op_flags);
       if (shouldBeOpped && enforceModes) {
         api.log(`Re-enforcing +o on ${target} in ${channel} (deopped by ${setter})`);
         const timer = setTimeout(() => {
@@ -183,8 +182,7 @@ export function setupModeEnforce(
         );
         if (!isSetterNodesynch) {
           const setterFlags = getUserFlags(api, channel, setter);
-          const setterHasAuthority =
-            setterFlags && config.op_flags.some((f) => setterFlags.includes(f));
+          const setterHasAuthority = hasAnyFlag(setterFlags, config.op_flags);
           if (!setterHasAuthority) {
             punishDeop(api, config, state, channel, setter);
           }
@@ -193,7 +191,7 @@ export function setupModeEnforce(
     } else if (modeStr === '-h') {
       if (!botCanHalfop(api, channel)) return;
       const shouldBeHalfopped =
-        config.halfop_flags.length > 0 && config.halfop_flags.some((f) => flags.includes(f));
+        config.halfop_flags.length > 0 && hasAnyFlag(flags, config.halfop_flags);
       if (shouldBeHalfopped) {
         api.log(`Re-enforcing +h on ${target} in ${channel} (dehalfopped by ${setter})`);
         const timer = setTimeout(() => {
@@ -203,7 +201,7 @@ export function setupModeEnforce(
       }
     } else if (modeStr === '-v') {
       if (!botHasOps(api, channel)) return;
-      const shouldBeVoiced = config.voice_flags.some((f) => flags.includes(f));
+      const shouldBeVoiced = hasAnyFlag(flags, config.voice_flags);
       if (shouldBeVoiced) {
         api.log(`Re-enforcing +v on ${target} in ${channel} (devoiced by ${setter})`);
         const timer = setTimeout(() => {

@@ -1,6 +1,6 @@
 // chanmod — auto-op/halfop/voice on join, with optional NickServ verification
 import type { HandlerContext, PluginAPI } from '../../src/types';
-import { botCanHalfop, botHasOps, isBotNick, parseModesSet } from './helpers';
+import { botCanHalfop, botHasOps, hasAnyFlag, isBotNick, parseModesSet } from './helpers';
 import type { ChanmodConfig, SharedState } from './state';
 
 export function setupAutoOp(api: PluginAPI, config: ChanmodConfig, state: SharedState): () => void {
@@ -41,13 +41,10 @@ export function setupAutoOp(api: PluginAPI, config: ChanmodConfig, state: Shared
     const channelFlags = user.channels[channel] ?? '';
     const allFlags = globalFlags + channelFlags;
 
-    const shouldOp = config.op_flags.some((f) => allFlags.includes(f));
+    const shouldOp = hasAnyFlag(allFlags, config.op_flags);
     const shouldHalfop =
-      !shouldOp &&
-      config.halfop_flags.length > 0 &&
-      config.halfop_flags.some((f) => allFlags.includes(f));
-    const shouldVoice =
-      !shouldOp && !shouldHalfop && config.voice_flags.some((f) => allFlags.includes(f));
+      !shouldOp && config.halfop_flags.length > 0 && hasAnyFlag(allFlags, config.halfop_flags);
+    const shouldVoice = !shouldOp && !shouldHalfop && hasAnyFlag(allFlags, config.voice_flags);
 
     if (!shouldOp && !shouldHalfop && !shouldVoice) return;
 

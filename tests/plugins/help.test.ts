@@ -114,7 +114,7 @@ describe('help plugin', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // List view — default reply_type: notice
+  // List view — default compact_index: true
   // ---------------------------------------------------------------------------
 
   it('sends list view via NOTICE to nick when called from a channel', async () => {
@@ -143,20 +143,8 @@ describe('help plugin', () => {
     }
   });
 
-  it('includes header and footer in list view', async () => {
-    await loadHelp();
-    helpRegistry.register('8ball', [BALL_ENTRY]);
-
-    const ctx = makeCtx();
-    await dispatcher.dispatch('pub', ctx);
-
-    const messages = mockNotice.mock.calls.map((c) => c[1]);
-    expect(messages[0]).toBe('*** Help ***');
-    expect(messages[messages.length - 1]).toBe('*** End of Help ***');
-  });
-
-  it('lists commands grouped by category', async () => {
-    await loadHelp();
+  it('compact index: sends bold intro line and one line per category', async () => {
+    await loadHelp({ help: { enabled: true, config: { cooldown_ms: 0 } } });
     helpRegistry.register('8ball', [BALL_ENTRY]);
     helpRegistry.register('seen', [SEEN_ENTRY]);
 
@@ -164,8 +152,73 @@ describe('help plugin', () => {
     await dispatcher.dispatch('pub', ctx);
 
     const messages = mockNotice.mock.calls.map((c) => c[1]);
-    expect(messages).toContain('[fun]');
-    expect(messages).toContain('[info]');
+    // First line is the bold intro
+    expect(messages[0].startsWith('\x02')).toBe(true);
+    expect(messages[0]).toContain('— !help <category> or !help <command>');
+    // One line per category, no footer
+    expect(messages.some((m) => m.includes('\x02fun\x02'))).toBe(true);
+    expect(messages.some((m) => m.includes('\x02info\x02'))).toBe(true);
+    // No classic header/footer lines
+    expect(messages).not.toContain('*** Help ***');
+    expect(messages).not.toContain('*** End of Help ***');
+  });
+
+  it('compact index: category line lists command names without !', async () => {
+    await loadHelp({ help: { enabled: true, config: { cooldown_ms: 0 } } });
+    helpRegistry.register('8ball', [BALL_ENTRY]);
+
+    const ctx = makeCtx();
+    await dispatcher.dispatch('pub', ctx);
+
+    const messages = mockNotice.mock.calls.map((c) => c[1]);
+    const funLine = messages.find((m) => m.includes('\x02fun\x02'));
+    expect(funLine).toBeDefined();
+    expect(funLine).toContain('8ball');
+    // Command names are stripped of ! in compact index
+    expect(funLine).not.toContain('!8ball');
+  });
+
+  // ---------------------------------------------------------------------------
+  // List view — verbose mode (compact_index: false)
+  // ---------------------------------------------------------------------------
+
+  it('verbose mode: sends bold header and footer', async () => {
+    await loadHelp({
+      help: {
+        enabled: true,
+        config: {
+          compact_index: false,
+          cooldown_ms: 0,
+          header: 'Test Help',
+          footer: '--- End ---',
+        },
+      },
+    });
+    helpRegistry.register('8ball', [BALL_ENTRY]);
+
+    const ctx = makeCtx();
+    await dispatcher.dispatch('pub', ctx);
+
+    const messages = mockNotice.mock.calls.map((c) => c[1]);
+    expect(messages[0]).toBe('\x02Test Help\x02');
+    expect(messages[messages.length - 1]).toBe('--- End ---');
+  });
+
+  it('verbose mode: lists commands grouped by category with bold formatting', async () => {
+    await loadHelp({
+      help: { enabled: true, config: { compact_index: false, cooldown_ms: 0 } },
+    });
+    helpRegistry.register('8ball', [BALL_ENTRY]);
+    helpRegistry.register('seen', [SEEN_ENTRY]);
+
+    const ctx = makeCtx();
+    await dispatcher.dispatch('pub', ctx);
+
+    const messages = mockNotice.mock.calls.map((c) => c[1]);
+    expect(messages).toContain('\x02[fun]\x02');
+    expect(messages).toContain('\x02[info]\x02');
+    expect(messages.some((m) => m.includes('\x02!8ball\x02'))).toBe(true);
+    expect(messages.some((m) => m.includes('\x02!seen\x02'))).toBe(true);
   });
 
   // ---------------------------------------------------------------------------
@@ -225,7 +278,9 @@ describe('help plugin', () => {
   // ---------------------------------------------------------------------------
 
   it('shows only flags:- entries to a user with no permissions', async () => {
-    await loadHelp({ help: { enabled: true, config: { cooldown_ms: 0 } } });
+    await loadHelp({
+      help: { enabled: true, config: { compact_index: false, cooldown_ms: 0 } },
+    });
     helpRegistry.register('chanmod', [OP_ENTRY]);
     helpRegistry.register('8ball', [BALL_ENTRY]);
 
@@ -241,7 +296,9 @@ describe('help plugin', () => {
   });
 
   it('shows flags:o entries to a user with +o permission', async () => {
-    await loadHelp({ help: { enabled: true, config: { cooldown_ms: 0 } } });
+    await loadHelp({
+      help: { enabled: true, config: { compact_index: false, cooldown_ms: 0 } },
+    });
     helpRegistry.register('chanmod', [OP_ENTRY]);
     helpRegistry.register('8ball', [BALL_ENTRY]);
 
@@ -273,7 +330,22 @@ describe('help plugin', () => {
       expect(call[0]).toBe('user1');
     }
     const messages = mockNotice.mock.calls.map((c) => c[1]);
-    expect(messages.some((m) => m.includes('!op [nick]'))).toBe(true);
+    // First line: bold usage — description
+    expect(messages[0]).toBe('\x02!op\x02 [nick] — Op a nick');
+    // Second line: flags
+    expect(messages[1]).toBe('Requires: o');
+  });
+
+  it('!help <command> with flags:- shows "No flags required"', async () => {
+    await loadHelp();
+    helpRegistry.register('8ball', [BALL_ENTRY]);
+
+    const ctx = makeCtx({ args: '8ball' });
+    await dispatcher.dispatch('pub', ctx);
+
+    const messages = mockNotice.mock.calls.map((c) => c[1]);
+    expect(messages[0]).toBe('\x02!8ball\x02 <question> — Ask the magic 8-ball');
+    expect(messages[1]).toBe('No flags required');
   });
 
   it('!help !op (with leading !) also works', async () => {
@@ -284,7 +356,7 @@ describe('help plugin', () => {
     await dispatcher.dispatch('pub', ctx);
 
     const messages = mockNotice.mock.calls.map((c) => c[1]);
-    expect(messages.some((m) => m.includes('!op [nick]'))).toBe(true);
+    expect(messages[0]).toBe('\x02!op\x02 [nick] — Op a nick');
   });
 
   it('!help <command> shows detail lines when present', async () => {
@@ -306,7 +378,105 @@ describe('help plugin', () => {
     const ctx = makeCtx({ args: 'unknowncmd', text: '!help unknowncmd' });
     await dispatcher.dispatch('pub', ctx);
 
-    expect(mockNotice).toHaveBeenCalledWith('user1', 'No help available for !unknowncmd');
+    expect(mockNotice).toHaveBeenCalledWith(
+      'user1',
+      'No help for "unknowncmd" — try !help for a list',
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // Category drill-down
+  // ---------------------------------------------------------------------------
+
+  it("!help <category> shows that category's commands to nick", async () => {
+    await loadHelp();
+    helpRegistry.register('8ball', [BALL_ENTRY]); // flags: '-', visible to all
+
+    const ctx = makeCtx({ args: 'fun', channel: '#test' });
+    await dispatcher.dispatch('pub', ctx);
+
+    // Category view always sends to nick, not channel
+    for (const call of mockNotice.mock.calls) {
+      expect(call[0]).toBe('user1');
+    }
+    const messages = mockNotice.mock.calls.map((c) => c[1]);
+    expect(messages[0]).toBe('\x02[fun]\x02');
+    expect(messages.some((m) => m.includes('\x02!8ball\x02'))).toBe(true);
+  });
+
+  it('!help <category> filters by permission', async () => {
+    await loadHelp({ help: { enabled: true, config: { cooldown_ms: 0 } } });
+    helpRegistry.register('chanmod', [OP_ENTRY]);
+
+    // User has no 'o' flag — moderation category hidden
+    const ctx = makeCtx({ args: 'moderation' });
+    await dispatcher.dispatch('pub', ctx);
+
+    expect(mockNotice).toHaveBeenCalledWith(
+      'user1',
+      'No help for "moderation" — try !help for a list',
+    );
+  });
+
+  it('!help <category> shows commands when user has the required flag', async () => {
+    await loadHelp({ help: { enabled: true, config: { cooldown_ms: 0 } } });
+    helpRegistry.register('chanmod', [OP_ENTRY]);
+
+    permissions.addUser('opuser', 'user1!user@host.com', 'o', 'test');
+    permissions.loadFromDb();
+
+    const ctx = makeCtx({ nick: 'user1', ident: 'user', hostname: 'host.com', args: 'moderation' });
+    await dispatcher.dispatch('pub', ctx);
+
+    const messages = mockNotice.mock.calls.map((c) => c[1]);
+    expect(messages[0]).toBe('\x02[moderation]\x02');
+    expect(messages.some((m) => m.includes('\x02!op\x02'))).toBe(true);
+  });
+
+  it('!help <category> case-insensitive match', async () => {
+    await loadHelp({ help: { enabled: true, config: { cooldown_ms: 0 } } });
+    helpRegistry.register('8ball', [BALL_ENTRY]);
+
+    const ctx = makeCtx({ args: 'FUN' });
+    await dispatcher.dispatch('pub', ctx);
+
+    const messages = mockNotice.mock.calls.map((c) => c[1]);
+    expect(messages[0]).toBe('\x02[fun]\x02');
+    expect(messages.some((m) => m.includes('\x02!8ball\x02'))).toBe(true);
+  });
+
+  it('command name takes priority over category name in arg dispatch', async () => {
+    await loadHelp({ help: { enabled: true, config: { cooldown_ms: 0 } } });
+    // Register a command named "!fun" and entries with category "fun"
+    const funCommand: HelpEntry = {
+      command: '!fun',
+      flags: '-',
+      usage: '!fun',
+      description: 'A command called fun',
+      category: 'misc',
+    };
+    helpRegistry.register('misc', [funCommand, BALL_ENTRY]);
+
+    const ctx = makeCtx({ args: 'fun' });
+    await dispatcher.dispatch('pub', ctx);
+
+    const messages = mockNotice.mock.calls.map((c) => c[1]);
+    // Should show detail for !fun command, not the category view
+    expect(messages[0]).toBe('\x02!fun\x02 — A command called fun');
+    expect(messages[1]).toBe('No flags required');
+  });
+
+  it('!help <unknowncategory> returns not-found reply', async () => {
+    await loadHelp();
+    helpRegistry.register('8ball', [BALL_ENTRY]);
+
+    const ctx = makeCtx({ args: 'unknowncat' });
+    await dispatcher.dispatch('pub', ctx);
+
+    expect(mockNotice).toHaveBeenCalledWith(
+      'user1',
+      'No help for "unknowncat" — try !help for a list',
+    );
   });
 
   // ---------------------------------------------------------------------------

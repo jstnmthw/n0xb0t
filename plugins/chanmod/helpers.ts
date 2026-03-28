@@ -57,6 +57,22 @@ export function wasIntentional(
   return false;
 }
 
+/** Owner flag — implies all other privileges. */
+const OWNER_FLAG = 'n';
+
+/**
+ * Returns true if `flags` grants any of the `required` flags.
+ * Owner flag (n) implies all privileges, mirroring permissions.ts semantics.
+ */
+export function hasAnyFlag(flags: string | null, required: Iterable<string>): boolean {
+  if (!flags) return false;
+  if (flags.includes(OWNER_FLAG)) return true;
+  for (const f of required) {
+    if (flags.includes(f)) return true;
+  }
+  return false;
+}
+
 export function getUserFlags(api: PluginAPI, channel: string, nick: string): string | null {
   const hostmask = api.getUserHostmask(channel, nick);
   if (!hostmask) return null;

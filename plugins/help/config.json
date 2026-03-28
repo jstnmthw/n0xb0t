@@ -1,6 +1,7 @@
 {
   "cooldown_ms": 30000,
   "reply_type": "notice",
-  "header": "*** Help ***",
+  "compact_index": true,
+  "header": "HexBot Commands",
   "footer": "*** End of Help ***"
 }

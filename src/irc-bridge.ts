@@ -162,7 +162,9 @@ export class IRCBridge {
     const stripped = stripFormatting(message);
     const spaceIdx = stripped.indexOf(' ');
     const command = spaceIdx === -1 ? stripped : stripped.substring(0, spaceIdx);
-    const args = spaceIdx === -1 ? '' : stripped.substring(spaceIdx + 1).trim();
+    // Preserve IRC formatting in args — extract from the original unstripped message
+    const firstSpace = message.indexOf(' ');
+    const args = firstSpace === -1 ? '' : message.substring(firstSpace + 1).trim();
 
     const ctx = this.buildContext({
       nick,

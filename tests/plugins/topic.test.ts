@@ -175,4 +175,208 @@ describe('topic plugin', () => {
     expect(warning).toBeDefined();
     expect(warning!.message).toContain('chars');
   });
+
+  // ---------------------------------------------------------------------------
+  // Phase 3: !topic lock / !topic unlock
+  // ---------------------------------------------------------------------------
+
+  describe('!topic lock', () => {
+    function setLiveTopic(b: MockBot, channel: string, topic: string): void {
+      // Channel-state listens directly to the IRC client's 'topic' event
+      b.client.simulateEvent('topic', {
+        nick: 'server',
+        ident: '',
+        hostname: '',
+        channel,
+        topic,
+      });
+    }
+
+    it('locks the current live topic', async () => {
+      setLiveTopic(bot, '#test', 'Welcome to #test!');
+      simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!topic lock');
+      await tick();
+
+      expect(bot.channelSettings.get('#test', 'protect_topic')).toBe(true);
+      expect(bot.channelSettings.get('#test', 'topic_text')).toBe('Welcome to #test!');
+
+      const reply = bot.client.messages.find(
+        (m) => m.type === 'say' && m.message?.includes('locked'),
+      );
+      expect(reply).toBeDefined();
+    });
+
+    it('reports error when no topic is set', async () => {
+      // No live topic set — channel will have empty string
+      simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!topic lock');
+      await tick();
+
+      expect(bot.channelSettings.get('#test', 'protect_topic')).toBe(false);
+      const reply = bot.client.messages.find(
+        (m) => m.type === 'say' && m.message?.includes('Cannot lock'),
+      );
+      expect(reply).toBeDefined();
+    });
+
+    it('warns when live topic exceeds 390 chars but still locks', async () => {
+      const longTopic = 'A'.repeat(400);
+      setLiveTopic(bot, '#test', longTopic);
+      simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!topic lock');
+      await tick();
+
+      expect(bot.channelSettings.get('#test', 'protect_topic')).toBe(true);
+      expect(bot.channelSettings.get('#test', 'topic_text')).toBe(longTopic);
+      const warning = bot.client.messages.find(
+        (m) => m.type === 'say' && m.message?.includes('Warning'),
+      );
+      expect(warning).toBeDefined();
+    });
+  });
+
+  describe('!topic unlock', () => {
+    it('disables topic protection', async () => {
+      bot.channelSettings.set('#test', 'protect_topic', true);
+      bot.channelSettings.set('#test', 'topic_text', 'some locked topic');
+
+      simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!topic unlock');
+      await tick();
+
+      expect(bot.channelSettings.get('#test', 'protect_topic')).toBe(false);
+      expect(bot.channelSettings.get('#test', 'topic_text')).toBe('');
+      const reply = bot.client.messages.find(
+        (m) => m.type === 'say' && m.message?.includes('disabled'),
+      );
+      expect(reply).toBeDefined();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Protection integration (lock → change → restore)
+  // ---------------------------------------------------------------------------
+
+  describe('topic protection integration', () => {
+    async function advancePastGrace(): Promise<void> {
+      await vi.advanceTimersByTimeAsync(5001);
+      await Promise.resolve();
+    }
+
+    function setLiveTopic(b: MockBot, channel: string, topic: string): void {
+      b.client.simulateEvent('topic', {
+        nick: 'server',
+        ident: '',
+        hostname: '',
+        channel,
+        topic,
+      });
+    }
+
+    it('non-op change after lock → bot restores enforced topic', async () => {
+      setLiveTopic(bot, '#test', 'locked topic');
+      simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!topic lock');
+      await tick();
+
+      await advancePastGrace();
+      bot.client.clearMessages();
+
+      // Non-op changes the topic
+      bot.client.simulateEvent('topic', {
+        nick: 'someuser',
+        ident: 'user',
+        hostname: 'user.host',
+        channel: '#test',
+        topic: 'rogue topic',
+      });
+      await tick();
+
+      const topicCmds = bot.client.messages.filter(
+        (m) => m.type === 'raw' && m.message?.startsWith('TOPIC'),
+      );
+      expect(topicCmds).toHaveLength(1);
+      expect(topicCmds[0].message).toContain('locked topic');
+    });
+
+    it('non-op change after unlock → bot does NOT restore', async () => {
+      bot.channelSettings.set('#test', 'protect_topic', true);
+      bot.channelSettings.set('#test', 'topic_text', 'was locked');
+
+      simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!topic unlock');
+      await tick();
+
+      await advancePastGrace();
+      bot.client.clearMessages();
+
+      bot.client.simulateEvent('topic', {
+        nick: 'someuser',
+        ident: 'user',
+        hostname: 'user.host',
+        channel: '#test',
+        topic: 'new topic',
+      });
+      await tick();
+
+      const topicCmds = bot.client.messages.filter(
+        (m) => m.type === 'raw' && m.message?.startsWith('TOPIC'),
+      );
+      expect(topicCmds).toHaveLength(0);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Phase 2: echo-loop fix
+  // ---------------------------------------------------------------------------
+
+  describe('topic protection echo loop', () => {
+    async function advancePastGrace(): Promise<void> {
+      await vi.advanceTimersByTimeAsync(5001);
+      await Promise.resolve();
+    }
+
+    it("bot's own TOPIC echo (matching enforced text) does not trigger another TOPIC command", async () => {
+      // Set up channel state with a locked topic
+      bot.channelSettings.set('#test', 'topic_text', 'locked text');
+      bot.channelSettings.set('#test', 'protect_topic', true);
+
+      await advancePastGrace();
+      bot.client.clearMessages();
+
+      // Simulate the bot's own echo: setter = botNick, topic = enforced text
+      bot.client.simulateEvent('topic', {
+        nick: 'hexbot',
+        ident: 'bot',
+        hostname: 'localhost',
+        channel: '#test',
+        topic: 'locked text',
+      });
+      await tick();
+
+      const topicCmds = bot.client.messages.filter(
+        (m) => m.type === 'raw' && m.message?.startsWith('TOPIC'),
+      );
+      expect(topicCmds).toHaveLength(0);
+    });
+
+    it('unauthorized topic change (different text) triggers one restore', async () => {
+      bot.channelSettings.set('#test', 'topic_text', 'locked text');
+      bot.channelSettings.set('#test', 'protect_topic', true);
+
+      await advancePastGrace();
+      bot.client.clearMessages();
+
+      // Non-op changes the topic
+      bot.client.simulateEvent('topic', {
+        nick: 'someuser',
+        ident: 'user',
+        hostname: 'user.host',
+        channel: '#test',
+        topic: 'rogue topic',
+      });
+      await tick();
+
+      const topicCmds = bot.client.messages.filter(
+        (m) => m.type === 'raw' && m.message?.startsWith('TOPIC'),
+      );
+      expect(topicCmds).toHaveLength(1);
+      expect(topicCmds[0].message).toContain('locked text');
+    });
+  });
 });

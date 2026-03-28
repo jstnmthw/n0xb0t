@@ -57,6 +57,28 @@ describe('IRCBridge', () => {
       dispatcher.unbindAll('test');
     });
 
+    it('should preserve IRC formatting (color codes) in ctx.args', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('pub', '-', '!topic', handler, 'test');
+
+      const coloredArgs = '\x034red \x033green text';
+      client.simulateEvent('privmsg', {
+        nick: 'user1',
+        ident: 'user',
+        hostname: 'host.com',
+        target: '#test',
+        message: `!topic ${coloredArgs}`,
+      });
+
+      await Promise.resolve();
+
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.command).toBe('!topic');
+      expect(ctx.args).toBe(coloredArgs);
+
+      dispatcher.unbindAll('test');
+    });
+
     it('should build reply function that uses client.say for channel', async () => {
       const handler = vi.fn((ctx: HandlerContext) => {
         ctx.reply('hi back');

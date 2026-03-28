@@ -464,10 +464,9 @@ export class DCCManager {
       return;
     }
 
-    // 3. Flag check
+    // 3. Flag check — delegate to permissions so owner flag (n) implies all others
     const requiredFlags = this.config.require_flags;
-    const hasFlags = requiredFlags.split('').some((f) => user.global.includes(f));
-    if (!hasFlags) {
+    if (!this.permissions.checkFlags(requiredFlags, ctx)) {
       this.logger?.info(
         `DCC CHAT rejected (insufficient flags) for ${nick}: has="${user.global}" needs="${requiredFlags}"`,
       );

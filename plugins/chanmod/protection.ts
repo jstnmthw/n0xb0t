@@ -6,6 +6,7 @@ import {
   buildBanMask,
   getBotNick,
   getUserFlags,
+  hasAnyFlag,
   isBotNick,
   markIntentional,
 } from './helpers';
@@ -91,7 +92,7 @@ export function setupProtection(
         // Check exempt flags
         if (config.revenge_exempt_flags) {
           const flags = getUserFlags(api, channel, kickerNick);
-          if (flags && [...config.revenge_exempt_flags].some((f) => flags.includes(f))) {
+          if (hasAnyFlag(flags, config.revenge_exempt_flags)) {
             api.log(`Revenge skipped for ${kickerNick} in ${channel} — exempt flag`);
             return;
           }

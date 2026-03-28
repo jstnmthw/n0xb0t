@@ -1,13 +1,13 @@
 // topic — IRC topic creator with color-coded themes + topic protection
 // Sets channel topics using pre-built color theme borders.
-// Also provides protect_topic/topic_text settings and !settopic command.
+// Also provides !topic lock / !topic unlock for topic protection.
 import type { HandlerContext, PluginAPI } from '../../src/types';
 import { themeNames, themes } from './themes';
 
 export const name = 'topic';
-export const version = '2.0.0';
+export const version = '2.1.0';
 export const description =
-  'Set channel topics with color-coded theme borders; optional topic protection';
+  'Set channel topics with color-coded theme borders; optional topic protection via lock/unlock';
 
 const PREVIEW_COOLDOWN_MS = 60_000;
 let previewCooldown: Map<string, number>;
@@ -27,7 +27,7 @@ export function init(api: PluginAPI): void {
       key: 'topic_text',
       type: 'string',
       default: '',
-      description: 'The enforced topic text (set by !settopic or an authorized topic change)',
+      description: 'The enforced topic text (set by !topic lock)',
     },
   ]);
 
@@ -37,7 +37,25 @@ export function init(api: PluginAPI): void {
       flags: 'o',
       usage: '!topic <theme> <text>',
       description: 'Set the channel topic with a color-coded theme',
-      detail: ['Use !topic preview <theme> <text> to preview without setting'],
+      detail: [
+        'Use !topic preview <theme> <text> to preview without setting.',
+        'Use !topic lock to lock the current topic.',
+        'Use !topic unlock to disable topic protection.',
+      ],
+      category: 'topic',
+    },
+    {
+      command: '!topic lock',
+      flags: 'o',
+      usage: '!topic lock',
+      description: 'Lock the current channel topic — restores it if changed by a non-op',
+      category: 'topic',
+    },
+    {
+      command: '!topic unlock',
+      flags: 'o',
+      usage: '!topic unlock',
+      description: 'Disable topic protection',
       category: 'topic',
     },
     {
@@ -47,28 +65,51 @@ export function init(api: PluginAPI): void {
       description: 'List available topic themes; preview renders all themes',
       category: 'topic',
     },
-    {
-      command: '!settopic',
-      flags: 'o',
-      usage: '!settopic <text>',
-      description: 'Set and lock the channel topic',
-      category: 'topic',
-    },
   ]);
 
-  // !topic <theme> <text>  — set the channel topic (requires o flag)
-  // !topic preview <theme> <text>  — preview the themed text in channel
+  // !topic <theme> <text>            — set the channel topic (requires o flag)
+  // !topic lock                      — lock the current live topic
+  // !topic unlock                    — disable topic protection
+  // !topic preview <theme> <text>    — preview the themed text in channel
   api.bind('pub', '+o', '!topic', (ctx: HandlerContext) => {
     if (!ctx.channel) return;
 
     const args = ctx.args.trim();
     if (!args) {
-      ctx.reply('Usage: !topic <theme> <text> | !topic preview <theme> <text>');
+      ctx.reply(
+        'Usage: !topic <theme> <text> | !topic lock | !topic unlock | !topic preview <theme> <text>',
+      );
       return;
     }
 
     const parts = args.split(/\s+/);
     const firstArg = parts[0].toLowerCase();
+
+    // Handle lock subcommand
+    if (firstArg === 'lock') {
+      const live = api.getChannel(ctx.channel)?.topic ?? '';
+      if (!live) {
+        ctx.reply('Cannot lock: no topic is currently set.');
+        return;
+      }
+      if (live.length > 390) {
+        ctx.reply(
+          `Warning: topic is ${live.length} chars (typical limit is ~390). It may be truncated by the server.`,
+        );
+      }
+      api.channelSettings.set(ctx.channel, 'topic_text', live);
+      api.channelSettings.set(ctx.channel, 'protect_topic', true);
+      ctx.reply('Topic locked.');
+      return;
+    }
+
+    // Handle unlock subcommand
+    if (firstArg === 'unlock') {
+      api.channelSettings.set(ctx.channel, 'protect_topic', false);
+      api.channelSettings.set(ctx.channel, 'topic_text', '');
+      ctx.reply('Topic protection disabled.');
+      return;
+    }
 
     // Handle preview subcommand
     if (firstArg === 'preview') {
@@ -151,21 +192,6 @@ export function init(api: PluginAPI): void {
     );
   });
 
-  // !settopic <text> — set and lock the channel topic (requires o flag)
-  api.bind('pub', '+o', '!settopic', (ctx: HandlerContext) => {
-    if (!ctx.channel) return;
-
-    const text = ctx.args.trim();
-    if (!text) {
-      ctx.reply('Usage: !settopic <text>');
-      return;
-    }
-
-    api.channelSettings.set(ctx.channel, 'topic_text', text);
-    api.topic(ctx.channel, text);
-    ctx.reply(`Topic set and locked.`);
-  });
-
   // topic bind — enforce topic protection on unauthorized changes
   api.bind('topic', '-', '*', (ctx: HandlerContext) => {
     if (!ctx.channel) return;
@@ -174,7 +200,8 @@ export function init(api: PluginAPI): void {
     if (!protect) return;
 
     const enforced = api.channelSettings.get(ctx.channel, 'topic_text') as string;
-    if (!enforced) return; // no authoritative topic set yet
+    if (!enforced) return; // no lock set
+    if (ctx.text === enforced) return; // already correct — bot's own echo or a matching change
 
     const isAuthorized = api.permissions.checkFlags('o', ctx);
     if (isAuthorized) {
