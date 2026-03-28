@@ -26,6 +26,22 @@ interface BanRecord {
   expires: number;
 }
 
+interface FloodConfig {
+  msgThreshold: number;
+  msgWindowSecs: number;
+  msgWindowMs: number;
+  joinThreshold: number;
+  joinWindowSecs: number;
+  joinWindowMs: number;
+  nickThreshold: number;
+  nickWindowSecs: number;
+  nickWindowMs: number;
+  banDurationMinutes: number;
+  ignoreOps: boolean;
+  actions: string[];
+  offenceWindowMs: number;
+}
+
 // ---------------------------------------------------------------------------
 // State (reset on each init)
 // Intentional module-level mutable state: plugin is single-instance per process;
@@ -36,10 +52,21 @@ let msgTracker: SlidingWindowCounter;
 let joinTracker: SlidingWindowCounter;
 let nickTracker: SlidingWindowCounter;
 let offenceTracker: Map<string, OffenceEntry>; // `${nick}@${channel}` or `${hostmask}`
+let cfg: FloodConfig;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Returns true if the tracker has seen more than `threshold` events in `windowMs`. */
+function isFloodTriggered(
+  tracker: SlidingWindowCounter,
+  key: string,
+  windowMs: number,
+  threshold: number,
+): boolean {
+  return tracker.check(key, windowMs, threshold);
+}
 
 function getBotNick(): string {
   return api.botConfig.irc.nick;
@@ -167,6 +194,67 @@ async function applyAction(
 }
 
 // ---------------------------------------------------------------------------
+// Bind handlers (module-level so init() stays thin)
+// ---------------------------------------------------------------------------
+
+async function handleMsgFlood(ctx: HandlerContext): Promise<void> {
+  if (!ctx.channel) return;
+  if (isBotNick(ctx.nick)) return;
+  if (isPrivileged(ctx.nick, ctx.channel, cfg.ignoreOps)) return;
+  const key = `${api.ircLower(ctx.nick)}@${api.ircLower(ctx.channel)}`;
+  if (!isFloodTriggered(msgTracker, key, cfg.msgWindowMs, cfg.msgThreshold)) return;
+  const action = recordOffence(cfg.actions, cfg.offenceWindowMs, key);
+  await applyAction(
+    cfg.banDurationMinutes,
+    action,
+    ctx.channel,
+    ctx.nick,
+    `message flood (${cfg.msgThreshold}+ msgs/${cfg.msgWindowSecs}s)`,
+  );
+}
+
+function handleJoinFlood(ctx: HandlerContext): void {
+  if (!ctx.channel) return;
+  if (isBotNick(ctx.nick)) return;
+  const hostmask = `${ctx.nick}!${ctx.ident}@${ctx.hostname}`;
+  const key = `join:${api.ircLower(hostmask)}`;
+  if (!isFloodTriggered(joinTracker, key, cfg.joinWindowMs, cfg.joinThreshold)) return;
+  if (isPrivileged(ctx.nick, ctx.channel, cfg.ignoreOps)) return;
+  const action = recordOffence(cfg.actions, cfg.offenceWindowMs, key);
+  applyAction(
+    cfg.banDurationMinutes,
+    action,
+    ctx.channel,
+    ctx.nick,
+    `join flood (${cfg.joinThreshold}+ joins/${cfg.joinWindowSecs}s)`,
+  ).catch((err) => api.error('Join flood action error:', err));
+}
+
+function handleNickFlood(ctx: HandlerContext): void {
+  const { ident, hostname } = ctx;
+  if (!ident && !hostname) return; // Incomplete hostmask data — skip
+  const hostmask = `${ctx.nick}!${ident}@${hostname}`;
+  const key = `nick:${api.ircLower(hostmask)}`;
+  if (!isFloodTriggered(nickTracker, key, cfg.nickWindowMs, cfg.nickThreshold)) return;
+  // Use the new nick (ctx.args) for channel lookup and punishment — the old nick is gone
+  const newNick = ctx.args || ctx.nick;
+  // Nick changes are global — punish in the first channel where we have ops
+  for (const channel of api.botConfig.irc.channels) {
+    if (isPrivileged(newNick, channel, cfg.ignoreOps)) return;
+    if (!botHasOps(channel)) continue;
+    const action = recordOffence(cfg.actions, cfg.offenceWindowMs, key);
+    applyAction(
+      cfg.banDurationMinutes,
+      action,
+      channel,
+      newNick,
+      `nick-change spam (${cfg.nickThreshold}+ changes/${cfg.nickWindowSecs}s)`,
+    ).catch((err) => api.error('Nick flood action error:', err));
+    break;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
 
@@ -179,81 +267,29 @@ export function init(pluginApi: PluginAPI): void {
   nickTracker = new SlidingWindowCounter();
   offenceTracker = new Map();
 
-  const msgThreshold = (api.config.msg_threshold as number | undefined) ?? 5;
   const msgWindowSecs = (api.config.msg_window_secs as number | undefined) ?? 3;
-  const joinThreshold = (api.config.join_threshold as number | undefined) ?? 3;
   const joinWindowSecs = (api.config.join_window_secs as number | undefined) ?? 60;
-  const nickThreshold = (api.config.nick_threshold as number | undefined) ?? 3;
   const nickWindowSecs = (api.config.nick_window_secs as number | undefined) ?? 60;
-  const banDurationMinutes = (api.config.ban_duration_minutes as number | undefined) ?? 10;
-  const ignoreOps = (api.config.ignore_ops as boolean | undefined) ?? true;
-  const actions = (api.config.actions as string[] | undefined) ?? ['warn', 'kick', 'tempban'];
-  const offenceWindowMs = (api.config.offence_window_ms as number | undefined) ?? 300_000;
+  cfg = {
+    msgThreshold: (api.config.msg_threshold as number | undefined) ?? 5,
+    msgWindowSecs,
+    msgWindowMs: msgWindowSecs * 1000,
+    joinThreshold: (api.config.join_threshold as number | undefined) ?? 3,
+    joinWindowSecs,
+    joinWindowMs: joinWindowSecs * 1000,
+    nickThreshold: (api.config.nick_threshold as number | undefined) ?? 3,
+    nickWindowSecs,
+    nickWindowMs: nickWindowSecs * 1000,
+    banDurationMinutes: (api.config.ban_duration_minutes as number | undefined) ?? 10,
+    ignoreOps: (api.config.ignore_ops as boolean | undefined) ?? true,
+    actions: (api.config.actions as string[] | undefined) ?? ['warn', 'kick', 'tempban'],
+    offenceWindowMs: (api.config.offence_window_ms as number | undefined) ?? 300_000,
+  };
 
-  const msgWindowMs = msgWindowSecs * 1000;
-  const joinWindowMs = joinWindowSecs * 1000;
-  const nickWindowMs = nickWindowSecs * 1000;
-
-  api.bind('pubm', '-', '*', async (ctx: HandlerContext) => {
-    if (!ctx.channel) return;
-    if (isBotNick(ctx.nick)) return;
-    if (isPrivileged(ctx.nick, ctx.channel, ignoreOps)) return;
-    const key = `${api.ircLower(ctx.nick)}@${api.ircLower(ctx.channel ?? '')}`;
-    if (!msgTracker.check(key, msgWindowMs, msgThreshold)) return;
-    const action = recordOffence(actions, offenceWindowMs, key);
-    await applyAction(
-      banDurationMinutes,
-      action,
-      ctx.channel,
-      ctx.nick,
-      `message flood (${msgThreshold}+ msgs/${msgWindowSecs}s)`,
-    );
-  });
-
-  api.bind('join', '-', '*', (ctx: HandlerContext) => {
-    if (!ctx.channel) return;
-    if (isBotNick(ctx.nick)) return;
-    const hostmask = `${ctx.nick}!${ctx.ident}@${ctx.hostname}`;
-    const key = `join:${api.ircLower(hostmask)}`;
-    if (!joinTracker.check(key, joinWindowMs, joinThreshold)) return;
-    if (isPrivileged(ctx.nick, ctx.channel, ignoreOps)) return;
-    const action = recordOffence(actions, offenceWindowMs, key);
-    applyAction(
-      banDurationMinutes,
-      action,
-      ctx.channel,
-      ctx.nick,
-      `join flood (${joinThreshold}+ joins/${joinWindowSecs}s)`,
-    ).catch((err) => api.error('Join flood action error:', err));
-  });
-
-  api.bind('nick', '-', '*', (ctx: HandlerContext) => {
-    const { ident, hostname } = ctx;
-    if (!ident && !hostname) return; // Incomplete hostmask data — skip
-    const hostmask = `${ctx.nick}!${ident}@${hostname}`;
-    const key = `nick:${api.ircLower(hostmask)}`;
-    if (!nickTracker.check(key, nickWindowMs, nickThreshold)) return;
-    // Use the new nick (ctx.args) for channel lookup and punishment — the old nick is gone
-    const newNick = ctx.args || ctx.nick;
-    // Nick changes are global — punish in the first channel where we have ops
-    for (const channel of api.botConfig.irc.channels) {
-      if (isPrivileged(newNick, channel, ignoreOps)) return;
-      if (!botHasOps(channel)) continue;
-      const action = recordOffence(actions, offenceWindowMs, key);
-      applyAction(
-        banDurationMinutes,
-        action,
-        channel,
-        newNick,
-        `nick-change spam (${nickThreshold}+ changes/${nickWindowSecs}s)`,
-      ).catch((err) => api.error('Nick flood action error:', err));
-      break;
-    }
-  });
-
-  api.bind('time', '-', '60', () => {
-    liftExpiredFloodBans();
-  });
+  api.bind('pubm', '-', '*', handleMsgFlood);
+  api.bind('join', '-', '*', handleJoinFlood);
+  api.bind('nick', '-', '*', handleNickFlood);
+  api.bind('time', '-', '60', liftExpiredFloodBans);
 }
 
 // ---------------------------------------------------------------------------

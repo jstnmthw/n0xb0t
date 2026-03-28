@@ -433,14 +433,30 @@ export class DCCManager {
 
   private async onDccCtcp(ctx: HandlerContext): Promise<void> {
     const { nick } = ctx;
-
     this.logger?.debug(`DCC CTCP from ${nick}: args="${ctx.args}"`);
     const parsed = parseDccChatPayload(ctx.args);
     if (!parsed) {
       this.logger?.debug(`DCC CTCP from ${nick}: not a CHAT subtype, ignoring`);
       return;
     }
+    const user = await this.validateDccRequest(nick, ctx, parsed);
+    if (!user) return;
+    await this.acceptDccConnection(nick, ctx.ident, ctx.hostname, user, parsed);
+  }
 
+  /**
+   * Run all guard checks for an incoming DCC CHAT request.
+   * Returns the matching UserRecord if all checks pass, or null if rejected
+   * (rejection notice already sent to the nick).
+   */
+  private async validateDccRequest(
+    nick: string,
+    ctx: HandlerContext,
+    parsed: DccChatPayload,
+  ): Promise<UserRecord | null> {
+    const { ident, hostname } = ctx;
+
+    // 0. Passive DCC — hexbot only accepts passive (port=0) DCC
     if (!isPassiveDcc(parsed.ip, parsed.port)) {
       this.logger?.info(
         `DCC CHAT rejected (active DCC) from ${nick}: ip=${parsed.ip} port=${parsed.port}`,
@@ -449,25 +465,8 @@ export class DCCManager {
         nick,
         'hexbot only accepts passive DCC CHAT. Enable passive/reverse DCC in your client settings, then try /dcc chat hexbot again.',
       );
-      return;
+      return null;
     }
-
-    const user = await this.validateDccRequest(nick, ctx);
-    if (!user) return;
-
-    await this.acceptDccConnection(nick, ctx.ident, ctx.hostname, user, parsed);
-  }
-
-  /**
-   * Run the four guard checks for an incoming DCC CHAT request.
-   * Returns the matching UserRecord if all checks pass, or null if rejected
-   * (rejection notice already sent to the nick).
-   */
-  private async validateDccRequest(
-    nick: string,
-    ctx: HandlerContext,
-  ): Promise<import('../types').UserRecord | null> {
-    const { ident, hostname } = ctx;
 
     // 1. Hostmask lookup
     const fullHostmask = `${nick}!${ident}@${hostname}`;

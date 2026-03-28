@@ -364,17 +364,9 @@ export class PluginLoader {
   private createPluginApi(pluginId: string, config: Record<string, unknown>): PluginAPI {
     const pluginLogger = this.rootLogger?.child(`plugin:${pluginId}`) ?? null;
 
-    const pluginDb = createPluginDbApi(this.db, pluginId);
-    const pluginPermissions = createPluginPermissionsApi(this.permissions);
-    const pluginServicesApi = createPluginServicesApi(this.services);
-
-    // Build the plugin-facing bot config as a typed variable so TypeScript can verify
-    // the shape before freezing — avoids the `as unknown as PluginBotConfig` double cast.
+    // Build plugin-facing bot config (password omitted; filesystem paths omitted).
     const pluginBotConfig: PluginBotConfig = {
-      irc: {
-        ...this.botConfig.irc,
-        channels: [...this.botConfig.irc.channels],
-      },
+      irc: { ...this.botConfig.irc, channels: [...this.botConfig.irc.channels] },
       owner: { ...this.botConfig.owner },
       identity: { ...this.botConfig.identity },
       services: {
@@ -388,207 +380,36 @@ export class PluginLoader {
     };
 
     const dispatcher = this.dispatcher;
-    const ircClient = this.ircClient;
-    const messageQueue = this.messageQueue;
-    const channelState = this.channelState;
-    const ircCommands = this.ircCommands;
-    const helpRegistry = this.helpRegistry;
-    const channelSettings = this.channelSettings;
     const getCasemapping = this.getCasemapping;
     const getServerSupports = this.getServerSupports;
 
     const api: PluginAPI = {
       pluginId,
-
-      // Bind system (auto-tagged with pluginId)
       bind(type: BindType, flags: string, mask: string, handler: BindHandler): void {
         dispatcher.bind(type, flags, mask, handler, pluginId);
       },
       unbind(type: BindType, mask: string, handler: BindHandler): void {
         dispatcher.unbind(type, mask, handler);
       },
-
-      // IRC actions — routed through message queue for flood protection
-      // (sanitize for defense-in-depth, even though irc-framework handles framing)
-      say(target: string, message: string): void {
-        const safe = sanitize(message);
-        if (messageQueue) {
-          messageQueue.enqueue(() => ircClient?.say(target, safe));
-        } else {
-          ircClient?.say(target, safe);
-        }
-      },
-      action(target: string, message: string): void {
-        const safe = sanitize(message);
-        if (messageQueue) {
-          messageQueue.enqueue(() => ircClient?.action(target, safe));
-        } else {
-          ircClient?.action(target, safe);
-        }
-      },
-      notice(target: string, message: string): void {
-        const safe = sanitize(message);
-        if (messageQueue) {
-          messageQueue.enqueue(() => ircClient?.notice(target, safe));
-        } else {
-          ircClient?.notice(target, safe);
-        }
-      },
-      ctcpResponse(target: string, type: string, message: string): void {
-        const safeTarget = sanitize(target);
-        const safeType = sanitize(type);
-        const safeMessage = sanitize(message);
-        if (messageQueue) {
-          messageQueue.enqueue(() => ircClient?.ctcpResponse(safeTarget, safeType, safeMessage));
-        } else {
-          ircClient?.ctcpResponse(safeTarget, safeType, safeMessage);
-        }
-      },
-
-      // IRC channel operations (delegated to IRCCommands)
-      op(channel: string, nick: string): void {
-        ircCommands?.op(channel, nick);
-      },
-      deop(channel: string, nick: string): void {
-        ircCommands?.deop(channel, nick);
-      },
-      voice(channel: string, nick: string): void {
-        ircCommands?.voice(channel, nick);
-      },
-      devoice(channel: string, nick: string): void {
-        ircCommands?.devoice(channel, nick);
-      },
-      halfop(channel: string, nick: string): void {
-        ircCommands?.halfop(channel, nick);
-      },
-      dehalfop(channel: string, nick: string): void {
-        ircCommands?.dehalfop(channel, nick);
-      },
-      kick(channel: string, nick: string, reason?: string): void {
-        ircCommands?.kick(channel, nick, reason);
-      },
-      ban(channel: string, mask: string): void {
-        ircCommands?.ban(channel, mask);
-      },
-      mode(channel: string, modes: string, ...params: string[]): void {
-        ircCommands?.mode(channel, modes, ...params);
-      },
-      topic(channel: string, text: string): void {
-        ircCommands?.topic(channel, text);
-      },
-      join(channel: string, key?: string): void {
-        ircCommands?.join(channel, key);
-      },
-      part(channel: string, message?: string): void {
-        ircCommands?.part(channel, message);
-      },
-      changeNick(nick: string): void {
-        ircClient?.raw?.(`NICK ${sanitize(nick)}`);
-      },
-
-      // Channel state
-      getChannel(name: string) {
-        if (!channelState) return undefined;
-        const ch = channelState.getChannel(name);
-        if (!ch) return undefined;
-        // Convert UserInfo (internal) to ChannelUser (plugin-facing)
-        const users = new Map<string, ChannelUser>();
-        for (const [key, u] of ch.users) {
-          users.set(key, {
-            nick: u.nick,
-            ident: u.ident,
-            hostname: u.hostname,
-            modes: u.modes.join(''),
-            joinedAt: u.joinedAt.getTime(),
-            accountName: u.accountName,
-          });
-        }
-        return { name: ch.name, topic: ch.topic, modes: ch.modes, users };
-      },
-      getUsers(channel: string): ChannelUser[] {
-        if (!channelState) return [];
-        const ch = channelState.getChannel(channel);
-        if (!ch) return [];
-        return Array.from(ch.users.values()).map((u) => ({
-          nick: u.nick,
-          ident: u.ident,
-          hostname: u.hostname,
-          modes: u.modes.join(''),
-          joinedAt: u.joinedAt.getTime(),
-          accountName: u.accountName,
-        }));
-      },
-      getUserHostmask(channel: string, nick: string): string | undefined {
-        return channelState?.getUserHostmask(channel, nick);
-      },
-
-      // Permissions (read-only)
-      permissions: pluginPermissions,
-
-      // Services (identity verification)
-      services: pluginServicesApi,
-
-      // Database
-      db: pluginDb,
-
-      // Bot config (read-only, deep-frozen, password redacted)
+      ...createPluginIrcActionsApi(this.ircClient, this.messageQueue, this.ircCommands),
+      ...createPluginChannelStateApi(this.channelState),
+      permissions: createPluginPermissionsApi(this.permissions),
+      services: createPluginServicesApi(this.services),
+      db: createPluginDbApi(this.db, pluginId),
       botConfig: Object.freeze(pluginBotConfig),
-
-      // Config
       config: Object.freeze({ ...config }),
-
-      // Server capabilities
       getServerSupports(): Record<string, string> {
         return getServerSupports();
       },
-
-      // IRC-aware case folding using the network's active CASEMAPPING
       ircLower(text: string): string {
         return ircLower(text, getCasemapping());
       },
-
-      // Per-channel settings
-      channelSettings: Object.freeze({
-        register(defs: ChannelSettingDef[]): void {
-          channelSettings?.register(pluginId, defs);
-        },
-        get(channel: string, key: string): ChannelSettingValue {
-          return channelSettings?.get(channel, key) ?? '';
-        },
-        set(channel: string, key: string, value: ChannelSettingValue): void {
-          channelSettings?.set(channel, key, value);
-        },
-        isSet(channel: string, key: string): boolean {
-          return channelSettings?.isSet(channel, key) ?? false;
-        },
-      } satisfies PluginChannelSettings),
-
-      // Help registry
-      registerHelp(entries: HelpEntry[]): void {
-        helpRegistry?.register(pluginId, entries);
-      },
-      getHelpEntries(): HelpEntry[] {
-        return helpRegistry?.getAll() ?? [];
-      },
-
-      // Formatting utility
+      channelSettings: createPluginChannelSettingsApi(this.channelSettings, pluginId),
+      ...createPluginHelpApi(this.helpRegistry, pluginId),
       stripFormatting(text: string): string {
         return stripFormatting(text);
       },
-
-      // Logging
-      log(...args: unknown[]): void {
-        pluginLogger?.info(...args);
-      },
-      error(...args: unknown[]): void {
-        pluginLogger?.error(...args);
-      },
-      warn(...args: unknown[]): void {
-        pluginLogger?.warn(...args);
-      },
-      debug(...args: unknown[]): void {
-        pluginLogger?.debug(...args);
-      },
+      ...createPluginLogApi(pluginLogger),
     };
 
     return Object.freeze(api);
@@ -805,4 +626,189 @@ function createPluginServicesApi(
       return services?.isAvailable() ?? false;
     },
   });
+}
+
+// IRC send actions + channel ops — routed through message queue for flood protection
+// (sanitize for defense-in-depth, even though irc-framework handles framing)
+function createPluginIrcActionsApi(
+  ircClient: IRCClientForPlugins | null | undefined,
+  messageQueue: MessageQueue | null | undefined,
+  ircCommands: IRCCommands | null | undefined,
+): Pick<
+  PluginAPI,
+  | 'say'
+  | 'action'
+  | 'notice'
+  | 'ctcpResponse'
+  | 'op'
+  | 'deop'
+  | 'voice'
+  | 'devoice'
+  | 'halfop'
+  | 'dehalfop'
+  | 'kick'
+  | 'ban'
+  | 'mode'
+  | 'topic'
+  | 'join'
+  | 'part'
+  | 'changeNick'
+> {
+  function send(fn: () => void): void {
+    if (messageQueue) messageQueue.enqueue(fn);
+    else fn();
+  }
+  return {
+    say(target: string, message: string): void {
+      const safe = sanitize(message);
+      send(() => ircClient?.say(target, safe));
+    },
+    action(target: string, message: string): void {
+      const safe = sanitize(message);
+      send(() => ircClient?.action(target, safe));
+    },
+    notice(target: string, message: string): void {
+      const safe = sanitize(message);
+      send(() => ircClient?.notice(target, safe));
+    },
+    ctcpResponse(target: string, type: string, message: string): void {
+      const safeTarget = sanitize(target),
+        safeType = sanitize(type),
+        safeMsg = sanitize(message);
+      send(() => ircClient?.ctcpResponse(safeTarget, safeType, safeMsg));
+    },
+    op(channel: string, nick: string): void {
+      ircCommands?.op(channel, nick);
+    },
+    deop(channel: string, nick: string): void {
+      ircCommands?.deop(channel, nick);
+    },
+    voice(channel: string, nick: string): void {
+      ircCommands?.voice(channel, nick);
+    },
+    devoice(channel: string, nick: string): void {
+      ircCommands?.devoice(channel, nick);
+    },
+    halfop(channel: string, nick: string): void {
+      ircCommands?.halfop(channel, nick);
+    },
+    dehalfop(channel: string, nick: string): void {
+      ircCommands?.dehalfop(channel, nick);
+    },
+    kick(channel: string, nick: string, reason?: string): void {
+      ircCommands?.kick(channel, nick, reason);
+    },
+    ban(channel: string, mask: string): void {
+      ircCommands?.ban(channel, mask);
+    },
+    mode(channel: string, modes: string, ...params: string[]): void {
+      ircCommands?.mode(channel, modes, ...params);
+    },
+    topic(channel: string, text: string): void {
+      ircCommands?.topic(channel, text);
+    },
+    join(channel: string, key?: string): void {
+      ircCommands?.join(channel, key);
+    },
+    part(channel: string, message?: string): void {
+      ircCommands?.part(channel, message);
+    },
+    changeNick(nick: string): void {
+      ircClient?.raw?.(`NICK ${sanitize(nick)}`);
+    },
+  };
+}
+
+function createPluginChannelStateApi(
+  channelState: ChannelState | null | undefined,
+): Pick<PluginAPI, 'getChannel' | 'getUsers' | 'getUserHostmask'> {
+  return {
+    getChannel(name: string) {
+      if (!channelState) return undefined;
+      const ch = channelState.getChannel(name);
+      if (!ch) return undefined;
+      // Convert UserInfo (internal) to ChannelUser (plugin-facing)
+      const users = new Map<string, ChannelUser>();
+      for (const [key, u] of ch.users) {
+        users.set(key, {
+          nick: u.nick,
+          ident: u.ident,
+          hostname: u.hostname,
+          modes: u.modes.join(''),
+          joinedAt: u.joinedAt.getTime(),
+          accountName: u.accountName,
+        });
+      }
+      return { name: ch.name, topic: ch.topic, modes: ch.modes, users };
+    },
+    getUsers(channel: string): ChannelUser[] {
+      if (!channelState) return [];
+      const ch = channelState.getChannel(channel);
+      if (!ch) return [];
+      return Array.from(ch.users.values()).map((u) => ({
+        nick: u.nick,
+        ident: u.ident,
+        hostname: u.hostname,
+        modes: u.modes.join(''),
+        joinedAt: u.joinedAt.getTime(),
+        accountName: u.accountName,
+      }));
+    },
+    getUserHostmask(channel: string, nick: string): string | undefined {
+      return channelState?.getUserHostmask(channel, nick);
+    },
+  };
+}
+
+function createPluginChannelSettingsApi(
+  channelSettings: ChannelSettings | null | undefined,
+  pluginId: string,
+): PluginChannelSettings {
+  return Object.freeze({
+    register(defs: ChannelSettingDef[]): void {
+      channelSettings?.register(pluginId, defs);
+    },
+    get(channel: string, key: string): ChannelSettingValue {
+      return channelSettings?.get(channel, key) ?? '';
+    },
+    set(channel: string, key: string, value: ChannelSettingValue): void {
+      channelSettings?.set(channel, key, value);
+    },
+    isSet(channel: string, key: string): boolean {
+      return channelSettings?.isSet(channel, key) ?? false;
+    },
+  } satisfies PluginChannelSettings);
+}
+
+function createPluginHelpApi(
+  helpRegistry: HelpRegistry | null | undefined,
+  pluginId: string,
+): Pick<PluginAPI, 'registerHelp' | 'getHelpEntries'> {
+  return {
+    registerHelp(entries: HelpEntry[]): void {
+      helpRegistry?.register(pluginId, entries);
+    },
+    getHelpEntries(): HelpEntry[] {
+      return helpRegistry?.getAll() ?? [];
+    },
+  };
+}
+
+function createPluginLogApi(
+  pluginLogger: Logger | null,
+): Pick<PluginAPI, 'log' | 'error' | 'warn' | 'debug'> {
+  return {
+    log(...args: unknown[]): void {
+      pluginLogger?.info(...args);
+    },
+    error(...args: unknown[]): void {
+      pluginLogger?.error(...args);
+    },
+    warn(...args: unknown[]): void {
+      pluginLogger?.warn(...args);
+    },
+    debug(...args: unknown[]): void {
+      pluginLogger?.debug(...args);
+    },
+  };
 }
