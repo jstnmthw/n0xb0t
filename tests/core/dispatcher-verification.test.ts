@@ -57,6 +57,11 @@ describe('requiresVerificationForFlags', () => {
   it('returns false when require_acc_for has only unknown flags', () => {
     expect(requiresVerificationForFlags('o', ['+z'])).toBe(false);
   });
+
+  it('returns false when bindFlags contains only unrecognized characters', () => {
+    // 'x' is not in FLAG_LEVEL — bindLevel resolves to 0 via the ?? 0 fallback
+    expect(requiresVerificationForFlags('x', ['+o'])).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -919,4 +919,132 @@ describe('ChannelState', () => {
       expect(state.getAccountForNick('Alice')).toBeUndefined();
     });
   });
+
+  describe('??-fallback branches (missing event fields)', () => {
+    it('returns empty array from getUserModes for non-existent user', () => {
+      // user?.modes ?? []: user is undefined → ?. gives undefined → ?? returns []
+      expect(state.getUserModes('#test', 'Ghost')).toEqual([]);
+    });
+
+    it('handles join with missing nick/ident/hostname fields', () => {
+      // event.nick ?? '', event.ident ?? '', event.hostname ?? '' right branches triggered
+      client.simulateEvent('join', { channel: '#test' });
+      expect(state.getUser('#test', '')).toBeDefined();
+    });
+
+    it('handles part with missing nick field', () => {
+      // event.nick ?? '' right branch triggered
+      client.simulateEvent('join', { nick: 'Y', ident: 'y', hostname: 'y.host', channel: '#test' });
+      expect(() => {
+        client.simulateEvent('part', { channel: '#test' }); // nick missing → ''
+      }).not.toThrow();
+    });
+
+    it('handles part with missing channel field', () => {
+      // event.channel ?? '' right branch triggered; pre-create '' channel so the ! assertion is safe
+      client.simulateEvent('join', { nick: 'Y', ident: 'y', hostname: 'y.host', channel: '' });
+      expect(() => {
+        client.simulateEvent('part', { nick: 'Y' }); // channel missing → ''
+      }).not.toThrow();
+    });
+
+    it('handles quit with missing nick field', () => {
+      // event.nick ?? '' right branch triggered (nick = '' → deletes '' from all channels, no-op)
+      expect(() => {
+        client.simulateEvent('quit', { message: 'gone' }); // no nick
+      }).not.toThrow();
+    });
+
+    it('handles kick with missing kicked field', () => {
+      // event.kicked ?? '' right branch triggered
+      client.simulateEvent('join', {
+        nick: 'Kicker',
+        ident: 'k',
+        hostname: 'k.host',
+        channel: '#test',
+      });
+      expect(() => {
+        client.simulateEvent('kick', { nick: 'Kicker', channel: '#test' }); // no kicked
+      }).not.toThrow();
+    });
+
+    it('handles kick with missing channel field', () => {
+      // event.channel ?? '' right branch triggered; channels.get('') → undefined → if(ch) false branch
+      expect(() => {
+        client.simulateEvent('kick', { nick: 'Kicker', kicked: 'Alice' }); // no channel
+      }).not.toThrow();
+    });
+
+    it('handles wholist entry with undefined channel field', () => {
+      client.simulateEvent('join', {
+        nick: 'Alice',
+        ident: 'alice',
+        hostname: 'host.com',
+        channel: '#test',
+      });
+      // Entry with no channel field — falls back to '' which won't match any tracked channel
+      client.simulateEvent('wholist', {
+        users: [{ nick: 'Alice', ident: 'updated', hostname: 'updated.host' }],
+      });
+      // Alice should be unchanged since channel defaulted to '' (no match)
+      expect(state.getUser('#test', 'Alice')!.ident).toBe('alice');
+    });
+
+    it('handles wholist entry with undefined nick/ident/hostname fields', () => {
+      client.simulateEvent('join', {
+        nick: 'Alice',
+        ident: 'alice',
+        hostname: 'host',
+        channel: '#test',
+      });
+      // Entry with channel but no nick/ident/hostname — ?? '' fallbacks triggered
+      client.simulateEvent('wholist', {
+        users: [{ channel: '#test' }], // missing nick, ident, hostname
+      });
+      // Should not throw; the user (nick='') doesn't match Alice
+      expect(state.getUser('#test', 'Alice')!.ident).toBe('alice');
+    });
+
+    it('handles userlist entry with undefined nick/ident/hostname fields', () => {
+      // Fire a userlist event with an entry missing nick/ident/hostname — ?? '' fallbacks
+      expect(() => {
+        client.simulateEvent('userlist', {
+          channel: '#test',
+          users: [{ modes: '' }], // no nick/ident/hostname fields
+        });
+      }).not.toThrow();
+    });
+
+    it('handles topic event with undefined channel field', () => {
+      // channel defaults to '' via ??; ensureChannel('') creates an empty-string entry but doesn't throw
+      expect(() => {
+        client.simulateEvent('topic', { topic: 'orphan' });
+      }).not.toThrow();
+    });
+
+    it('handles account event with undefined nick field', () => {
+      // nick defaults to '' — should not throw
+      expect(() => {
+        client.simulateEvent('account', { account: 'SomeAccount' });
+      }).not.toThrow();
+    });
+
+    it('handles user updated event with undefined nick field', () => {
+      // nick defaults to '' — no channel entry to update; should not throw
+      expect(() => {
+        client.simulateEvent('user updated', { new_ident: 'x', new_hostname: 'y' });
+      }).not.toThrow();
+    });
+
+    it('handles mode event entry with no param field (falsy param branch)', () => {
+      // m.param falsy → param = '' branch in `m.param ? String(m.param) : ''`
+      client.simulateEvent('join', { nick: 'Alice', ident: 'a', hostname: 'h', channel: '#test' });
+      expect(() => {
+        client.simulateEvent('mode', {
+          target: '#test',
+          modes: [{ mode: '+m' }], // no param
+        });
+      }).not.toThrow();
+    });
+  });
 });

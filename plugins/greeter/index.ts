@@ -139,6 +139,7 @@ export function init(api: PluginAPI): void {
         ctx.replyPrivate('You must be a registered user to set a greet.');
         return;
       }
+      /* v8 ignore next -- ctx.channel is always set for pub handlers */
       if (!meetsMinFlag(record, minFlag, ctx.channel ? api.ircLower(ctx.channel) : null)) {
         ctx.replyPrivate(`You need at least +${minFlag} to set a custom greet.`);
         return;
@@ -157,6 +158,7 @@ export function init(api: PluginAPI): void {
         ctx.replyPrivate('You must be a registered user to remove a greet.');
         return;
       }
+      /* v8 ignore next -- ctx.channel is always set for pub handlers */
       if (!meetsMinFlag(record, minFlag, ctx.channel ? api.ircLower(ctx.channel) : null)) {
         ctx.replyPrivate(`You need at least +${minFlag} to remove a custom greet.`);
         return;

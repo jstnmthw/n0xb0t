@@ -50,6 +50,7 @@ interface RejoinRecord {
 /** Extract the kicker's nick from kick ctx.args ("reason (by Nick)" or "by Nick"). */
 function parseKicker(args: string): string {
   const m = args.match(/\(by ([^)]+)\)$/) ?? args.match(/^by (.+)$/);
+  /* v8 ignore next -- m is always truthy given the two-pattern format produced by irc-bridge */
   return m?.[1]?.trim() ?? '';
 }
 

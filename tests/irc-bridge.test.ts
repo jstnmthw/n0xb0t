@@ -1402,6 +1402,39 @@ describe('IRCBridge', () => {
 
       topicDispatcher.unbindAll('test');
     });
+
+    it('should handle missing nick/ident/hostname/topic fields via ?? fallback', async () => {
+      const handler = vi.fn();
+      topicDispatcher.bind('topic', '-', '*', handler, 'test');
+
+      vi.advanceTimersByTime(6000); // clear startup grace
+
+      topicClient.simulateEvent('topic', { channel: '#test' }); // omit all other fields
+      await Promise.resolve();
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.nick).toBe('');
+      expect(ctx.ident).toBe('');
+      expect(ctx.hostname).toBe('');
+      expect(ctx.text).toBe('');
+
+      topicDispatcher.unbindAll('test');
+    });
+
+    it('should handle missing channel field via ?? fallback (falls through as invalid)', async () => {
+      const handler = vi.fn();
+      topicDispatcher.bind('topic', '-', '*', handler, 'test');
+
+      vi.advanceTimersByTime(6000);
+
+      topicClient.simulateEvent('topic', {}); // no channel → '' → isValidChannel fails
+      await Promise.resolve();
+
+      expect(handler).not.toHaveBeenCalled();
+
+      topicDispatcher.unbindAll('test');
+    });
   });
 
   describe('quit events', () => {
@@ -1445,6 +1478,23 @@ describe('IRCBridge', () => {
       await Promise.resolve();
 
       expect(handler).not.toHaveBeenCalled();
+
+      dispatcher.unbindAll('test');
+    });
+
+    it('should handle missing nick/ident/hostname/message fields via ?? fallback', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('quit', '-', '*', handler, 'test');
+
+      client.simulateEvent('quit', {}); // all fields missing → all ?? '' fallbacks triggered
+      await Promise.resolve();
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.nick).toBe('');
+      expect(ctx.ident).toBe('');
+      expect(ctx.hostname).toBe('');
+      expect(ctx.text).toBe('');
 
       dispatcher.unbindAll('test');
     });
@@ -1741,6 +1791,72 @@ describe('IRCBridge', () => {
       expect(ctx.hostname).toBe('bad.host.com');
 
       csDispatcher.unbindAll('test');
+    });
+  });
+
+  describe('??-fallback branches (missing event fields)', () => {
+    it('invite: missing nick/ident/hostname fields default to empty string', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('invite', '-', '*', handler, 'test');
+
+      client.simulateEvent('invite', { channel: '#test' }); // omit nick/ident/hostname
+      await Promise.resolve();
+
+      expect(handler).toHaveBeenCalledOnce();
+      const ctx: HandlerContext = handler.mock.calls[0][0];
+      expect(ctx.nick).toBe('');
+      expect(ctx.ident).toBe('');
+      expect(ctx.hostname).toBe('');
+
+      dispatcher.unbindAll('test');
+    });
+
+    it('invite: missing channel field falls back to empty string via ?? (invalid → no dispatch)', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('invite', '-', '*', handler, 'test');
+
+      client.simulateEvent('invite', { nick: 'user', ident: 'u', hostname: 'h.com' }); // omit channel
+      await Promise.resolve();
+
+      expect(handler).not.toHaveBeenCalled(); // '' is not a valid channel
+
+      dispatcher.unbindAll('test');
+    });
+
+    it('part: missing channel field falls back via ?? (invalid → no dispatch)', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('part', '-', '*', handler, 'test');
+
+      client.simulateEvent('part', { nick: 'user', ident: 'u', hostname: 'h.com' }); // omit channel
+      await Promise.resolve();
+
+      expect(handler).not.toHaveBeenCalled();
+
+      dispatcher.unbindAll('test');
+    });
+
+    it('kick: missing channel field falls back via ?? (invalid → no dispatch)', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('kick', '-', '*', handler, 'test');
+
+      client.simulateEvent('kick', { nick: 'op', kicked: 'user' }); // omit channel
+      await Promise.resolve();
+
+      expect(handler).not.toHaveBeenCalled();
+
+      dispatcher.unbindAll('test');
+    });
+
+    it('mode: missing target field falls back via ?? (invalid → no dispatch)', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('mode', '-', '*', handler, 'test');
+
+      client.simulateEvent('mode', { nick: 'op', modes: [{ mode: '+o', param: 'user' }] }); // omit target
+      await Promise.resolve();
+
+      expect(handler).not.toHaveBeenCalled();
+
+      dispatcher.unbindAll('test');
     });
   });
 });

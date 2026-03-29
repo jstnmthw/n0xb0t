@@ -1,0 +1,465 @@
+import { EventEmitter } from 'node:events';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import {
+  type ConnectionLifecycleDeps,
+  type LifecycleIRCClient,
+  registerConnectionEvents,
+} from '../../src/core/connection-lifecycle';
+import { BotEventBus } from '../../src/event-bus';
+import type { Logger } from '../../src/logger';
+import type { BotConfig } from '../../src/types';
+
+// ---------------------------------------------------------------------------
+// Mock IRC client
+// ---------------------------------------------------------------------------
+
+class MockClient extends EventEmitter {
+  public joins: Array<{ channel: string; key?: string }> = [];
+  public network = {
+    supports: vi.fn<(feature: string) => string | boolean>().mockReturnValue('rfc1459'),
+  };
+
+  join(channel: string, key?: string): void {
+    this.joins.push({ channel, key });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const MINIMAL_BOT_CONFIG: BotConfig = {
+  irc: {
+    host: 'irc.example.com',
+    port: 6667,
+    tls: false,
+    nick: 'testbot',
+    username: 'test',
+    realname: 'Test Bot',
+    channels: [],
+  },
+  owner: { handle: 'admin', hostmask: '*!*@localhost' },
+  identity: { method: 'hostmask', require_acc_for: [] },
+  services: { type: 'none', nickserv: 'NickServ', password: '', sasl: false },
+  database: ':memory:',
+  pluginDir: './plugins',
+  logging: { level: 'info', mod_actions: false },
+};
+
+function makeLogger(): Logger {
+  return {
+    info: vi.fn(),
+    debug: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    child: vi.fn().mockReturnValue(null),
+  } as unknown as Logger;
+}
+
+interface TestContext {
+  client: MockClient;
+  eventBus: BotEventBus;
+  logger: Logger;
+  applyCasemapping: ReturnType<typeof vi.fn>;
+  messageQueue: { clear: ReturnType<typeof vi.fn> };
+  dispatcher: { bind: ReturnType<typeof vi.fn> };
+  deps: ConnectionLifecycleDeps;
+}
+
+function makeContext(overrides?: Partial<ConnectionLifecycleDeps>): TestContext {
+  const client = new MockClient();
+  const eventBus = new BotEventBus();
+  const logger = makeLogger();
+  const applyCasemapping = vi.fn();
+  const messageQueue = { clear: vi.fn() };
+  const dispatcher = { bind: vi.fn() };
+
+  const deps: ConnectionLifecycleDeps = {
+    client: client as unknown as LifecycleIRCClient,
+    config: MINIMAL_BOT_CONFIG,
+    configuredChannels: [],
+    eventBus,
+    applyCasemapping,
+    messageQueue,
+    dispatcher,
+    logger,
+    ...overrides,
+  };
+
+  return { client, eventBus, logger, applyCasemapping, messageQueue, dispatcher, deps };
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('registerConnectionEvents', () => {
+  describe('registered event', () => {
+    it('calls resolve', () => {
+      const { client, deps } = makeContext();
+      const resolve = vi.fn();
+      registerConnectionEvents(deps, resolve, () => {});
+      client.emit('registered');
+      expect(resolve).toHaveBeenCalledOnce();
+    });
+
+    it('emits bot:connected', () => {
+      const { client, deps, eventBus } = makeContext();
+      const handler = vi.fn();
+      eventBus.on('bot:connected', handler);
+      registerConnectionEvents(
+        deps,
+        () => {},
+        () => {},
+      );
+      client.emit('registered');
+      expect(handler).toHaveBeenCalledOnce();
+    });
+
+    it('joins all configured channels with their keys', () => {
+      const { client, deps } = makeContext({
+        configuredChannels: [{ name: '#alpha', key: 'secret' }, { name: '#beta' }],
+      });
+      registerConnectionEvents(
+        deps,
+        () => {},
+        () => {},
+      );
+      client.emit('registered');
+      expect(client.joins).toHaveLength(2);
+      expect(client.joins[0]).toEqual({ channel: '#alpha', key: 'secret' });
+      expect(client.joins[1]).toEqual({ channel: '#beta', key: undefined });
+    });
+
+    it('propagates rfc1459 casemapping', () => {
+      const { client, deps, applyCasemapping } = makeContext();
+      client.network.supports.mockReturnValue('rfc1459');
+      registerConnectionEvents(
+        deps,
+        () => {},
+        () => {},
+      );
+      client.emit('registered');
+      expect(applyCasemapping).toHaveBeenCalledWith('rfc1459');
+    });
+
+    it('propagates ascii casemapping', () => {
+      const { client, deps, applyCasemapping } = makeContext();
+      client.network.supports.mockReturnValue('ascii');
+      registerConnectionEvents(
+        deps,
+        () => {},
+        () => {},
+      );
+      client.emit('registered');
+      expect(applyCasemapping).toHaveBeenCalledWith('ascii');
+    });
+
+    it('propagates strict-rfc1459 casemapping', () => {
+      const { client, deps, applyCasemapping } = makeContext();
+      client.network.supports.mockReturnValue('strict-rfc1459');
+      registerConnectionEvents(
+        deps,
+        () => {},
+        () => {},
+      );
+      client.emit('registered');
+      expect(applyCasemapping).toHaveBeenCalledWith('strict-rfc1459');
+    });
+
+    it('falls back to rfc1459 for unknown casemapping value', () => {
+      const { client, deps, applyCasemapping } = makeContext();
+      client.network.supports.mockReturnValue('unicode');
+      registerConnectionEvents(
+        deps,
+        () => {},
+        () => {},
+      );
+      client.emit('registered');
+      expect(applyCasemapping).toHaveBeenCalledWith('rfc1459');
+    });
+
+    it('does not mention TLS when tls is false', () => {
+      const { client, deps, logger } = makeContext();
+      registerConnectionEvents(
+        deps,
+        () => {},
+        () => {},
+      );
+      client.emit('registered');
+      const infoCalls = (logger.info as ReturnType<typeof vi.fn>).mock.calls.flat();
+      expect(infoCalls.some((s) => String(s).includes('TLS'))).toBe(false);
+    });
+
+    it('logs cipher info when TLS socket exposes getCipher', () => {
+      const tlsConfig: BotConfig = {
+        ...MINIMAL_BOT_CONFIG,
+        irc: { ...MINIMAL_BOT_CONFIG.irc, tls: true },
+      };
+      const { client, deps, logger } = makeContext({ config: tlsConfig });
+      (client as unknown as Record<string, unknown>).connection = {
+        transport: {
+          socket: {
+            getCipher: () => ({ name: 'ECDHE-RSA-AES256-GCM-SHA384', version: 'TLSv1.2' }),
+          },
+        },
+      };
+      registerConnectionEvents(
+        deps,
+        () => {},
+        () => {},
+      );
+      client.emit('registered');
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.stringContaining('ECDHE-RSA-AES256-GCM-SHA384'),
+      );
+    });
+
+    it('logs generic TLS connected when getCipher is unavailable', () => {
+      const tlsConfig: BotConfig = {
+        ...MINIMAL_BOT_CONFIG,
+        irc: { ...MINIMAL_BOT_CONFIG.irc, tls: true },
+      };
+      const { client, deps, logger } = makeContext({ config: tlsConfig });
+      // No .connection property on the mock — getCipher unavailable
+      registerConnectionEvents(
+        deps,
+        () => {},
+        () => {},
+      );
+      client.emit('registered');
+      expect(logger.info).toHaveBeenCalledWith('TLS connected');
+    });
+
+    it('registers irc error and unknown command listeners', () => {
+      const { client, deps } = makeContext();
+      const onSpy = vi.spyOn(client, 'on');
+      registerConnectionEvents(
+        deps,
+        () => {},
+        () => {},
+      );
+      client.emit('registered');
+      const registeredEvents = onSpy.mock.calls.map((c) => c[0]);
+      expect(registeredEvents).toContain('irc error');
+      expect(registeredEvents).toContain('unknown command');
+    });
+  });
+
+  describe('close event', () => {
+    it('emits bot:disconnected with reason', () => {
+      const { client, deps, eventBus } = makeContext();
+      const handler = vi.fn();
+      eventBus.on('bot:disconnected', handler);
+      registerConnectionEvents(
+        deps,
+        () => {},
+        () => {},
+      );
+      client.emit('close');
+      expect(handler).toHaveBeenCalledWith('connection closed');
+    });
+  });
+
+  describe('reconnecting event', () => {
+    it('clears the message queue', () => {
+      const { client, deps, messageQueue } = makeContext();
+      registerConnectionEvents(
+        deps,
+        () => {},
+        () => {},
+      );
+      client.emit('reconnecting');
+      expect(messageQueue.clear).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('socket error event', () => {
+    it('calls reject with the Error before registration', () => {
+      const { client, deps } = makeContext();
+      const reject = vi.fn();
+      registerConnectionEvents(deps, () => {}, reject);
+      client.emit('socket error', new Error('ECONNREFUSED'));
+      expect(reject).toHaveBeenCalledOnce();
+      expect((reject.mock.calls[0][0] as Error).message).toBe('ECONNREFUSED');
+    });
+
+    it('wraps a non-Error value in an Error', () => {
+      const { client, deps } = makeContext();
+      const reject = vi.fn();
+      registerConnectionEvents(deps, () => {}, reject);
+      client.emit('socket error', 'plain string');
+      const err = reject.mock.calls[0][0] as Error;
+      expect(err).toBeInstanceOf(Error);
+      expect(err.message).toBe('plain string');
+    });
+
+    it('does not call reject after registration', () => {
+      const { client, deps } = makeContext();
+      const reject = vi.fn();
+      registerConnectionEvents(deps, () => {}, reject);
+      client.emit('registered');
+      client.emit('socket error', new Error('SSL_ERROR'));
+      expect(reject).not.toHaveBeenCalled();
+    });
+
+    it('emits bot:error with the error object', () => {
+      const { client, deps, eventBus } = makeContext();
+      const handler = vi.fn();
+      eventBus.on('bot:error', handler);
+      registerConnectionEvents(
+        deps,
+        () => {},
+        () => {},
+      );
+      const err = new Error('socket failure');
+      client.emit('socket error', err);
+      expect(handler).toHaveBeenCalledWith(err);
+    });
+  });
+
+  describe('irc error listeners (registered after connect)', () => {
+    let ctx: TestContext;
+
+    beforeEach(() => {
+      ctx = makeContext();
+      registerConnectionEvents(
+        ctx.deps,
+        () => {},
+        () => {},
+      );
+      ctx.client.emit('registered');
+    });
+
+    it('logs warning for channel_is_full', () => {
+      ctx.client.emit('irc error', { error: 'channel_is_full', channel: '#busy' });
+      expect(ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining('channel is full'));
+    });
+
+    it('logs warning for invite_only_channel', () => {
+      ctx.client.emit('irc error', { error: 'invite_only_channel', channel: '#priv' });
+      expect(ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining('invite only'));
+    });
+
+    it('logs warning for banned_from_channel', () => {
+      ctx.client.emit('irc error', { error: 'banned_from_channel', channel: '#strict' });
+      expect(ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining('banned'));
+    });
+
+    it('logs warning for bad_channel_key', () => {
+      ctx.client.emit('irc error', { error: 'bad_channel_key', channel: '#keyed' });
+      expect(ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining('bad channel key'));
+    });
+
+    it('does not log for unrecognized irc errors', () => {
+      const warnsBefore = (ctx.logger.warn as ReturnType<typeof vi.fn>).mock.calls.length;
+      ctx.client.emit('irc error', { error: 'unknown_error', channel: '#test' });
+      expect((ctx.logger.warn as ReturnType<typeof vi.fn>).mock.calls.length).toBe(warnsBefore);
+    });
+
+    it('logs warning for numeric 477 (need to register nick)', () => {
+      ctx.client.emit('unknown command', { command: '477', params: ['testbot', '#restricted'] });
+      expect(ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining('#restricted'));
+    });
+
+    it('ignores non-477 unknown command numerics', () => {
+      const warnsBefore = (ctx.logger.warn as ReturnType<typeof vi.fn>).mock.calls.length;
+      ctx.client.emit('unknown command', { command: '999', params: ['testbot', '#test'] });
+      expect((ctx.logger.warn as ReturnType<typeof vi.fn>).mock.calls.length).toBe(warnsBefore);
+    });
+
+    it('irc error: missing error field falls back to empty string via ??', () => {
+      // Fires the handler but reason is undefined (JOIN_ERROR_NAMES[''] = undefined) → no warn
+      const warnsBefore = (ctx.logger.warn as ReturnType<typeof vi.fn>).mock.calls.length;
+      ctx.client.emit('irc error', {}); // no error field — hits e.error ?? '' fallback
+      expect((ctx.logger.warn as ReturnType<typeof vi.fn>).mock.calls.length).toBe(warnsBefore);
+    });
+
+    it('irc error: missing channel field falls back to empty string via ??', () => {
+      // Error is known but channel is missing — hits e.channel ?? '' fallback
+      ctx.client.emit('irc error', { error: 'channel_is_full' }); // no channel field
+      expect(ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining('channel is full'));
+      expect(ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining(':'));
+    });
+
+    it('unknown command: missing command field falls back via ??', () => {
+      // Hits e.command ?? '' → '' !== '477' → no warn
+      const warnsBefore = (ctx.logger.warn as ReturnType<typeof vi.fn>).mock.calls.length;
+      ctx.client.emit('unknown command', {}); // no command field
+      expect((ctx.logger.warn as ReturnType<typeof vi.fn>).mock.calls.length).toBe(warnsBefore);
+    });
+
+    it('unknown command 477: non-array params falls back to empty array', () => {
+      // Array.isArray(e.params) false branch → params = [] → params[1] undefined → ?? '' fallback
+      ctx.client.emit('unknown command', { command: '477', params: { notAnArray: true } });
+      expect(ctx.logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('need to register nick'),
+      );
+    });
+
+    it('unknown command 477: short params array falls back to empty string via ??', () => {
+      // params[1] is undefined → hits params[1] ?? '' fallback
+      ctx.client.emit('unknown command', { command: '477', params: ['testbot'] }); // only 1 element
+      expect(ctx.logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('need to register nick'),
+      );
+    });
+  });
+
+  describe('core INVITE handler', () => {
+    it('re-joins a configured channel when invited', () => {
+      const { client, deps } = makeContext({
+        configuredChannels: [{ name: '#test', key: 'mykey' }],
+      });
+      registerConnectionEvents(
+        deps,
+        () => {},
+        () => {},
+      );
+      client.emit('registered');
+
+      const [, , , handler] = (deps.dispatcher.bind as ReturnType<typeof vi.fn>).mock.calls[0];
+      client.joins = []; // clear joins from startup
+      handler({ nick: 'op', channel: '#test' });
+
+      expect(client.joins).toContainEqual({ channel: '#test', key: 'mykey' });
+    });
+
+    it('ignores invite to a non-configured channel', () => {
+      const { client, deps } = makeContext({
+        configuredChannels: [{ name: '#test' }],
+      });
+      registerConnectionEvents(
+        deps,
+        () => {},
+        () => {},
+      );
+      client.emit('registered');
+
+      const [, , , handler] = (deps.dispatcher.bind as ReturnType<typeof vi.fn>).mock.calls[0];
+      client.joins = [];
+      handler({ nick: 'op', channel: '#other' });
+
+      expect(client.joins).toHaveLength(0);
+    });
+
+    it('ignores invite with null channel', () => {
+      const { client, deps } = makeContext({
+        configuredChannels: [{ name: '#test' }],
+      });
+      registerConnectionEvents(
+        deps,
+        () => {},
+        () => {},
+      );
+      client.emit('registered');
+
+      const [, , , handler] = (deps.dispatcher.bind as ReturnType<typeof vi.fn>).mock.calls[0];
+      client.joins = [];
+      handler({ nick: 'op', channel: null });
+
+      expect(client.joins).toHaveLength(0);
+    });
+  });
+});

@@ -637,6 +637,7 @@ export class DCCManager {
   // Session management
   // -------------------------------------------------------------------------
 
+  /* v8 ignore start -- openSession requires a live TCP socket; covered by manual integration tests */
   private openSession(pending: PendingDCC, socket: Socket): void {
     const session = new DCCSession({
       manager: this,

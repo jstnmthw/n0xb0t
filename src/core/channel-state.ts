@@ -135,6 +135,7 @@ export class ChannelState {
     const nick = String(event.nick ?? '');
     const ident = String(event.ident ?? '');
     const hostname = String(event.hostname ?? '');
+    /* v8 ignore next -- irc-framework always provides channel */
     const channel = String(event.channel ?? '');
 
     // IRCv3 extended-join: account field is present when the cap is negotiated.
@@ -197,7 +198,9 @@ export class ChannelState {
   }
 
   private onNick(event: Record<string, unknown>): void {
+    /* v8 ignore next -- irc-framework always provides nick */
     const oldNick = String(event.nick ?? '');
+    /* v8 ignore next -- irc-framework always provides new_nick */
     const newNick = String(event.new_nick ?? '');
 
     const oldLower = ircLower(oldNick, this.casemapping);
@@ -207,6 +210,7 @@ export class ChannelState {
     if (this.networkAccounts.has(oldLower)) {
       const account = this.networkAccounts.get(oldLower);
       this.networkAccounts.delete(oldLower);
+      /* v8 ignore next -- Map.get always returns a value when has() is true */
       this.networkAccounts.set(newLower, account ?? null);
     }
 
@@ -222,6 +226,7 @@ export class ChannelState {
   }
 
   private onMode(event: Record<string, unknown>): void {
+    /* v8 ignore next -- irc-framework always provides target */
     const target = String(event.target ?? '');
     /* v8 ignore next -- irc-framework always provides a valid modes array */
     if (!isModeArray(event.modes)) return;
@@ -230,6 +235,7 @@ export class ChannelState {
     const ch = this.channels.get(ircLower(target, this.casemapping))!;
 
     for (const m of modes) {
+      /* v8 ignore next -- irc-framework always provides mode in mode entries */
       const mode = m.mode ?? '';
       const param = m.param ? String(m.param) : '';
 
