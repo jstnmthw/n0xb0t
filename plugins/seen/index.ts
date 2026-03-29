@@ -68,7 +68,10 @@ export function init(api: PluginAPI): void {
     }
 
     const ago = formatRelativeTime(age);
-    ctx.reply(`${record.nick} was last seen ${ago} in ${record.channel} saying: ${record.text}`);
+    ctx.reply(
+      `${api.stripFormatting(record.nick)} was last seen ${ago} in ` +
+        `${api.stripFormatting(record.channel)} saying: ${api.stripFormatting(record.text)}`,
+    );
   });
 
   // Hourly cleanup of stale entries

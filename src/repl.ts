@@ -6,6 +6,7 @@ import { type Interface as ReadlineInterface, createInterface } from 'node:readl
 import type { Bot } from './bot';
 import type { Logger } from './logger';
 import { toEventObject } from './utils/irc-event';
+import { sanitize } from './utils/sanitize';
 
 // ---------------------------------------------------------------------------
 // BotREPL
@@ -51,7 +52,7 @@ export class BotREPL {
       const message = String(e.message ?? '');
       // Only print notices sent directly to the bot (not channel notices)
       if (target && /^[#&]/.test(target)) return;
-      this.print(`-${nick}- ${message}`);
+      this.print(`-${sanitize(nick)}- ${sanitize(message)}`);
     };
     const onPrivmsg = (event: unknown) => {
       const e = toEventObject(event);
@@ -60,7 +61,7 @@ export class BotREPL {
       const message = String(e.message ?? '');
       // Only print private messages (not channel messages)
       if (target && /^[#&]/.test(target)) return;
-      this.print(`<${nick}> ${message}`);
+      this.print(`<${sanitize(nick)}> ${sanitize(message)}`);
     };
 
     this.bot.client.on('notice', onNotice);

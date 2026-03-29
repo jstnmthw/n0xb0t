@@ -38,7 +38,7 @@ export function setupAutoOp(api: PluginAPI, config: ChanmodConfig, state: Shared
     if (!user) return;
 
     const globalFlags = user.global;
-    const channelFlags = user.channels[channel] ?? '';
+    const channelFlags = user.channels[api.ircLower(channel)] ?? '';
     const allFlags = globalFlags + channelFlags;
 
     const shouldOp = hasAnyFlag(allFlags, config.op_flags);

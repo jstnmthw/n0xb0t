@@ -28,7 +28,7 @@ export function meetsMinFlag(record: UserRecord, minFlag: string, channel: strin
   if (flagsMeet(record.global)) return true;
 
   if (channel) {
-    const chanFlags = record.channels[channel.toLowerCase()];
+    const chanFlags = record.channels[channel];
     if (chanFlags && flagsMeet(chanFlags)) return true;
   }
 
@@ -139,7 +139,7 @@ export function init(api: PluginAPI): void {
         ctx.replyPrivate('You must be a registered user to set a greet.');
         return;
       }
-      if (!meetsMinFlag(record, minFlag, ctx.channel)) {
+      if (!meetsMinFlag(record, minFlag, ctx.channel ? api.ircLower(ctx.channel) : null)) {
         ctx.replyPrivate(`You need at least +${minFlag} to set a custom greet.`);
         return;
       }
@@ -157,7 +157,7 @@ export function init(api: PluginAPI): void {
         ctx.replyPrivate('You must be a registered user to remove a greet.');
         return;
       }
-      if (!meetsMinFlag(record, minFlag, ctx.channel)) {
+      if (!meetsMinFlag(record, minFlag, ctx.channel ? api.ircLower(ctx.channel) : null)) {
         ctx.replyPrivate(`You need at least +${minFlag} to remove a custom greet.`);
         return;
       }

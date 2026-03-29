@@ -17,6 +17,7 @@ import type { EventDispatcher } from '../dispatcher';
 import type { Logger } from '../logger';
 import type { DccConfig, HandlerContext, UserRecord } from '../types';
 import { toEventObject } from '../utils/irc-event';
+import { sanitize } from '../utils/sanitize';
 import { type Casemapping, ircLower } from '../utils/wildcard';
 import type { Permissions } from './permissions';
 import type { Services } from './services';
@@ -392,7 +393,7 @@ export class DCCManager {
       const target = String(e.target ?? '');
       const message = String(e.message ?? '');
       if (/^[#&]/.test(target)) return; // skip channel notices
-      this.announce(`-${nick}- ${message}`);
+      this.announce(`-${sanitize(nick)}- ${sanitize(message)}`);
     };
     const onPrivmsg = (...args: unknown[]) => {
       const e = toEventObject(args[0]);
@@ -400,7 +401,7 @@ export class DCCManager {
       const target = String(e.target ?? '');
       const message = String(e.message ?? '');
       if (/^[#&]/.test(target)) return; // skip channel messages
-      this.announce(`<${nick}> ${message}`);
+      this.announce(`<${sanitize(nick)}> ${sanitize(message)}`);
     };
     /* v8 ignore stop */
     this.client.on('notice', onNotice);

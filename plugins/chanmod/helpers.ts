@@ -28,7 +28,7 @@ export function botCanHalfop(api: PluginAPI, channel: string): boolean {
 }
 
 export function isValidNick(nick: string): boolean {
-  return nick.length > 0 && !/[\r\n\s]/.test(nick);
+  return /^[a-zA-Z[\]\\`_^{|}][a-zA-Z0-9[\]\\`_^{|}\\-]{0,49}$/.test(nick);
 }
 
 export function markIntentional(
