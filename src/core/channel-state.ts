@@ -124,7 +124,7 @@ export class ChannelState {
 
   getUserModes(channel: string, nick: string): string[] {
     const user = this.getUser(channel, nick);
-    return user!.modes;
+    return user?.modes ?? [];
   }
 
   // -------------------------------------------------------------------------
@@ -132,10 +132,10 @@ export class ChannelState {
   // -------------------------------------------------------------------------
 
   private onJoin(event: Record<string, unknown>): void {
-    const nick = event.nick as string;
-    const ident = event.ident as string;
-    const hostname = event.hostname as string;
-    const channel = event.channel as string;
+    const nick = String(event.nick ?? '');
+    const ident = String(event.ident ?? '');
+    const hostname = String(event.hostname ?? '');
+    const channel = String(event.channel ?? '');
 
     // IRCv3 extended-join: account field is present when the cap is negotiated.
     // irc-framework sets it to false (not the string '*') when the user is not identified.
@@ -162,8 +162,8 @@ export class ChannelState {
   }
 
   private onPart(event: Record<string, unknown>): void {
-    const nick = event.nick as string;
-    const channel = event.channel as string;
+    const nick = String(event.nick ?? '');
+    const channel = String(event.channel ?? '');
 
     this.channels
       .get(ircLower(channel, this.casemapping))!
@@ -173,7 +173,7 @@ export class ChannelState {
   }
 
   private onQuit(event: Record<string, unknown>): void {
-    const nick = event.nick as string;
+    const nick = String(event.nick ?? '');
 
     const lower = ircLower(nick, this.casemapping);
     for (const ch of this.channels.values()) {
@@ -185,8 +185,8 @@ export class ChannelState {
   }
 
   private onKick(event: Record<string, unknown>): void {
-    const kicked = event.kicked as string;
-    const channel = event.channel as string;
+    const kicked = String(event.kicked ?? '');
+    const channel = String(event.channel ?? '');
 
     const ch = this.channels.get(ircLower(channel, this.casemapping));
     if (ch) {
@@ -197,8 +197,8 @@ export class ChannelState {
   }
 
   private onNick(event: Record<string, unknown>): void {
-    const oldNick = event.nick as string;
-    const newNick = event.new_nick as string;
+    const oldNick = String(event.nick ?? '');
+    const newNick = String(event.new_nick ?? '');
 
     const oldLower = ircLower(oldNick, this.casemapping);
     const newLower = ircLower(newNick, this.casemapping);
@@ -207,7 +207,7 @@ export class ChannelState {
     if (this.networkAccounts.has(oldLower)) {
       const account = this.networkAccounts.get(oldLower);
       this.networkAccounts.delete(oldLower);
-      this.networkAccounts.set(newLower, account!);
+      this.networkAccounts.set(newLower, account ?? null);
     }
 
     for (const ch of this.channels.values()) {
@@ -222,7 +222,7 @@ export class ChannelState {
   }
 
   private onMode(event: Record<string, unknown>): void {
-    const target = event.target as string;
+    const target = String(event.target ?? '');
     /* v8 ignore next -- irc-framework always provides a valid modes array */
     if (!isModeArray(event.modes)) return;
     const modes = event.modes;
@@ -230,7 +230,7 @@ export class ChannelState {
     const ch = this.channels.get(ircLower(target, this.casemapping))!;
 
     for (const m of modes) {
-      const mode = m.mode as string;
+      const mode = m.mode ?? '';
       const param = m.param ? String(m.param) : '';
 
       // User modes: +o, -o, +v, -v, etc. have a nick as param
@@ -272,9 +272,9 @@ export class ChannelState {
     const ch = this.ensureChannel(channel);
 
     for (const u of users) {
-      const nick = u.nick as string;
-      const ident = u.ident as string;
-      const hostname = u.hostname as string;
+      const nick = String(u.nick ?? '');
+      const ident = String(u.ident ?? '');
+      const hostname = String(u.hostname ?? '');
       const modes = this.parseUserlistModes(typeof u.modes === 'string' ? u.modes : undefined);
 
       // Only add if not already present (join event may have fired first)
@@ -305,10 +305,10 @@ export class ChannelState {
     const users = event.users;
 
     for (const u of users) {
-      const nick = u.nick as string;
-      const ident = u.ident as string;
-      const hostname = u.hostname as string;
-      const channel = u.channel as string;
+      const nick = String(u.nick ?? '');
+      const ident = String(u.ident ?? '');
+      const hostname = String(u.hostname ?? '');
+      const channel = String(u.channel ?? '');
 
       const ch = this.channels.get(ircLower(channel, this.casemapping));
       if (!ch) continue;
@@ -323,8 +323,8 @@ export class ChannelState {
   }
 
   private onTopic(event: Record<string, unknown>): void {
-    const channel = event.channel as string;
-    const topic = event.topic as string;
+    const channel = String(event.channel ?? '');
+    const topic = String(event.topic ?? '');
 
     const ch = this.ensureChannel(channel);
     ch.topic = topic;
@@ -332,7 +332,7 @@ export class ChannelState {
 
   /** IRCv3 account-notify: fires when a user's identification status changes. */
   private onAccount(event: Record<string, unknown>): void {
-    const nick = event.nick as string;
+    const nick = String(event.nick ?? '');
 
     // irc-framework sets account to false when the user deidentifies
     const accountName: string | null =
@@ -358,7 +358,7 @@ export class ChannelState {
 
   /** IRCv3 chghost: fires when a user's displayed ident/hostname changes. */
   private onUserUpdated(event: Record<string, unknown>): void {
-    const nick = event.nick as string;
+    const nick = String(event.nick ?? '');
     const newIdent = event.new_ident !== undefined ? String(event.new_ident) : undefined;
     const newHostname = event.new_hostname !== undefined ? String(event.new_hostname) : undefined;
 

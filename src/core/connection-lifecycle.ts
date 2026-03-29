@@ -5,6 +5,7 @@ import type { BotEventBus } from '../event-bus';
 import type { Logger } from '../logger';
 import type { BotConfig, Casemapping } from '../types';
 import type { BindHandler, BindType } from '../types';
+import { toEventObject } from '../utils/irc-event';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -122,7 +123,7 @@ function registerJoinErrorListeners(client: LifecycleIRCClient, logger: Logger):
     bad_channel_key: 'bad channel key (+k)',
   };
   client.on('irc error', (event: unknown) => {
-    const e = event as Record<string, unknown>;
+    const e = toEventObject(event);
     const reason = JOIN_ERROR_NAMES[String(e.error ?? '')];
     if (reason) {
       logger.warn(`Cannot join ${String(e.channel ?? '')}: ${reason}`);
@@ -130,7 +131,7 @@ function registerJoinErrorListeners(client: LifecycleIRCClient, logger: Logger):
   });
   // 477 (need to register nick) is unknown to irc-framework — catch it via raw numeric.
   client.on('unknown command', (event: unknown) => {
-    const e = event as Record<string, unknown>;
+    const e = toEventObject(event);
     if (String(e.command ?? '') === '477') {
       const params = Array.isArray(e.params) ? (e.params as unknown[]) : [];
       logger.warn(`Cannot join ${String(params[1] ?? '')}: need to register nick (+r)`);
