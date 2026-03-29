@@ -4,6 +4,7 @@
  * Defines every interface a plugin interacts with via the `api` object
  * received in `init()`. All objects on the API are frozen at runtime.
  */
+import type { IdentityConfig, IrcConfig, LoggingConfig, ServicesConfig } from './config.d.ts';
 import type {
   BindHandler,
   BindType,
@@ -11,6 +12,33 @@ import type {
   ChannelUser,
   HandlerContext,
 } from './events.d.ts';
+
+// ---------------------------------------------------------------------------
+// Plugin-facing bot config
+// ---------------------------------------------------------------------------
+
+/**
+ * `IrcConfig` as exposed to plugins — channels is always `string[]` (keys stripped),
+ * and all properties are readonly.
+ */
+export interface PluginIrcConfig extends Readonly<Omit<IrcConfig, 'channels'>> {
+  readonly channels: readonly string[];
+}
+
+/**
+ * Read-only bot config exposed to plugins via `api.botConfig`.
+ *
+ * The NickServ/SASL password is always omitted. Filesystem paths
+ * (`database`, `pluginDir`) are also omitted.
+ */
+export interface PluginBotConfig {
+  readonly irc: PluginIrcConfig;
+  readonly owner: Readonly<{ handle: string; hostmask: string }>;
+  readonly identity: Readonly<IdentityConfig>;
+  /** NickServ config with `password` omitted. */
+  readonly services: Readonly<Pick<ServicesConfig, 'type' | 'nickserv' | 'sasl'>>;
+  readonly logging: Readonly<LoggingConfig>;
+}
 
 // ---------------------------------------------------------------------------
 // Permission flags
@@ -281,6 +309,8 @@ export interface HelpEntry {
   detail?: string[];
   /** Grouping category shown in `!help`. Defaults to the plugin ID if unset. */
   category?: string;
+  /** Populated automatically by the help registry — do not set manually. */
+  pluginId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -452,6 +482,12 @@ export interface PluginAPI {
    */
   topic(channel: string, text: string): void;
 
+  /**
+   * Change the bot's own IRC nick (e.g. for nick recovery).
+   * @param nick The new nick to request.
+   */
+  changeNick(nick: string): void;
+
   // -------------------------------------------------------------------------
   // Channel state
   // -------------------------------------------------------------------------
@@ -504,9 +540,9 @@ export interface PluginAPI {
 
   /**
    * The bot's core configuration (`config/bot.json`), read-only and deep-frozen.
-   * The NickServ/SASL password is redacted — never present in this object.
+   * The NickServ/SASL password and filesystem paths are omitted.
    */
-  readonly botConfig: Record<string, unknown>;
+  readonly botConfig: PluginBotConfig;
 
   /**
    * This plugin's merged configuration. Values come from the plugin's own

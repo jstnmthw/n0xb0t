@@ -40,7 +40,8 @@ export type BindType =
   | 'ctcp' // CTCP request received (rate-limited), stackable
   | 'notice' // NOTICE received, stackable
   | 'topic' // Topic change (suppressed during startup burst), stackable
-  | 'quit'; // User quit the network (not channel-scoped), stackable
+  | 'quit' // User quit the network (not channel-scoped), stackable
+  | 'invite'; // Bot invited to a channel, stackable
 
 // ---------------------------------------------------------------------------
 // Handler context
@@ -52,22 +53,23 @@ export type BindType =
  *
  * ### Field semantics by bind type
  *
- * | type    | nick               | channel      | text                             | command              | args                       |
- * |---------|--------------------|--------------|----------------------------------|----------------------|----------------------------|
- * | `pub`   | sender             | `#channel`   | full message (raw)               | command word         | text after command          |
- * | `pubm`  | sender             | `#channel`   | full message (raw)               | command word / `''` for `/me` | args / action text   |
- * | `msg`   | sender             | `null`       | full message (raw)               | command word         | text after command          |
- * | `msgm`  | sender             | `null`       | full message (raw)               | command word / `''` for `/me` | args / action text   |
- * | `join`  | joiner             | `#channel`   | `"#chan nick!ident@host"`         | `'JOIN'`             | `''`                        |
- * | `part`  | parter             | `#channel`   | `"#chan nick!ident@host"`         | `'PART'`             | part reason                 |
- * | `kick`  | **kicked** nick    | `#channel`   | `"#chan kicked!ident@host"`       | `'KICK'`             | `"reason (by kicker)"`      |
- * | `nick`  | old nick           | `null`       | new nick                         | `'NICK'`             | new nick                    |
- * | `mode`  | mode setter        | `#channel`   | `"#chan +o nick"`                 | mode string (`+o`)   | mode param (`nick`)         |
- * | `ctcp`  | sender             | `null`       | CTCP payload (no type prefix)    | CTCP type (UPPER)    | CTCP payload                |
- * | `notice`| sender             | `#chan`/`null` | notice text                    | `'NOTICE'`           | notice text                 |
- * | `topic` | setter             | `#channel`   | new topic text                   | `'topic'`            | `''`                        |
- * | `quit`  | quitter            | `null`       | quit reason                      | `'quit'`             | `''`                        |
- * | `time`  | `''`               | `null`       | `''`                             | `''`                 | `''`                        |
+ * | type     | nick               | channel      | text                             | command              | args                       |
+ * |----------|--------------------|--------------|----------------------------------|----------------------|----------------------------|
+ * | `pub`    | sender             | `#channel`   | full message (raw)               | command word         | text after command          |
+ * | `pubm`   | sender             | `#channel`   | full message (raw)               | command word / `''` for `/me` | args / action text   |
+ * | `msg`    | sender             | `null`       | full message (raw)               | command word         | text after command          |
+ * | `msgm`   | sender             | `null`       | full message (raw)               | command word / `''` for `/me` | args / action text   |
+ * | `join`   | joiner             | `#channel`   | `"#chan nick!ident@host"`         | `'JOIN'`             | `''`                        |
+ * | `part`   | parter             | `#channel`   | `"#chan nick!ident@host"`         | `'PART'`             | part reason                 |
+ * | `kick`   | **kicked** nick    | `#channel`   | `"#chan kicked!ident@host"`       | `'KICK'`             | `"reason (by kicker)"`      |
+ * | `nick`   | old nick           | `null`       | new nick                         | `'NICK'`             | new nick                    |
+ * | `mode`   | mode setter        | `#channel`   | `"#chan +o nick"`                 | mode string (`+o`)   | mode param (`nick`)         |
+ * | `ctcp`   | sender             | `null`       | CTCP payload (no type prefix)    | CTCP type (UPPER)    | CTCP payload                |
+ * | `notice` | sender             | `#chan`/`null` | notice text                    | `'NOTICE'`           | notice text                 |
+ * | `topic`  | setter             | `#channel`   | new topic text                   | `'topic'`            | `''`                        |
+ * | `quit`   | quitter            | `null`       | quit reason                      | `'quit'`             | `''`                        |
+ * | `invite` | inviter            | `#channel`   | `"#chan nick!ident@host"`         | `'INVITE'`           | `''`                        |
+ * | `time`   | `''`               | `null`       | `''`                             | `''`                 | `''`                        |
  *
  * ### Notes
  * - `kick`: `ctx.nick` is the **kicked** user, not the kicker. The kicker's

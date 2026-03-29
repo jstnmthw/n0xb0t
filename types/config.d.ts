@@ -7,6 +7,24 @@
  */
 
 // ---------------------------------------------------------------------------
+// Channel entry
+// ---------------------------------------------------------------------------
+
+/**
+ * A channel entry in `irc.channels`. Either a plain name string or an object
+ * with a `key` for password-protected (`+k`) channels.
+ *
+ * @example
+ * "channels": ["#general", { "name": "#secret", "key": "pass123" }]
+ */
+export interface ChannelEntry {
+  /** Channel name (e.g. `"#secret"`). */
+  name: string;
+  /** Channel key required to join a `+k` channel. */
+  key?: string;
+}
+
+// ---------------------------------------------------------------------------
 // IRC connection
 // ---------------------------------------------------------------------------
 
@@ -37,8 +55,18 @@ export interface IrcConfig {
   username: string;
   /** IRC real name / GECOS field. */
   realname: string;
-  /** Channels to join automatically on connect. */
-  channels: string[];
+  /**
+   * Channels to join automatically on connect. Each entry is either a plain
+   * channel name (`"#general"`) or a `ChannelEntry` object with a key for
+   * password-protected channels.
+   */
+  channels: (string | ChannelEntry)[];
+  /**
+   * Verify the server's TLS certificate against the system CA store. Defaults to `true`.
+   * Set to `false` only for networks with self-signed certificates — disables certificate
+   * validation and exposes the connection to MITM attacks.
+   */
+  tls_verify?: boolean;
   /**
    * Path to a PEM-format TLS client certificate file.
    * Required when `services.sasl_mechanism` is `"EXTERNAL"` (CertFP).
@@ -209,6 +237,38 @@ export interface QueueConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Input flood limiter
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-event-type flood window configuration.
+ * When the event count within the window is exceeded, further events are blocked.
+ */
+export interface FloodWindowConfig {
+  /** Maximum events allowed within the window before blocking. */
+  count: number;
+  /** Window size in seconds. */
+  window: number;
+}
+
+/**
+ * Input flood limiter settings (`config/bot.json` → `flood`).
+ *
+ * `pub` covers channel commands (`pub` + `pubm`); `msg` covers private message
+ * commands (`msg` + `msgm`). If absent, flood limiting is disabled.
+ *
+ * @example
+ * {
+ *   "pub":  { "count": 5, "window": 10 },
+ *   "msg":  { "count": 3, "window": 10 }
+ * }
+ */
+export interface FloodConfig {
+  pub?: FloodWindowConfig;
+  msg?: FloodWindowConfig;
+}
+
+// ---------------------------------------------------------------------------
 // SOCKS5 proxy
 // ---------------------------------------------------------------------------
 
@@ -310,6 +370,7 @@ export interface BotConfig {
   pluginDir: string;
   logging: LoggingConfig;
   queue?: QueueConfig;
+  flood?: FloodConfig;
   proxy?: ProxyConfig;
   dcc?: DccConfig;
   /** QUIT message sent when the bot shuts down. */

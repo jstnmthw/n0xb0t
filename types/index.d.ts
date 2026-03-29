@@ -45,9 +45,11 @@ export type {
   Flag,
   HelpEntry,
   PluginAPI,
+  PluginBotConfig,
   PluginChannelSettings,
   PluginDB,
   PluginExports,
+  PluginIrcConfig,
   PluginPermissions,
   PluginServices,
   UserRecord,
@@ -57,7 +59,10 @@ export type {
 // Configuration
 export type {
   BotConfig,
+  ChannelEntry,
   DccConfig,
+  FloodConfig,
+  FloodWindowConfig,
   IdentityConfig,
   IrcConfig,
   LoggingConfig,
