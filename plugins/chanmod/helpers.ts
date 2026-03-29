@@ -111,13 +111,30 @@ export function buildBanMask(hostmask: string, banType: number): string | null {
   return `*!*${ident}@${host}`;
 }
 
-/** Parse a mode string like "+nt" into a Set of mode chars. */
+/**
+ * Modes that require parameters and must use dedicated chanset settings
+ * (channel_key for +k, channel_limit for +l) instead of the channel_modes string.
+ */
+export const PARAM_MODES = new Set(['k', 'l']);
+
+/**
+ * Parse a mode string like "+nt" into a Set of mode chars.
+ * Strips parameter modes (k, l) since they have dedicated settings.
+ */
 export function parseModesSet(modeStr: string): Set<string> {
   const set = new Set<string>();
   for (const ch of modeStr) {
-    if (ch !== '+' && ch !== '-') set.add(ch);
+    if (ch !== '+' && ch !== '-' && !PARAM_MODES.has(ch)) set.add(ch);
   }
   return set;
+}
+
+/** Returns true if a mode string contains parameter modes (k, l). */
+export function hasParamModes(modeStr: string): boolean {
+  for (const ch of modeStr) {
+    if (PARAM_MODES.has(ch)) return true;
+  }
+  return false;
 }
 
 /** Format a ban expiry for display. */

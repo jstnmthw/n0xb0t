@@ -5,8 +5,16 @@ import type { ChannelSettingDef, ChannelSettingEntry, ChannelSettingValue } from
 
 const NAMESPACE = 'chanset';
 
+/** Callback signature for channel setting change notifications. */
+export type ChannelSettingChangeCallback = (
+  channel: string,
+  key: string,
+  value: ChannelSettingValue,
+) => void;
+
 export class ChannelSettings {
   private defs: Map<string, ChannelSettingEntry> = new Map();
+  private changeListeners: Map<string, ChannelSettingChangeCallback[]> = new Map();
 
   constructor(private readonly db: BotDatabase) {}
 
@@ -63,6 +71,7 @@ export class ChannelSettings {
       return;
     }
     this.db.set(NAMESPACE, `${channel}:${key}`, String(value));
+    this.notifyChange(channel, key, value);
   }
 
   /**
@@ -70,6 +79,27 @@ export class ChannelSettings {
    */
   unset(channel: string, key: string): void {
     this.db.del(NAMESPACE, `${channel}:${key}`);
+    // Notify with the new effective value (the default)
+    const def = this.defs.get(key);
+    /* v8 ignore next -- '' fallback: unset is only called for registered keys */
+    this.notifyChange(channel, key, def ? def.default : '');
+  }
+
+  /**
+   * Register a callback that fires when any per-channel setting is set or unset.
+   * Keyed by pluginId for automatic cleanup on plugin unload.
+   */
+  onChange(pluginId: string, callback: ChannelSettingChangeCallback): void {
+    const list = this.changeListeners.get(pluginId) ?? [];
+    list.push(callback);
+    this.changeListeners.set(pluginId, list);
+  }
+
+  /**
+   * Remove all change listeners for a plugin.
+   */
+  offChange(pluginId: string): void {
+    this.changeListeners.delete(pluginId);
   }
 
   /**
@@ -103,6 +133,19 @@ export class ChannelSettings {
   // -------------------------------------------------------------------------
   // Internal
   // -------------------------------------------------------------------------
+
+  private notifyChange(channel: string, key: string, value: ChannelSettingValue): void {
+    for (const callbacks of this.changeListeners.values()) {
+      for (const cb of callbacks) {
+        try {
+          cb(channel, key, value);
+        } catch (err) {
+          /* v8 ignore next -- defensive: callback errors should not crash the settings system */
+          console.error(`[channel-settings] onChange callback error for key "${key}":`, err);
+        }
+      }
+    }
+  }
 
   private coerce(def: ChannelSettingEntry, stored: string): ChannelSettingValue {
     switch (def.type) {

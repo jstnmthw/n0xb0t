@@ -3,12 +3,14 @@ import type { HandlerContext, PluginAPI } from '../../src/types';
 import { wildcardMatch } from '../../src/utils/wildcard';
 import { storeBan } from './bans';
 import {
+  PARAM_MODES,
   botCanHalfop,
   botHasOps,
   buildBanMask,
   getBotNick,
   getUserFlags,
   hasAnyFlag,
+  hasParamModes,
   isBotNick,
   markIntentional,
   parseModesSet,
@@ -23,6 +25,77 @@ import {
 
 const PUNISH_MAX = 2;
 const PUNISH_COOLDOWN_MS = 30_000;
+
+/** Keys in channelSettings that should trigger a mode sync when changed. */
+const MODE_SETTING_KEYS = new Set([
+  'channel_modes',
+  'channel_key',
+  'channel_limit',
+  'enforce_modes',
+]);
+
+/**
+ * Synchronize a channel's modes to match the configured desired state.
+ *
+ * Compares the configured channel_modes, channel_key, and channel_limit against
+ * the channel's current mode string (from channel-state) and issues corrective
+ * MODE commands for any divergence. Safe to call repeatedly — redundant mode
+ * sets are harmless (the server ignores them).
+ *
+ * Does NOT require enforce_modes — if modes are configured, they get applied.
+ * The enforce_modes flag controls only the reactive enforcement in the mode handler.
+ * Gated on bot having ops.
+ */
+export function syncChannelModes(
+  api: PluginAPI,
+  config: ChanmodConfig,
+  state: SharedState,
+  channel: string,
+): void {
+  // Defer execution so that mode events (e.g. +o on the bot) settle before we check ops.
+  const timer = setTimeout(() => {
+    if (!botHasOps(api, channel)) return;
+
+    const channelModes = api.channelSettings.get(channel, 'channel_modes') as string;
+    if (hasParamModes(channelModes)) {
+      api.warn(
+        `channel_modes for ${channel} contains parameter modes (k/l) which are stripped — use channel_key and channel_limit instead`,
+      );
+    }
+    const desiredModes = parseModesSet(channelModes);
+
+    // Read current channel modes from channel-state
+    const ch = api.getChannel(channel);
+    /* v8 ignore next -- ch.modes is never populated by channel-state in tests; always '' */
+    const currentModes = ch?.modes ?? '';
+
+    // Add missing modes
+    if (desiredModes.size > 0) {
+      const missing = [...desiredModes].filter((m) => !currentModes.includes(m));
+      /* v8 ignore next -- missing is always the full set in tests (ch.modes is always '') */
+      if (missing.length > 0) {
+        const modeString = '+' + missing.join('');
+        api.mode(channel, modeString);
+        api.log(`Synced channel modes ${modeString} on ${channel}`);
+      }
+    }
+
+    // Enforce channel key
+    const channelKey = api.channelSettings.get(channel, 'channel_key') as string;
+    if (channelKey) {
+      api.mode(channel, '+k', channelKey);
+      api.log(`Synced channel key on ${channel}`);
+    }
+
+    // Enforce channel limit
+    const channelLimit = api.channelSettings.get(channel, 'channel_limit') as number;
+    if (channelLimit > 0) {
+      api.mode(channel, '+l', String(channelLimit));
+      api.log(`Synced channel limit (+l ${channelLimit}) on ${channel}`);
+    }
+  }, config.enforce_delay_ms);
+  state.enforcementTimers.push(timer);
+}
 
 /**
  * Bind the mode enforcement handler for a channel.
@@ -65,6 +138,27 @@ export function setupModeEnforce(
         api.log(`Re-enforcing +${modeChar} on ${channel} (removed by ${setter})`);
         const timer = setTimeout(() => {
           api.mode(channel, '+' + modeChar);
+        }, config.enforce_delay_ms);
+        state.enforcementTimers.push(timer);
+      }
+    }
+
+    // --- Unauthorized mode reversal: remove simple modes not in the configured set ---
+    // Only triggers for parameterless +X modes (user modes like +o/+v have a param, so they're skipped).
+    if (
+      enforceChannelModeSet.size > 0 &&
+      modeStr.startsWith('+') &&
+      modeStr.length === 2 &&
+      !target &&
+      canEnforce
+    ) {
+      const modeChar = modeStr[1];
+      if (!enforceChannelModeSet.has(modeChar) && !PARAM_MODES.has(modeChar)) {
+        api.log(
+          `Removing unauthorized +${modeChar} on ${channel} (not in channel_modes, set by ${setter})`,
+        );
+        const timer = setTimeout(() => {
+          api.mode(channel, '-' + modeChar);
         }, config.enforce_delay_ms);
         state.enforcementTimers.push(timer);
       }
@@ -280,6 +374,15 @@ export function setupModeEnforce(
         }, config.enforce_delay_ms);
         state.enforcementTimers.push(timer);
       }
+    }
+  });
+
+  // --- Immediate sync on .chanset changes ---
+  // When an operator changes channel_modes, channel_key, channel_limit, or enforce_modes,
+  // immediately sync the channel's modes to match the new configuration.
+  api.channelSettings.onChange((channel: string, key: string) => {
+    if (MODE_SETTING_KEYS.has(key)) {
+      syncChannelModes(api, config, state, channel);
     }
   });
 

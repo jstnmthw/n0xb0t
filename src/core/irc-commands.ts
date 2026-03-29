@@ -111,6 +111,11 @@ export class IRCCommands {
     this.sendMode(channel, '-h', nick);
   }
 
+  invite(channel: string, nick: string): void {
+    this.client.raw(`INVITE ${sanitize(nick)} ${sanitize(channel)}`);
+    this.logMod('invite', channel, nick, 'bot', null);
+  }
+
   topic(channel: string, text: string): void {
     const safe = sanitize(text);
     this.client.raw(`TOPIC ${sanitize(channel)} :${safe}`);

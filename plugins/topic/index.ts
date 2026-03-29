@@ -21,7 +21,7 @@ export function init(api: PluginAPI): void {
       key: 'protect_topic',
       type: 'flag',
       default: false,
-      description: 'Restore topic if changed by a user without +o flag',
+      description: 'Restore topic if changed; use !topic unlock (+o) to allow changes',
     },
     {
       key: 'topic_text',

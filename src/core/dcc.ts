@@ -127,10 +127,11 @@ const PROMPT = 'hexbot> ';
 // ASCII logo placeholder — replace BANNER_LOGO lines with your own art.
 // Each entry is one line of text sent to the user's DCC CHAT window.
 const BANNER_LOGO = [
-  ' _______               __           __   ',
-  '|   |   |.-----.--.--.|  |--.-----.|  |_ ',
-  '|       ||  -__|_   _||  _  |  _  ||   _|',
-  '|___|___||_____|__.__||_____|_____||____|',
+  ' _______               ______         __   ',
+  '|   |   |.-----.--.--.|   __ \\.-----.|  |_ ',
+  '|       ||  -__|_   _||   __ <|  _  ||   _|',
+  '|___|___||_____|__.__||______/|_____||____|',
+  'ʜᴇʟʟ ɪꜱ ᴇᴍᴘᴛʏ. ᴀʟʟ ᴛʜᴇ ᴅᴇᴍᴏɴꜱ ᴀʀᴇ ʜᴇʀᴇ..',
 ];
 
 export class DCCSession {
@@ -197,7 +198,7 @@ export class DCCSession {
     }
     this.writeLine('');
     this.writeLine(
-      `Hey ${this.handle}!  My name is ${botNick} and I am running HexBot v${version},`,
+      `Hey ${this.handle}! My name is ${botNick} and I am running HexBot v${version},`,
     );
     this.writeLine(`on ${platform}.`);
     this.writeLine('');
@@ -207,7 +208,7 @@ export class DCCSession {
     this.writeLine(`Your flags: +${this.flags || '-'}`);
     if (this.flags.includes('n')) {
       this.writeLine('');
-      this.writeLine('You are an owner of this bot.  Only +n users can see this!');
+      this.writeLine('You are an owner of this bot. Only +n users can see this.');
     }
     this.writeLine('');
     this.writeLine(`Console: ${onConsole}`);
@@ -216,10 +217,8 @@ export class DCCSession {
     this.writeLine('Use .help <command> for help on a specific command.');
     this.writeLine('Use .console to see who is currently on the console.');
     this.writeLine('');
-    this.writeLine('Have fun.');
-    this.writeLine('');
     this.writeLine("Commands start with '.' (like '.quit' or '.help')");
-    this.writeLine('Everything else goes out to the party line.');
+    this.writeLine('Everything else goes out to the console.');
     this.writeLine('');
     this.write(PROMPT);
 

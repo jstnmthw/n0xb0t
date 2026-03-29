@@ -163,6 +163,8 @@ export interface PluginAPI {
   ban(channel: string, mask: string): void;
   mode(channel: string, modes: string, ...params: string[]): void;
   topic(channel: string, text: string): void;
+  /** Invite a user to a channel. */
+  invite(channel: string, nick: string): void;
   /** Change the bot's own IRC nick (e.g. for nick recovery). */
   changeNick(nick: string): void;
 
@@ -434,6 +436,13 @@ export interface ChannelSettingEntry extends ChannelSettingDef {
   pluginId: string;
 }
 
+/** Callback signature for channel setting change notifications. */
+export type ChannelSettingChangeCallback = (
+  channel: string,
+  key: string,
+  value: ChannelSettingValue,
+) => void;
+
 /** Per-channel settings API provided to plugins. */
 export interface PluginChannelSettings {
   /** Declare per-channel setting definitions for this plugin. Call once in init(). */
@@ -444,6 +453,8 @@ export interface PluginChannelSettings {
   set(channel: string, key: string, value: ChannelSettingValue): void;
   /** True if an operator has explicitly set this value (not relying on default). */
   isSet(channel: string, key: string): boolean;
+  /** Register a callback that fires when any per-channel setting changes. Auto-cleaned on unload. */
+  onChange(callback: ChannelSettingChangeCallback): void;
 }
 
 // ---------------------------------------------------------------------------

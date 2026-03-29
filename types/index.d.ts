@@ -39,6 +39,7 @@ export type {
 
 // Plugin API
 export type {
+  ChannelSettingChangeCallback,
   ChannelSettingDef,
   ChannelSettingType,
   ChannelSettingValue,

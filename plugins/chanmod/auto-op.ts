@@ -1,6 +1,7 @@
 // chanmod — auto-op/halfop/voice on join, with optional NickServ verification
 import type { HandlerContext, PluginAPI } from '../../src/types';
-import { botCanHalfop, botHasOps, hasAnyFlag, isBotNick, parseModesSet } from './helpers';
+import { botCanHalfop, botHasOps, hasAnyFlag, isBotNick } from './helpers';
+import { syncChannelModes } from './mode-enforce';
 import type { ChanmodConfig, SharedState } from './state';
 
 export function setupAutoOp(api: PluginAPI, config: ChanmodConfig, state: SharedState): () => void {
@@ -8,24 +9,9 @@ export function setupAutoOp(api: PluginAPI, config: ChanmodConfig, state: Shared
     const { nick } = ctx;
     const channel = ctx.channel!;
 
-    // Bot joined — check if channel needs enforce_channel_modes applied
+    // Bot joined — sync channel modes (enforce_channel_modes, key, limit)
     if (isBotNick(api, nick)) {
-      const channelModes = api.channelSettings.get(channel, 'channel_modes') as string;
-      const enforceChannelModeSet = parseModesSet(channelModes);
-      if (enforceChannelModeSet.size > 0) {
-        const timer = setTimeout(() => {
-          if (!botHasOps(api, channel)) return;
-          const ch = api.getChannel(channel);
-          const missing = [...enforceChannelModeSet].filter((m) => !ch!.modes.includes(m));
-          /* v8 ignore next -- ch.modes is never populated by channel-state; missing is always the full set */
-          if (missing.length > 0) {
-            const modeString = '+' + missing.join('');
-            api.mode(channel, modeString);
-            api.log(`Set channel modes ${modeString} on ${channel} (channel_modes)`);
-          }
-        }, config.enforce_delay_ms);
-        state.enforcementTimers.push(timer);
-      }
+      syncChannelModes(api, config, state, channel);
       return;
     }
 

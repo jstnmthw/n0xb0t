@@ -1,5 +1,5 @@
 // HexBot — IRC admin commands
-// Registers .say, .join, .part, .status with the command handler.
+// Registers .say, .join, .part, .invite, .status with the command handler.
 import type { CommandHandler } from '../../command-handler';
 import { sanitize } from '../../utils/sanitize';
 
@@ -8,6 +8,7 @@ export interface AdminIRCClient {
   say(target: string, message: string): void;
   join(channel: string): void;
   part(channel: string, message?: string): void;
+  raw(line: string): void;
   connected: boolean;
   user?: { nick: string };
 }
@@ -118,6 +119,37 @@ export function registerIRCAdminCommands(
       }
       client.say(target, sanitize(message));
       ctx.reply(`Message sent to ${target}`);
+    },
+  );
+
+  handler.registerCommand(
+    'invite',
+    {
+      flags: '+o',
+      description: 'Invite a user to a channel',
+      usage: '.invite <#channel> <nick>',
+      category: 'irc',
+    },
+    (_args, ctx) => {
+      // Reject raw args containing control characters (\r, \n) before splitting
+      if (/[\r\n]/.test(_args)) {
+        ctx.reply('Invalid nick.');
+        return;
+      }
+      const parts = _args.trim().split(/\s+/);
+      const channel = parts[0];
+      const nick = parts[1];
+      if (!channel || !channel.startsWith('#') || !nick) {
+        ctx.reply('Usage: .invite <#channel> <nick>');
+        return;
+      }
+      /* v8 ignore next 3 -- unreachable: \r\n check above prevents whitespace-only nicks from reaching here */
+      if (!/^[^\s]+$/.test(nick)) {
+        ctx.reply('Invalid nick.');
+        return;
+      }
+      client.raw(`INVITE ${sanitize(nick)} ${sanitize(channel)}`);
+      ctx.reply(`Invited ${nick} to ${channel}`);
     },
   );
 

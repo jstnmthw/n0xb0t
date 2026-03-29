@@ -27,6 +27,7 @@ describe('irc-commands-admin', () => {
       say: vi.fn(),
       join: vi.fn(),
       part: vi.fn(),
+      raw: vi.fn(),
       connected: true,
       user: { nick: 'testbot' },
     };
@@ -192,6 +193,56 @@ describe('irc-commands-admin', () => {
       await handler.execute('.part notachannel', ctx);
 
       expect(mockClient.part).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('.invite', () => {
+    it('should send INVITE to the specified channel and nick', async () => {
+      const ctx = makeCtx();
+      await handler.execute('.invite #test Alice', ctx);
+
+      expect(mockClient.raw).toHaveBeenCalledWith('INVITE Alice #test');
+      expect(ctx.reply).toHaveBeenCalledWith('Invited Alice to #test');
+    });
+
+    it('should show usage when no args provided', async () => {
+      const ctx = makeCtx();
+      await handler.execute('.invite', ctx);
+
+      expect(mockClient.raw).not.toHaveBeenCalled();
+      expect(ctx.reply).toHaveBeenCalledWith('Usage: .invite <#channel> <nick>');
+    });
+
+    it('should show usage when only channel provided', async () => {
+      const ctx = makeCtx();
+      await handler.execute('.invite #test', ctx);
+
+      expect(mockClient.raw).not.toHaveBeenCalled();
+      expect(ctx.reply).toHaveBeenCalledWith('Usage: .invite <#channel> <nick>');
+    });
+
+    it('should show usage when channel does not start with #', async () => {
+      const ctx = makeCtx();
+      await handler.execute('.invite notachannel Alice', ctx);
+
+      expect(mockClient.raw).not.toHaveBeenCalled();
+      expect(ctx.reply).toHaveBeenCalledWith('Usage: .invite <#channel> <nick>');
+    });
+
+    it('should ignore extra arguments beyond channel and nick', async () => {
+      const ctx = makeCtx();
+      await handler.execute('.invite #test Alice extra stuff', ctx);
+
+      expect(mockClient.raw).toHaveBeenCalledWith('INVITE Alice #test');
+      expect(ctx.reply).toHaveBeenCalledWith('Invited Alice to #test');
+    });
+
+    it('should reject args containing control characters', async () => {
+      const ctx = makeCtx();
+      await handler.execute('.invite #test evil\rnick', ctx);
+
+      expect(mockClient.raw).not.toHaveBeenCalled();
+      expect(ctx.reply).toHaveBeenCalledWith('Invalid nick.');
     });
   });
 

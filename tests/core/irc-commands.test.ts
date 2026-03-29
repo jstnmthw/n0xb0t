@@ -159,6 +159,23 @@ describe('IRCCommands', () => {
     expect(client.sent[1].args).toEqual(['#test', '-v', 'Bob']);
   });
 
+  it('should send INVITE via raw command', () => {
+    irc.invite('#test', 'Alice');
+
+    const raw = client.sent.find((m) => m.type === 'raw');
+    expect(raw).toBeDefined();
+    expect(raw!.args[0]).toBe('INVITE Alice #test');
+  });
+
+  it('should log invite action to database', () => {
+    irc.invite('#test', 'Alice');
+
+    const log = db.getModLog({ action: 'invite' });
+    expect(log).toHaveLength(1);
+    expect(log[0].channel).toBe('#test');
+    expect(log[0].target).toBe('Alice');
+  });
+
   it('should set topic via raw command', () => {
     irc.topic('#test', 'New topic here');
 

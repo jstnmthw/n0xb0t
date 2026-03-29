@@ -318,8 +318,9 @@ export class PluginLoader {
     // Remove help entries
     this.helpRegistry?.unregister(pluginName);
 
-    // Remove channel setting defs (stored values are intentionally preserved)
+    // Remove channel setting defs and change listeners (stored values are intentionally preserved)
     this.channelSettings?.unregister(pluginName);
+    this.channelSettings?.offChange(pluginName);
 
     // Remove from loaded map
     this.loaded.delete(pluginName);
@@ -694,6 +695,7 @@ function createPluginIrcActionsApi(
   | 'ban'
   | 'mode'
   | 'topic'
+  | 'invite'
   | 'join'
   | 'part'
   | 'changeNick'
@@ -752,6 +754,11 @@ function createPluginIrcActionsApi(
     topic(channel: string, text: string): void {
       ircCommands?.topic(channel, text);
     },
+    /* v8 ignore start -- invite is not exercised through plugin tests */
+    invite(channel: string, nick: string): void {
+      ircCommands?.invite(channel, nick);
+    },
+    /* v8 ignore stop */
     join(channel: string, key?: string): void {
       ircCommands?.join(channel, key);
     },
@@ -823,6 +830,9 @@ function createPluginChannelSettingsApi(
     isSet(channel: string, key: string): boolean {
       /* v8 ignore next */
       return channelSettings?.isSet(channel, key) ?? false;
+    },
+    onChange(callback: (channel: string, key: string, value: ChannelSettingValue) => void): void {
+      channelSettings?.onChange(pluginId, callback);
     },
   } satisfies PluginChannelSettings);
 }

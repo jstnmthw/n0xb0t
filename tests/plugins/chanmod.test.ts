@@ -3642,3 +3642,297 @@ describe('chanmod plugin — stopnethack mode 2 deops when no ops snapshot exist
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Immediate mode enforcement on .chanset (syncChannelModes via onChange)
+// ---------------------------------------------------------------------------
+
+describe('chanmod plugin — immediate mode enforcement on .chanset', () => {
+  it('applies modes immediately when channel_modes is set via channelSettings', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: { enabled: true, config: { enforce_modes: true, enforce_delay_ms: 5 } },
+      });
+      giveBotOps(freshBot, '#test');
+      freshBot.client.clearMessages();
+
+      // Simulate .chanset #test channel_modes +nti
+      freshBot.channelSettings.set('#test', 'channel_modes', '+nti');
+      await tick(20);
+
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'raw' && m.message === 'MODE #test +nti'),
+      ).toBeDefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+
+  it('applies channel_key immediately when set via channelSettings', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: { enabled: true, config: { enforce_modes: true, enforce_delay_ms: 5 } },
+      });
+      giveBotOps(freshBot, '#test');
+      freshBot.client.clearMessages();
+
+      freshBot.channelSettings.set('#test', 'channel_key', 'secret123');
+      await tick(20);
+
+      expect(
+        freshBot.client.messages.find(
+          (m) => m.type === 'raw' && m.message?.includes('MODE #test +k secret123'),
+        ),
+      ).toBeDefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+
+  it('applies channel_limit immediately when set via channelSettings', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: { enabled: true, config: { enforce_modes: true, enforce_delay_ms: 5 } },
+      });
+      giveBotOps(freshBot, '#test');
+      freshBot.client.clearMessages();
+
+      freshBot.channelSettings.set('#test', 'channel_limit', 25);
+      await tick(20);
+
+      expect(
+        freshBot.client.messages.find(
+          (m) => m.type === 'raw' && m.message?.includes('MODE #test +l 25'),
+        ),
+      ).toBeDefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+
+  it('does NOT apply modes when bot has no ops', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: { enabled: true, config: { enforce_modes: true, enforce_delay_ms: 5 } },
+      });
+      // Bot is in channel but NOT opped
+      freshBot.client.simulateEvent('join', {
+        nick: 'hexbot',
+        ident: 'bot',
+        hostname: 'bot.host',
+        channel: '#test',
+      });
+      freshBot.client.clearMessages();
+
+      freshBot.channelSettings.set('#test', 'channel_modes', '+nti');
+      await tick(20);
+
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'raw' && m.message?.startsWith('MODE')),
+      ).toBeUndefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Unauthorized mode reversal (mode-enforce.ts — removes +X when X not in channel_modes)
+// ---------------------------------------------------------------------------
+
+describe('chanmod plugin — unauthorized mode reversal', () => {
+  it('removes +i when channel_modes is +nt (i is not configured)', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: { enforce_channel_modes: '+nt', enforce_modes: true, enforce_delay_ms: 5 },
+        },
+      });
+      giveBotOps(freshBot, '#test');
+      freshBot.client.clearMessages();
+
+      // User sets +i which is not in the configured +nt
+      simulateMode(freshBot, 'SomeOp', '#test', '+i', '');
+      await tick(20);
+
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'raw' && m.message === 'MODE #test -i'),
+      ).toBeDefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+
+  it('does NOT remove +t when channel_modes includes t', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: { enforce_channel_modes: '+nt', enforce_modes: true, enforce_delay_ms: 5 },
+        },
+      });
+      giveBotOps(freshBot, '#test');
+      freshBot.client.clearMessages();
+
+      // User sets +t which IS in the configured modes — should not be removed
+      simulateMode(freshBot, 'SomeOp', '#test', '+t', '');
+      await tick(20);
+
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'raw' && m.message === 'MODE #test -t'),
+      ).toBeUndefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+
+  it('does NOT remove modes with parameters (user modes like +o)', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: { enforce_channel_modes: '+nt', enforce_modes: true, enforce_delay_ms: 5 },
+        },
+      });
+      giveBotOps(freshBot, '#test');
+      addToChannel(freshBot, 'Alice', 'alice', 'alice.host', '#test');
+      freshBot.client.clearMessages();
+
+      // +o has a param (nick) — should NOT be treated as unauthorized channel mode
+      simulateMode(freshBot, 'SomeOp', '#test', '+o', 'Alice');
+      await tick(20);
+
+      // Should not see a -o for the unauthorized mode check
+      // (bitch mode is OFF by default, so no bitch deop either)
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'mode' && m.message === '-o'),
+      ).toBeUndefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+
+  it('does NOT remove unauthorized modes when enforce_modes is false', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: { enforce_channel_modes: '+nt', enforce_modes: false, enforce_delay_ms: 5 },
+        },
+      });
+      giveBotOps(freshBot, '#test');
+      freshBot.client.clearMessages();
+
+      simulateMode(freshBot, 'SomeOp', '#test', '+i', '');
+      await tick(20);
+
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'raw' && m.message === 'MODE #test -i'),
+      ).toBeUndefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+
+  it('does NOT remove unauthorized modes when setter is nodesynch nick', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: { enforce_channel_modes: '+nt', enforce_modes: true, enforce_delay_ms: 5 },
+        },
+      });
+      giveBotOps(freshBot, '#test');
+      freshBot.client.clearMessages();
+
+      // ChanServ is in nodesynch_nicks by default
+      simulateMode(freshBot, 'ChanServ', '#test', '+i', '');
+      await tick(20);
+
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'raw' && m.message === 'MODE #test -i'),
+      ).toBeUndefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+
+  it('does NOT remove unauthorized modes when channel_modes is empty', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: { enforce_channel_modes: '', enforce_modes: true, enforce_delay_ms: 5 },
+        },
+      });
+      giveBotOps(freshBot, '#test');
+      freshBot.client.clearMessages();
+
+      simulateMode(freshBot, 'SomeOp', '#test', '+i', '');
+      await tick(20);
+
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'raw' && m.message === 'MODE #test -i'),
+      ).toBeUndefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseModesSet strips k/l parameter modes (helpers.ts)
+// ---------------------------------------------------------------------------
+
+describe('chanmod plugin — parameter modes stripped from channel_modes', () => {
+  it('does NOT try to set +k without a key when k is in channel_modes string', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: { enforce_channel_modes: '+ntk', enforce_modes: true, enforce_delay_ms: 5 },
+        },
+      });
+      giveBotOps(freshBot, '#test');
+      freshBot.client.clearMessages();
+
+      // Remove +n — should re-enforce +n but NOT +k (k is stripped from the set)
+      simulateMode(freshBot, 'EvilOp', '#test', '-n', '');
+      await tick(20);
+
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'raw' && m.message === 'MODE #test +n'),
+      ).toBeDefined();
+      // k should NOT appear in any re-enforcement
+      expect(
+        freshBot.client.messages.find(
+          (m) => m.type === 'raw' && m.message?.includes('+k') && !m.message?.includes('+k '),
+        ),
+      ).toBeUndefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+});

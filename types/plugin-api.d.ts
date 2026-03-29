@@ -248,6 +248,13 @@ export interface ChannelSettingDef {
   description: string;
 }
 
+/** Callback signature for channel setting change notifications. */
+export type ChannelSettingChangeCallback = (
+  channel: string,
+  key: string,
+  value: ChannelSettingValue,
+) => void;
+
 /**
  * Per-channel settings API for plugins.
  *
@@ -277,6 +284,12 @@ export interface PluginChannelSettings {
    * Returns `true` if an operator has explicitly set this value (not relying on default).
    */
   isSet(channel: string, key: string): boolean;
+  /**
+   * Register a callback that fires whenever any per-channel setting is set or unset.
+   * Automatically cleaned up on plugin unload.
+   * @param callback Receives the channel, key, and new effective value.
+   */
+  onChange(callback: (channel: string, key: string, value: ChannelSettingValue) => void): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -481,6 +494,13 @@ export interface PluginAPI {
    * @param text New topic text.
    */
   topic(channel: string, text: string): void;
+
+  /**
+   * Invite a user to a channel (`INVITE <nick> <channel>`).
+   * @param channel Channel to invite the user to.
+   * @param nick    Nick to invite.
+   */
+  invite(channel: string, nick: string): void;
 
   /**
    * Change the bot's own IRC nick (e.g. for nick recovery).
