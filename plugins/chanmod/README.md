@@ -231,7 +231,7 @@ With `cycle_on_deop: true`, if the bot itself is deopped three times within 10 s
 
 ## Caveats
 
-- All commands silently fail (or reply with an error) if the bot does not currently hold ops in the channel.
+- All moderation commands (`!op`, `!deop`, `!halfop`, `!dehalfop`, `!voice`, `!devoice`, `!kick`, `!ban`, `!unban`, `!kickban`) reply with an error message if the bot does not currently hold ops in the channel. `!bans` has no ops requirement (it is read-only).
 - `!ban` by nick requires the target to be present in the channel so their hostmask can be resolved. For absent users, pass an explicit mask: `!ban *!*@1.2.3.4`.
 - `!unban <nick>` works if the target is still in the channel — chanmod derives candidate masks from their hostmask and removes whichever one matches a stored record (or tries all three if no record is found). For absent users, provide an explicit mask: `!unban *!*@1.2.3.4`. Use `!bans` to list stored masks.
 - Timed bans are only lifted in channels where the bot has ops at the time the timer fires. Bans in channels the bot has left, or where it has lost ops, will not be lifted until it regains them.
