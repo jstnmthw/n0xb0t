@@ -192,23 +192,22 @@ export function init(api: PluginAPI): void {
 
   // topic bind — enforce topic protection on unauthorized changes
   api.bind('topic', '-', '*', (ctx: HandlerContext) => {
-    /* v8 ignore next */
-    if (!ctx.channel) return;
+    const channel = ctx.channel!;
 
-    const protect = api.channelSettings.get(ctx.channel, 'protect_topic') as boolean;
+    const protect = api.channelSettings.get(channel, 'protect_topic') as boolean;
     if (!protect) return;
 
-    const enforced = api.channelSettings.get(ctx.channel, 'topic_text') as string;
+    const enforced = api.channelSettings.get(channel, 'topic_text') as string;
     if (!enforced) return; // no lock set
     if (ctx.text === enforced) return; // already correct — bot's own echo or a matching change
 
     const isAuthorized = api.permissions.checkFlags('o', ctx);
     if (isAuthorized) {
       // Authorized change — update the stored topic
-      api.channelSettings.set(ctx.channel, 'topic_text', ctx.text);
+      api.channelSettings.set(channel, 'topic_text', ctx.text);
     } else {
       // Restore the enforced topic
-      api.topic(ctx.channel, enforced);
+      api.topic(channel, enforced);
     }
   });
 }

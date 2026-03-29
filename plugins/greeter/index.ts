@@ -72,8 +72,10 @@ export function init(api: PluginAPI): void {
   api.bind('join', '-', '*', (ctx: HandlerContext) => {
     if (api.ircLower(ctx.nick) === api.ircLower(botNick)) return;
 
+    const channel = ctx.channel!;
+
     // Precedence: user custom greet > channel greet_msg setting > global default
-    let greeting = api.channelSettings.get(ctx.channel ?? '', 'greet_msg') as string;
+    let greeting = api.channelSettings.get(channel, 'greet_msg') as string;
 
     if (allowCustom) {
       const hostmask = `${ctx.nick}!${ctx.ident}@${ctx.hostname}`;
@@ -85,20 +87,19 @@ export function init(api: PluginAPI): void {
     }
 
     const text = greeting
-      .replace(/\{channel\}/g, ctx.channel ?? '')
+      .replace(/\{channel\}/g, channel)
       .replace(/\{nick\}/g, api.stripFormatting(ctx.nick));
 
-    if (delivery === 'channel_notice' && ctx.channel) {
-      api.notice(ctx.channel, text);
+    if (delivery === 'channel_notice') {
+      api.notice(channel, text);
     } else {
       ctx.reply(text); // 'say' — PRIVMSG to channel (default)
     }
 
     if (joinNotice) {
-      /* v8 ignore next 4 -- ctx.channel is always a string for join events; null branch of ?? unreachable */
       const noticeText = joinNotice
         .replace(/[\r\n]/g, '')
-        .replace(/\{channel\}/g, ctx.channel ?? '')
+        .replace(/\{channel\}/g, channel)
         .replace(/\{nick\}/g, api.stripFormatting(ctx.nick));
       api.notice(ctx.nick, noticeText);
     }

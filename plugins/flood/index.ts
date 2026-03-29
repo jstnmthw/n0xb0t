@@ -82,7 +82,7 @@ function botHasOps(channel: string): boolean {
   const botNick = api.ircLower(getBotNick());
   const botUser = ch.users.get(botNick);
   /* v8 ignore next -- botUser.modes is always string[] when bot is in channel; ?? false unreachable */
-  return botUser?.modes?.includes('o') ?? false;
+  return botUser?.modes.includes('o') ?? false;
 }
 
 /** Return true if the nick has any privileged flag (n/m/o) in the channel. */
@@ -205,36 +205,34 @@ async function applyAction(
 // ---------------------------------------------------------------------------
 
 async function handleMsgFlood(ctx: HandlerContext): Promise<void> {
-  /* v8 ignore next -- pubm events always have a channel (IRC protocol) */
-  if (!ctx.channel) return;
+  const channel = ctx.channel!;
   if (isBotNick(ctx.nick)) return;
-  if (isPrivileged(ctx.nick, ctx.channel, cfg.ignoreOps)) return;
-  const key = `${api.ircLower(ctx.nick)}@${api.ircLower(ctx.channel)}`;
+  if (isPrivileged(ctx.nick, channel, cfg.ignoreOps)) return;
+  const key = `${api.ircLower(ctx.nick)}@${api.ircLower(channel)}`;
   if (!isFloodTriggered(msgTracker, key, cfg.msgWindowMs, cfg.msgThreshold)) return;
   const action = recordOffence(cfg.actions, cfg.offenceWindowMs, key);
   await applyAction(
     cfg.banDurationMinutes,
     action,
-    ctx.channel,
+    channel,
     ctx.nick,
     `message flood (${cfg.msgThreshold}+ msgs/${cfg.msgWindowSecs}s)`,
   );
 }
 
 function handleJoinFlood(ctx: HandlerContext): void {
-  /* v8 ignore next -- join events always have a channel (IRC protocol) */
-  if (!ctx.channel) return;
+  const channel = ctx.channel!;
   if (isBotNick(ctx.nick)) return;
   const hostmask = `${ctx.nick}!${ctx.ident}@${ctx.hostname}`;
   const key = `join:${api.ircLower(hostmask)}`;
   if (!isFloodTriggered(joinTracker, key, cfg.joinWindowMs, cfg.joinThreshold)) return;
-  if (isPrivileged(ctx.nick, ctx.channel, cfg.ignoreOps)) return;
+  if (isPrivileged(ctx.nick, channel, cfg.ignoreOps)) return;
   const action = recordOffence(cfg.actions, cfg.offenceWindowMs, key);
   /* v8 ignore start -- .catch callback only fires on IRC error; never rejects in tests */
   applyAction(
     cfg.banDurationMinutes,
     action,
-    ctx.channel,
+    channel,
     ctx.nick,
     `join flood (${cfg.joinThreshold}+ joins/${cfg.joinWindowSecs}s)`,
   ).catch((err) => api.error('Join flood action error:', err));
@@ -248,8 +246,7 @@ function handleNickFlood(ctx: HandlerContext): void {
   const key = `nick:${api.ircLower(hostmask)}`;
   if (!isFloodTriggered(nickTracker, key, cfg.nickWindowMs, cfg.nickThreshold)) return;
   // Use the new nick (ctx.args) for channel lookup and punishment — the old nick is gone
-  /* v8 ignore next -- nick events always carry the new nick in ctx.args (IRC protocol) */
-  const newNick = ctx.args || ctx.nick;
+  const newNick = ctx.args;
   // Nick changes are global — punish in the first channel where we have ops
   for (const channel of api.botConfig.irc.channels) {
     if (isPrivileged(newNick, channel, cfg.ignoreOps)) return;

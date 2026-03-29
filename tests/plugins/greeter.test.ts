@@ -150,26 +150,6 @@ describe('greeter plugin', () => {
     expect(ctx.reply).not.toHaveBeenCalled();
   });
 
-  it('should use empty string fallback when channel is null', async () => {
-    await loadGreeter();
-
-    const ctx: HandlerContext = {
-      nick: 'someone',
-      ident: 'user',
-      hostname: 'host.com',
-      channel: null,
-      text: '',
-      command: 'JOIN',
-      args: '',
-      reply: vi.fn(),
-      replyPrivate: vi.fn(),
-    };
-    await dispatcher.dispatch('join', ctx);
-
-    // The template replaces {channel} with '' (the ?? '' fallback)
-    expect(ctx.reply).toHaveBeenCalledWith('Welcome to , someone!');
-  });
-
   // ---------------------------------------------------------------------------
   // meetsMinFlag helper
   // ---------------------------------------------------------------------------
@@ -406,30 +386,6 @@ describe('greeter plugin', () => {
 
       expect(ctx.reply).not.toHaveBeenCalled();
       expect(mockIrc.notice).toHaveBeenCalledWith('#test', 'Welcome to #test, alice!');
-    });
-
-    it('delivery: "channel_notice" falls back to ctx.reply when channel is null', async () => {
-      const mockIrc = { notice: vi.fn(), say: vi.fn() };
-      await loadGreeter(
-        { greeter: { enabled: true, config: { delivery: 'channel_notice' } } },
-        mockIrc,
-      );
-
-      const ctx: HandlerContext = {
-        nick: 'alice',
-        ident: 'user',
-        hostname: 'host.com',
-        channel: null,
-        text: '',
-        command: 'JOIN',
-        args: '',
-        reply: vi.fn(),
-        replyPrivate: vi.fn(),
-      };
-      await dispatcher.dispatch('join', ctx);
-
-      expect(ctx.reply).toHaveBeenCalledWith('Welcome to , alice!');
-      expect(mockIrc.notice).not.toHaveBeenCalled();
     });
   });
 

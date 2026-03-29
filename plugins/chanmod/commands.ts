@@ -102,8 +102,8 @@ export function setupCommands(
   // ---------------------------------------------------------------------------
 
   api.bind('pub', '+o', '!op', (ctx: HandlerContext) => {
-    if (!ctx.channel) return;
-    if (!botHasOps(api, ctx.channel)) {
+    const channel = ctx.channel!;
+    if (!botHasOps(api, channel)) {
       ctx.reply('I am not opped in this channel.');
       return;
     }
@@ -112,13 +112,13 @@ export function setupCommands(
       ctx.reply('Invalid nick.');
       return;
     }
-    api.op(ctx.channel, target);
-    api.log(`${ctx.nick} opped ${target} in ${ctx.channel}`);
+    api.op(channel, target);
+    api.log(`${ctx.nick} opped ${target} in ${channel}`);
   });
 
   api.bind('pub', '+o', '!deop', (ctx: HandlerContext) => {
-    if (!ctx.channel) return;
-    if (!botHasOps(api, ctx.channel)) {
+    const channel = ctx.channel!;
+    if (!botHasOps(api, channel)) {
       ctx.reply('I am not opped in this channel.');
       return;
     }
@@ -131,14 +131,14 @@ export function setupCommands(
       ctx.reply('I cannot deop myself.');
       return;
     }
-    markIntentional(state, api, ctx.channel, target);
-    api.deop(ctx.channel, target);
-    api.log(`${ctx.nick} deopped ${target} in ${ctx.channel}`);
+    markIntentional(state, api, channel, target);
+    api.deop(channel, target);
+    api.log(`${ctx.nick} deopped ${target} in ${channel}`);
   });
 
   api.bind('pub', '+o', '!voice', (ctx: HandlerContext) => {
-    if (!ctx.channel) return;
-    if (!botHasOps(api, ctx.channel)) {
+    const channel = ctx.channel!;
+    if (!botHasOps(api, channel)) {
       ctx.reply('I am not opped in this channel.');
       return;
     }
@@ -147,13 +147,13 @@ export function setupCommands(
       ctx.reply('Invalid nick.');
       return;
     }
-    api.voice(ctx.channel, target);
-    api.log(`${ctx.nick} voiced ${target} in ${ctx.channel}`);
+    api.voice(channel, target);
+    api.log(`${ctx.nick} voiced ${target} in ${channel}`);
   });
 
   api.bind('pub', '+o', '!devoice', (ctx: HandlerContext) => {
-    if (!ctx.channel) return;
-    if (!botHasOps(api, ctx.channel)) {
+    const channel = ctx.channel!;
+    if (!botHasOps(api, channel)) {
       ctx.reply('I am not opped in this channel.');
       return;
     }
@@ -162,14 +162,14 @@ export function setupCommands(
       ctx.reply('Invalid nick.');
       return;
     }
-    markIntentional(state, api, ctx.channel, target);
-    api.devoice(ctx.channel, target);
-    api.log(`${ctx.nick} devoiced ${target} in ${ctx.channel}`);
+    markIntentional(state, api, channel, target);
+    api.devoice(channel, target);
+    api.log(`${ctx.nick} devoiced ${target} in ${channel}`);
   });
 
   api.bind('pub', '+o', '!halfop', (ctx: HandlerContext) => {
-    if (!ctx.channel) return;
-    if (!botCanHalfop(api, ctx.channel)) {
+    const channel = ctx.channel!;
+    if (!botCanHalfop(api, channel)) {
       ctx.reply('I do not have +h or +o in this channel.');
       return;
     }
@@ -178,13 +178,13 @@ export function setupCommands(
       ctx.reply('Invalid nick.');
       return;
     }
-    api.halfop(ctx.channel, target);
-    api.log(`${ctx.nick} halfopped ${target} in ${ctx.channel}`);
+    api.halfop(channel, target);
+    api.log(`${ctx.nick} halfopped ${target} in ${channel}`);
   });
 
   api.bind('pub', '+o', '!dehalfop', (ctx: HandlerContext) => {
-    if (!ctx.channel) return;
-    if (!botCanHalfop(api, ctx.channel)) {
+    const channel = ctx.channel!;
+    if (!botCanHalfop(api, channel)) {
       ctx.reply('I do not have +h or +o in this channel.');
       return;
     }
@@ -197,9 +197,9 @@ export function setupCommands(
       ctx.reply('I cannot dehalfop myself.');
       return;
     }
-    markIntentional(state, api, ctx.channel, target);
-    api.dehalfop(ctx.channel, target);
-    api.log(`${ctx.nick} dehalfopped ${target} in ${ctx.channel}`);
+    markIntentional(state, api, channel, target);
+    api.dehalfop(channel, target);
+    api.log(`${ctx.nick} dehalfopped ${target} in ${channel}`);
   });
 
   // ---------------------------------------------------------------------------
@@ -207,8 +207,8 @@ export function setupCommands(
   // ---------------------------------------------------------------------------
 
   api.bind('pub', '+o', '!kick', (ctx: HandlerContext) => {
-    if (!ctx.channel) return;
-    if (!botHasOps(api, ctx.channel)) {
+    const channel = ctx.channel!;
+    if (!botHasOps(api, channel)) {
       ctx.reply('I am not opped in this channel.');
       return;
     }
@@ -223,8 +223,8 @@ export function setupCommands(
       return;
     }
     const reason = parts.slice(1).join(' ') || config.default_kick_reason;
-    api.kick(ctx.channel, target, reason);
-    api.log(`${ctx.nick} kicked ${target} from ${ctx.channel} (${reason})`);
+    api.kick(channel, target, reason);
+    api.log(`${ctx.nick} kicked ${target} from ${channel} (${reason})`);
   });
 
   // ---------------------------------------------------------------------------
@@ -232,8 +232,8 @@ export function setupCommands(
   // ---------------------------------------------------------------------------
 
   api.bind('pub', '+o', '!ban', (ctx: HandlerContext) => {
-    if (!ctx.channel) return;
-    if (!botHasOps(api, ctx.channel)) {
+    const channel = ctx.channel!;
+    if (!botHasOps(api, channel)) {
       ctx.reply('I am not opped in this channel.');
       return;
     }
@@ -249,10 +249,10 @@ export function setupCommands(
     const target = hasDuration ? parts.slice(0, -1).join(' ') : parts.join(' ');
 
     if (target.includes('!') || target.includes('@')) {
-      api.ban(ctx.channel, target);
-      storeBan(api, ctx.channel, target, ctx.nick, durationMinutes);
+      api.ban(channel, target);
+      storeBan(api, channel, target, ctx.nick, durationMinutes);
       const durStr = durationMinutes === 0 ? 'permanent' : `${durationMinutes}m`;
-      api.log(`${ctx.nick} banned ${target} in ${ctx.channel} (${durStr})`);
+      api.log(`${ctx.nick} banned ${target} in ${channel} (${durStr})`);
       return;
     }
 
@@ -265,7 +265,7 @@ export function setupCommands(
       return;
     }
 
-    const hostmask = api.getUserHostmask(ctx.channel, target);
+    const hostmask = api.getUserHostmask(channel, target);
     if (!hostmask) {
       ctx.reply(`Cannot resolve hostmask for ${target}. Provide an explicit mask: !ban *!*@host`);
       return;
@@ -277,15 +277,15 @@ export function setupCommands(
       return;
     }
 
-    api.ban(ctx.channel, banMask);
-    storeBan(api, ctx.channel, banMask, ctx.nick, durationMinutes);
+    api.ban(channel, banMask);
+    storeBan(api, channel, banMask, ctx.nick, durationMinutes);
     const durStr = durationMinutes === 0 ? 'permanent' : `${durationMinutes}m`;
-    api.log(`${ctx.nick} banned ${target} (${banMask}) in ${ctx.channel} (${durStr})`);
+    api.log(`${ctx.nick} banned ${target} (${banMask}) in ${channel} (${durStr})`);
   });
 
   api.bind('pub', '+o', '!unban', (ctx: HandlerContext) => {
-    if (!ctx.channel) return;
-    if (!botHasOps(api, ctx.channel)) {
+    const channel = ctx.channel!;
+    if (!botHasOps(api, channel)) {
       ctx.reply('I am not opped in this channel.');
       return;
     }
@@ -295,13 +295,13 @@ export function setupCommands(
       return;
     }
     if (arg.includes('!') || arg.includes('@')) {
-      api.mode(ctx.channel, '-b', arg);
-      removeBanRecord(api, ctx.channel, arg);
-      api.log(`${ctx.nick} unbanned ${arg} in ${ctx.channel}`);
+      api.mode(channel, '-b', arg);
+      removeBanRecord(api, channel, arg);
+      api.log(`${ctx.nick} unbanned ${arg} in ${channel}`);
       return;
     }
 
-    const hostmask = api.getUserHostmask(ctx.channel, arg);
+    const hostmask = api.getUserHostmask(channel, arg);
     if (!hostmask) {
       ctx.reply(
         `${arg} is not in the channel. Provide an explicit mask: !unban *!*@host — use !bans to list stored masks.`,
@@ -311,24 +311,24 @@ export function setupCommands(
     const candidates = [1, 2, 3]
       .map((t) => buildBanMask(hostmask, t))
       .filter((m): m is string => m !== null);
-    const records = getChannelBanRecords(api, ctx.channel);
+    const records = getChannelBanRecords(api, channel);
     const storedMasks = new Set(records.map((r) => r.mask));
     const match = candidates.find((m) => storedMasks.has(m));
     if (match) {
-      api.mode(ctx.channel, '-b', match);
-      removeBanRecord(api, ctx.channel, match);
-      api.log(`${ctx.nick} unbanned ${arg} (${match}) in ${ctx.channel}`);
+      api.mode(channel, '-b', match);
+      removeBanRecord(api, channel, match);
+      api.log(`${ctx.nick} unbanned ${arg} (${match}) in ${channel}`);
     } else {
       for (const m of candidates) {
-        api.mode(ctx.channel, '-b', m);
+        api.mode(channel, '-b', m);
       }
-      api.log(`${ctx.nick} unbanned ${arg} (no stored record) in ${ctx.channel}`);
+      api.log(`${ctx.nick} unbanned ${arg} (no stored record) in ${channel}`);
     }
   });
 
   api.bind('pub', '+o', '!kickban', (ctx: HandlerContext) => {
-    if (!ctx.channel) return;
-    if (!botHasOps(api, ctx.channel)) {
+    const channel = ctx.channel!;
+    if (!botHasOps(api, channel)) {
       ctx.reply('I am not opped in this channel.');
       return;
     }
@@ -345,7 +345,7 @@ export function setupCommands(
 
     const reason = parts.slice(1).join(' ') || config.default_kick_reason;
 
-    const hostmask = api.getUserHostmask(ctx.channel, target);
+    const hostmask = api.getUserHostmask(channel, target);
     if (!hostmask) {
       ctx.reply(`Cannot resolve hostmask for ${target}. Use !ban <mask> then !kick <nick>.`);
       return;
@@ -357,15 +357,15 @@ export function setupCommands(
       return;
     }
 
-    api.ban(ctx.channel, banMask);
-    storeBan(api, ctx.channel, banMask, ctx.nick, config.default_ban_duration);
-    api.kick(ctx.channel, target, reason);
-    api.log(`${ctx.nick} kickbanned ${target} (${banMask}) from ${ctx.channel} (${reason})`);
+    api.ban(channel, banMask);
+    storeBan(api, channel, banMask, ctx.nick, config.default_ban_duration);
+    api.kick(channel, target, reason);
+    api.log(`${ctx.nick} kickbanned ${target} (${banMask}) from ${channel} (${reason})`);
   });
 
   api.bind('pub', '+o', '!bans', (ctx: HandlerContext) => {
-    if (!ctx.channel) return;
-    const targetChannel = ctx.args.trim() || ctx.channel;
+    const channel = ctx.channel!;
+    const targetChannel = ctx.args.trim() || channel;
     const bans = getChannelBanRecords(api, targetChannel);
     if (bans.length === 0) {
       ctx.reply(`No tracked bans for ${targetChannel}.`);

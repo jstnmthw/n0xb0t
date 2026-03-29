@@ -9,9 +9,7 @@ export function setupInvite(
   _state: SharedState,
 ): () => void {
   api.bind('invite', '-', '*', (ctx: HandlerContext) => {
-    const channel = ctx.channel;
-    /* v8 ignore next */
-    if (!channel) return;
+    const channel = ctx.channel!;
 
     const enabled = api.channelSettings.get(channel, 'invite') as boolean;
     if (!enabled) return;
@@ -22,8 +20,7 @@ export function setupInvite(
     const user = api.permissions.findByHostmask(fullHostmask);
     if (!user) return;
 
-    /* v8 ignore next -- user.global is always a string from permissions; null branch of ?? unreachable */
-    const globalFlags = user.global ?? '';
+    const globalFlags = user.global;
     const channelFlags = user.channels[api.ircLower(channel)] ?? '';
     const flags = globalFlags + channelFlags;
 

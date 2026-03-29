@@ -15,7 +15,7 @@ export function botHasOps(api: PluginAPI, channel: string): boolean {
   if (!ch) return false;
   const botNick = api.ircLower(getBotNick(api));
   const botUser = ch.users.get(botNick);
-  return botUser?.modes?.includes('o') ?? false;
+  return botUser?.modes.includes('o') ?? false;
 }
 
 export function botCanHalfop(api: PluginAPI, channel: string): boolean {
@@ -76,9 +76,7 @@ export function hasAnyFlag(flags: string | null, required: Iterable<string>): bo
 export function getUserFlags(api: PluginAPI, channel: string, nick: string): string | null {
   const hostmask = api.getUserHostmask(channel, nick);
   if (!hostmask) return null;
-  /* v8 ignore next */
-  const fullHostmask = hostmask.includes('!') ? hostmask : `${nick}!${hostmask}`;
-  const user = api.permissions.findByHostmask(fullHostmask);
+  const user = api.permissions.findByHostmask(hostmask);
   if (!user) return null;
   const globalFlags = user.global;
   const channelFlags = user.channels[api.ircLower(channel)] ?? '';
