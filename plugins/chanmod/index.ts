@@ -81,7 +81,7 @@ export function init(api: PluginAPI): void {
       key: 'chanserv_op',
       type: 'flag',
       default: config.chanserv_op,
-      description: 'Request ops from ChanServ when the bot is deopped and ChanServ is present',
+      description: 'Request ops from ChanServ when the bot is deopped',
     },
     {
       key: 'invite',

@@ -14,6 +14,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`onModesReady(callback)`** on PluginAPI: register a callback for when channel modes are received from the server; auto-cleaned on plugin unload
 - **Proactive mode sync on join**: bot sends `MODE #channel` on join; `syncChannelModes()` chains to `channel:modesReady` instead of a timer, guaranteeing channel-state is populated before enforcement runs
 
+### Fixed
+
+- **`chanserv_op` broken on networks where ChanServ doesn't join channels** (e.g. Rizon): the OP request was gated on ChanServ being present in the channel user list; now always sends the request when `chanserv_op` is enabled, with a diagnostic log note when ChanServ isn't visible
+
 ### Changed
 
 - `syncChannelModes()` now removes unauthorized simple modes, keys, and limits (previously only added missing ones)
@@ -26,7 +30,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`chanmod` channel key and limit enforcement**: `channel_key` (string) and `channel_limit` (int) per-channel settings enforce `+k` and `+l` when `enforce_modes` is on — re-applied if removed or changed to a different value; `enforce_channel_key` and `enforce_channel_limit` global config defaults added alongside the existing `enforce_channel_modes`
 - `chanmod` README: new "Per-channel settings (.chanset)" section documents all `.chanset`-configurable keys with syntax examples; "Channel mode enforcement" subsection updated to cover all supported modes (`+imnpst`, `+k`, `+l`) in a unified table
 - **INVITE handling**: `invite` BindType added to dispatcher and irc-bridge; core registers a bind that auto-rejoins any configured channel on invite (key-aware, no permission check); `chanmod` `invite` per-channel setting (default off) accepts invites from users holding `o`/`m`/`n` flags by matching the sender's hostmask directly against the permissions DB — no shared channel required
-- **ChanServ OP recovery in `chanmod`**: new `chanserv_op` per-channel setting (default off); when enabled, sends `PRIVMSG ChanServ :OP <channel>` to recover ops when the bot is deopped and ChanServ is present in the channel; `chanserv_nick` (default `ChanServ`) and `chanserv_op_delay_ms` (default `1000`) global config fields added; also moves `revenge` into per-channel settings; `.chanset <channel>` with no key lists all registered settings
+- **ChanServ OP recovery in `chanmod`**: new `chanserv_op` per-channel setting (default off); when enabled, sends `PRIVMSG ChanServ :OP <channel>` to recover ops when the bot is deopped; `chanserv_nick` (default `ChanServ`) and `chanserv_op_delay_ms` (default `1000`) global config fields added; also moves `revenge` into per-channel settings; `.chanset <channel>` with no key lists all registered settings
 - **Per-user input flood limiter in dispatcher**: `pub`/`pubm` and `msg`/`msgm` events gated by a per-hostmask sliding-window counter; first blocked message per window sends a one-time NOTICE warning to the user; owners (`n` flag) bypass limits; configurable via optional `flood` block in `bot.json`; also adds `pnpm check` script (typecheck + lint + test) and wires `on`/`removeListener` into `DCCIRCClient` so the DCC manager mirrors incoming private notices/messages to open sessions
 
 ### Changed

@@ -3254,7 +3254,7 @@ describe('chanmod plugin — chanserv_op recovery', () => {
     }
   });
 
-  it('does NOT message ChanServ when it is not in the channel', async () => {
+  it('still messages ChanServ when it is not present in the channel', async () => {
     const freshBot = createMockBot({ botNick: 'hexbot' });
     try {
       giveBotOps(freshBot, '#test');
@@ -3269,8 +3269,10 @@ describe('chanmod plugin — chanserv_op recovery', () => {
       simulateMode(freshBot, 'SomeOp', '#test', '-o', 'hexbot');
       await tick(50);
       expect(
-        freshBot.client.messages.find((m) => m.type === 'say' && m.target === 'ChanServ'),
-      ).toBeUndefined();
+        freshBot.client.messages.find(
+          (m) => m.type === 'say' && m.target === 'ChanServ' && m.message === 'OP #test',
+        ),
+      ).toBeDefined();
     } finally {
       freshBot.cleanup();
     }
