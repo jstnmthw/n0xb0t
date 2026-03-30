@@ -15,7 +15,10 @@ import { registerDispatcherCommands } from './core/commands/dispatcher-commands'
 import { registerIRCAdminCommands } from './core/commands/irc-commands-admin';
 import { registerPermissionCommands } from './core/commands/permission-commands';
 import { registerPluginCommands } from './core/commands/plugin-commands';
-import { registerConnectionEvents } from './core/connection-lifecycle';
+import {
+  type ConnectionLifecycleHandle,
+  registerConnectionEvents,
+} from './core/connection-lifecycle';
 import { DCCManager } from './core/dcc';
 import { HelpRegistry } from './core/help-registry';
 import { IRCCommands } from './core/irc-commands';
@@ -58,6 +61,7 @@ export class Bot {
 
   private bridge: IRCBridge | null = null;
   private _dccManager: DCCManager | null = null;
+  private _lifecycleHandle: ConnectionLifecycleHandle | null = null;
   private botLogger: Logger;
   private _casemapping: Casemapping = 'rfc1459';
 
@@ -203,10 +207,8 @@ export class Bot {
 
     this.botLogger.info('Starting...');
 
-    // 5. Connect to IRC
-    await this.connect();
-
-    // 6. Create and attach bridge + core modules
+    // 5. Attach bridge + core modules (register event listeners before connect
+    //    so handlers are ready when the server starts sending events)
     this.bridge = new IRCBridge({
       client: this.client,
       dispatcher: this.dispatcher,
@@ -219,10 +221,7 @@ export class Bot {
     this.channelState.attach();
     this.services.attach();
 
-    // 7. Authenticate with NickServ (non-SASL fallback)
-    this.services.identify();
-
-    // 8a. Start DCC CHAT / botnet (if configured)
+    // 6. Start DCC CHAT / botnet (if configured)
     if (this.config.dcc?.enabled) {
       this._dccManager = new DCCManager({
         client: this.client,
@@ -239,8 +238,15 @@ export class Bot {
       this.botLogger.info('DCC CHAT enabled');
     }
 
-    // 8. Load plugins
+    // 7. Load plugins (sets up binds before connection so all handlers are
+    //    ready when the server starts sending JOIN/MODE/etc responses)
     await this.pluginLoader.loadAll();
+
+    // 8. Connect to IRC (all handlers are registered — safe to receive events)
+    await this.connect();
+
+    // 9. Authenticate with NickServ (non-SASL fallback, needs active connection)
+    this.services.identify();
 
     this.startTime = Date.now();
     const elapsed = this.startTime - this.bootStart;
@@ -250,6 +256,11 @@ export class Bot {
   /** Graceful shutdown. */
   async shutdown(): Promise<void> {
     this.botLogger.info('Shutting down...');
+
+    if (this._lifecycleHandle) {
+      this._lifecycleHandle.stopPresenceCheck();
+      this._lifecycleHandle = null;
+    }
 
     if (this._dccManager) {
       this._dccManager.detach('Bot shutting down.');
@@ -286,7 +297,7 @@ export class Bot {
     const options = this.buildClientOptions();
     this.botLogger.info(`Connecting to ${this.config.irc.host}:${this.config.irc.port}...`);
     return new Promise<void>((resolve, reject) => {
-      registerConnectionEvents(
+      this._lifecycleHandle = registerConnectionEvents(
         {
           client: this.client,
           config: this.config,
@@ -302,6 +313,7 @@ export class Bot {
           },
           messageQueue: this.messageQueue,
           dispatcher: this.dispatcher,
+          channelState: this.channelState,
           logger: this.botLogger,
         },
         resolve,

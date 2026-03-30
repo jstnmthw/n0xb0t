@@ -419,6 +419,8 @@ export interface BotConfig {
   proxy?: ProxyConfig;
   dcc?: DccConfig;
   quit_message?: string;
+  /** Interval in ms for the periodic channel presence check (rejoin missing channels). Default: 30000. Set to 0 to disable. */
+  channel_rejoin_interval_ms?: number;
 }
 
 // ---------------------------------------------------------------------------

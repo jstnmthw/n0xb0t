@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Persistent channel rejoin**: the bot now periodically checks (every 30s by default) that it is in all configured channels and attempts to rejoin any it is missing from — handles kick+ban, channel full, invite-only, bad key, and any other join failure that previously left the bot permanently locked out until reconnect. Configurable via `channel_rejoin_interval_ms` in `bot.json` (set to `0` to disable)
 - **Enforce unauthorized `+k`/`+l` removal**: when `enforce_modes` is on and no `channel_key`/`channel_limit` is configured, the bot now removes unauthorized `+k` and `+l` mode changes — both reactively (real-time) and proactively (on join via RPL_CHANNELMODEIS)
 - **Channel mode tracking in channel-state**: `ChannelInfo` now tracks the channel mode string, key, and limit; updated from `MODE` events and the `channel info` (RPL_CHANNELMODEIS) reply; new `channel:modesReady` event on the internal event bus
 - **`requestChannelModes(channel)`** on PluginAPI: sends `MODE #channel` to query the server; response populates channel-state and fires `channel:modesReady`

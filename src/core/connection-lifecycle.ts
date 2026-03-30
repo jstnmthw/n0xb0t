@@ -18,6 +18,11 @@ export interface LifecycleIRCClient {
   network: { supports(feature: string): string | boolean };
 }
 
+/** Minimal channel-state interface for presence checks (avoids importing the full class). */
+export interface PresenceCheckChannelState {
+  getChannel(name: string): unknown | undefined;
+}
+
 export interface ConnectionLifecycleDeps {
   client: LifecycleIRCClient;
   config: BotConfig;
@@ -30,6 +35,14 @@ export interface ConnectionLifecycleDeps {
     bind(type: BindType, flags: string, mask: string, handler: BindHandler, owner?: string): void;
   };
   logger: Logger;
+  /** Channel state tracker — required for periodic presence check. */
+  channelState?: PresenceCheckChannelState;
+}
+
+/** Handle returned by registerConnectionEvents for cleanup on shutdown. */
+export interface ConnectionLifecycleHandle {
+  /** Stop the periodic channel presence check timer. */
+  stopPresenceCheck(): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -40,15 +53,18 @@ export interface ConnectionLifecycleDeps {
  * Register all IRC connection lifecycle event listeners on the client.
  * The returned promise resolves when the bot successfully registers,
  * and rejects on a socket error before registration.
+ *
+ * Returns a handle with a `stopPresenceCheck()` method for cleanup on shutdown.
  */
 export function registerConnectionEvents(
   deps: ConnectionLifecycleDeps,
   resolve: () => void,
   reject: (err: Error) => void,
-): void {
+): ConnectionLifecycleHandle {
   const { client, config, logger } = deps;
   const cfg = config.irc;
   let registered = false;
+  let presenceTimer: ReturnType<typeof setInterval> | null = null;
 
   client.on('registered', () => {
     registered = true;
@@ -63,6 +79,11 @@ export function registerConnectionEvents(
     registerJoinErrorListeners(client, logger);
     bindCoreInviteHandler(deps);
     joinConfiguredChannels(deps);
+
+    // (Re)start the periodic channel presence check.
+    // Cleared and restarted on each registration so reconnects get a fresh timer.
+    if (presenceTimer !== null) clearInterval(presenceTimer);
+    presenceTimer = startChannelPresenceCheck(deps);
 
     resolve();
   });
@@ -85,6 +106,15 @@ export function registerConnectionEvents(
       reject(error);
     }
   });
+
+  return {
+    stopPresenceCheck() {
+      if (presenceTimer !== null) {
+        clearInterval(presenceTimer);
+        presenceTimer = null;
+      }
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -168,4 +198,37 @@ function joinConfiguredChannels(deps: ConnectionLifecycleDeps): void {
     deps.client.join(ch.name, ch.key);
     deps.logger.info(`Joining ${ch.name}`);
   }
+}
+
+/**
+ * Periodically check that the bot is in all configured channels.
+ * If missing from any, attempt to rejoin (with key if configured).
+ *
+ * Returns the interval handle, or null if disabled (interval = 0 or no channelState).
+ */
+function startChannelPresenceCheck(
+  deps: ConnectionLifecycleDeps,
+): ReturnType<typeof setInterval> | null {
+  const intervalMs = deps.config.channel_rejoin_interval_ms ?? 30_000;
+  if (intervalMs <= 0 || !deps.channelState) return null;
+
+  const { client, configuredChannels, channelState, logger } = deps;
+  const warnedChannels = new Set<string>();
+
+  return setInterval(() => {
+    for (const ch of configuredChannels) {
+      const inChannel = channelState.getChannel(ch.name) !== undefined;
+      if (inChannel) {
+        warnedChannels.delete(ch.name);
+        continue;
+      }
+      if (!warnedChannels.has(ch.name)) {
+        logger.warn(`Not in configured channel ${ch.name} — attempting rejoin`);
+        warnedChannels.add(ch.name);
+      } else {
+        logger.debug(`Retrying join for ${ch.name}`);
+      }
+      client.join(ch.name, ch.key);
+    }
+  }, intervalMs);
 }
