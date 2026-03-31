@@ -76,20 +76,20 @@ The following strings in `src/core/dcc.ts` referred to the console incorrectly a
 
 ---
 
-### Phase 2: Type system additions
+### Phase 2: Type system additions ✅ Complete
 
 **Goal:** Extend the type system to support bot linking without breaking existing compilation.
 
-- [ ] `src/types.ts` — add `BotlinkConfig` interface (see Config Changes section)
-- [ ] `src/types.ts` — add `botlink?: BotlinkConfig` to `BotConfig`
-- [ ] `src/event-bus.ts` — add new event types: `botlink:connected`, `botlink:disconnected`, `botlink:syncComplete`, `user:removed`, `user:flagsChanged`, `user:hostmaskAdded`, `user:hostmaskRemoved`
-- [ ] `src/command-handler.ts` — add `'botlink'` to `CommandContext.source` union type
-- [ ] `config/bot.example.json` — add disabled `botlink` block (see Config Changes section)
-- [ ] **Verify**: `pnpm exec tsc --noEmit` passes clean.
+- [x] `src/types.ts` — add `BotlinkConfig` interface (see Config Changes section)
+- [x] `src/types.ts` — add `botlink?: BotlinkConfig` to `BotConfig`
+- [x] `src/event-bus.ts` — add new event types: `botlink:connected`, `botlink:disconnected`, `botlink:syncComplete`, `user:removed`, `user:flagsChanged`, `user:hostmaskAdded`, `user:hostmaskRemoved`
+- [x] `src/command-handler.ts` — add `'botlink'` to `CommandContext.source` union type
+- [x] `config/bot.example.json` — add disabled `botlink` block (see Config Changes section)
+- [x] **Verify**: `pnpm exec tsc --noEmit` passes clean.
 
 ---
 
-### Phase 3: `src/core/botlink.ts` — protocol layer
+### Phase 3: `src/core/botlink.ts` — protocol layer ✅ Complete
 
 **Goal:** Frame serialization, connection management, handshake — no state sync yet.
 
@@ -97,74 +97,74 @@ Three classes in one file, following the `DCCManager`/`DCCSession` pattern from 
 
 **`BotLinkProtocol`** (internal socket wrapper)
 
-- [ ] Wraps `net.Socket` with `readline` line framing
-- [ ] Serializes/deserializes JSON frames; enforces 64 KB max frame size
-- [ ] Strips `\r`/`\n` from all string fields via `sanitize()`
-- [ ] Emits typed events: `message`, `close`, `error`
+- [x] Wraps `net.Socket` with `readline` line framing
+- [x] Serializes/deserializes JSON frames; enforces 64 KB max frame size
+- [x] Strips `\r`/`\n` from all string fields via `sanitize()`
+- [x] Emits typed events: `message`, `close`, `error`
 
 **`BotLinkHub`** (hub role)
 
-- [ ] `listen(port, host)` — starts `net.Server`
-- [ ] Accepts connections, runs four-step handshake (see Protocol Design)
-- [ ] Authenticates password (`sha256:<hex>` format; never logged)
-- [ ] Maintains `Map<string, BotLinkLeafConnection>` keyed by botname
-- [ ] On auth success: broadcasts `BOTJOIN`, initiates state sync (Phase 4)
-- [ ] Fan-out: frame from one leaf forwarded to all other leaves
-- [ ] `close()` — tears down all leaf connections and server
-- [ ] Rate-limit `CMD` frames: max 10/sec per leaf
-- [ ] Rate-limit `PARTY_CHAT` frames: max 5/sec per leaf (anti-flood)
-- [ ] `PROTECT_*` frames are NOT rate-limited — they must arrive instantly during takeover response
+- [x] `listen(port, host)` — starts `net.Server`
+- [x] Accepts connections, runs four-step handshake (see Protocol Design)
+- [x] Authenticates password (`sha256:<hex>` format; never logged)
+- [x] Maintains `Map<string, BotLinkLeafConnection>` keyed by botname
+- [x] On auth success: broadcasts `BOTJOIN`, initiates state sync (Phase 4)
+- [x] Fan-out: frame from one leaf forwarded to all other leaves
+- [x] `close()` — tears down all leaf connections and server
+- [x] Rate-limit `CMD` frames: max 10/sec per leaf
+- [x] Rate-limit `PARTY_CHAT` frames: max 5/sec per leaf (anti-flood)
+- [x] `PROTECT_*` frames are NOT rate-limited — they must arrive instantly during takeover response
 
 **`BotLinkLeaf`** (leaf role)
 
-- [ ] Connects to hub; sends `HELLO`, waits for `WELCOME` or `ERROR`
-- [ ] Reconnect with exponential backoff (`reconnect_delay_ms` → `reconnect_max_delay_ms`)
-- [ ] Exposes `sendCommand(cmd, args, fromHandle, channel)` for command relay (Phase 5)
-- [ ] Exposes `sendProtect(type, channel, nick)` for protection requests (Phase 8)
-- [ ] `disconnect()` — closes socket, cancels reconnect timer
+- [x] Connects to hub; sends `HELLO`, waits for `WELCOME` or `ERROR`
+- [x] Reconnect with exponential backoff (`reconnect_delay_ms` → `reconnect_max_delay_ms`)
+- [x] Exposes `sendCommand(cmd, args, fromHandle, channel)` for command relay (Phase 5)
+- [x] Exposes `sendProtect(type, channel, nick)` for protection requests (Phase 8)
+- [x] `disconnect()` — closes socket, cancels reconnect timer
 
-- [ ] **Verify**: `tests/core/botlink.test.ts` — handshake success, auth failure, frame size limit, reconnect logic.
+- [x] **Verify**: `tests/core/botlink.test.ts` — handshake success, auth failure, frame size limit, reconnect logic.
 
 ---
 
-### Phase 4: `src/core/botlink-sync.ts` — state synchronization
+### Phase 4: `src/core/botlink-sync.ts` — state synchronization ✅ Complete
 
 **Goal:** Channel state and permission sync frames.
 
-- [ ] `src/core/channel-state.ts` — add `injectEvent(event: string, data: Record<string, unknown>): void` public method (or typed `processJoin`, `processPart`, `processMode` methods)
-- [ ] `src/core/botlink-sync.ts` — `ChannelStateSyncer.buildSyncFrames(channelState)` → `LinkFrame[]`
-- [ ] `src/core/botlink-sync.ts` — `ChannelStateSyncer.applyFrame(frame, channelState)`
-- [ ] `src/core/botlink-sync.ts` — `PermissionSyncer.buildSyncFrames(permissions)` → `LinkFrame[]`
-- [ ] `src/core/botlink-sync.ts` — `PermissionSyncer.applyFrame(frame, permissions)`
-- [ ] `src/core/botlink.ts` — implement `SYNC_START`/`SYNC_END` sequence in hub and leaf
-- [ ] **Verify**: sync serialization roundtrip tests; permission sync tests; `pnpm exec tsc --noEmit` clean.
+- [x] `src/core/channel-state.ts` — add `injectEvent(event: string, data: Record<string, unknown>): void` public method (or typed `processJoin`, `processPart`, `processMode` methods)
+- [x] `src/core/botlink-sync.ts` — `ChannelStateSyncer.buildSyncFrames(channelState)` → `LinkFrame[]`
+- [x] `src/core/botlink-sync.ts` — `ChannelStateSyncer.applyFrame(frame, channelState)`
+- [x] `src/core/botlink-sync.ts` — `PermissionSyncer.buildSyncFrames(permissions)` → `LinkFrame[]`
+- [x] `src/core/botlink-sync.ts` — `PermissionSyncer.applyFrame(frame, permissions)`
+- [x] `src/core/botlink.ts` — implement `SYNC_START`/`SYNC_END` sequence in hub and leaf
+- [x] **Verify**: sync serialization roundtrip tests; permission sync tests; `pnpm exec tsc --noEmit` clean.
 
 ---
 
-### Phase 5: Command relay
+### Phase 5: Command relay ✅ Complete
 
 **Goal:** Permission commands on a leaf are relayed to the hub for execution.
 
-- [ ] `src/command-handler.ts` — add `relayToHub?: boolean` to `CommandOptions`
-- [ ] `src/core/commands/permission-commands.ts` — mark `.adduser`, `.deluser`, `.flags`, `.addhost`, `.delhost` with `relayToHub: true`
-- [ ] `src/core/botlink.ts` — leaf: intercepts `relayToHub` commands, sends `CMD` frame, waits for `CMD_RESULT`, displays output to originating session
-- [ ] `src/core/botlink.ts` — hub: receives `CMD` frame, validates `fromHandle` flags against hub's own `Permissions`, executes via `CommandHandler`, sends `CMD_RESULT` back to originating leaf
-- [ ] `src/core/permissions.ts` — emit `BotEventBus` events (`user:added`, `user:removed`, `user:flagsChanged`, etc.) after each mutation
-- [ ] `src/core/botlink.ts` — hub: subscribe to `user:*` events on eventBus; broadcast `ADDUSER`/`DELUSER`/`SETFLAGS` frames to all leaves after successful permission command
-- [ ] **Verify**: leaf `.adduser` test — user appears in both hub and leaf `.users` after relay; permission denial test.
+- [x] `src/command-handler.ts` — add `relayToHub?: boolean` to `CommandOptions`
+- [x] `src/core/commands/permission-commands.ts` — mark `.adduser`, `.deluser`, `.flags`, `.addhost`, `.delhost` with `relayToHub: true`
+- [x] `src/core/botlink.ts` — leaf: intercepts `relayToHub` commands, sends `CMD` frame, waits for `CMD_RESULT`, displays output to originating session
+- [x] `src/core/botlink.ts` — hub: receives `CMD` frame, validates `fromHandle` flags against hub's own `Permissions`, executes via `CommandHandler`, sends `CMD_RESULT` back to originating leaf
+- [x] `src/core/permissions.ts` — emit `BotEventBus` events (`user:added`, `user:removed`, `user:flagsChanged`, etc.) after each mutation
+- [x] `src/core/botlink.ts` — hub: subscribe to `user:*` events on eventBus; broadcast `ADDUSER`/`DELUSER`/`SETFLAGS` frames to all leaves after successful permission command
+- [x] **Verify**: leaf `.adduser` test — user appears in both hub and leaf `.users` after relay; permission denial test.
 
 ---
 
-### Phase 6: Bot.ts wiring and botlink commands
+### Phase 6: Bot.ts wiring and botlink commands ✅ Complete
 
 **Goal:** Wire botlink into the bot lifecycle; register admin commands.
 
-- [ ] `src/bot.ts` — `private _botLinkHub: BotLinkHub | null = null` and `private _botLinkLeaf: BotLinkLeaf | null = null` with public getters
-- [ ] `src/bot.ts` — in `start()`, after `dccManager` setup: instantiate and start the appropriate role based on `config.botlink.role`
-- [ ] `src/bot.ts` — in `shutdown()`: call `hub.close()` or `leaf.disconnect()` before bridge detach
-- [ ] `src/core/commands/botlink-commands.ts` — implement commands (see table below)
-- [ ] `src/bot.ts` — register `BotlinkCommands` alongside other command modules
-- [ ] **Verify**: bot starts with `botlink.enabled: false` — no behaviour change. Hub starts and accepts leaf connection in integration smoke test.
+- [x] `src/bot.ts` — `private _botLinkHub: BotLinkHub | null = null` and `private _botLinkLeaf: BotLinkLeaf | null = null` with public getters
+- [x] `src/bot.ts` — in `start()`, after `dccManager` setup: instantiate and start the appropriate role based on `config.botlink.role`
+- [x] `src/bot.ts` — in `shutdown()`: call `hub.close()` or `leaf.disconnect()` before bridge detach
+- [x] `src/core/commands/botlink-commands.ts` — implement commands (see table below)
+- [x] `src/bot.ts` — register `BotlinkCommands` alongside other command modules
+- [x] **Verify**: bot starts with `botlink.enabled: false` — no behaviour change. Hub starts and accepts leaf connection in integration smoke test.
 
 **Botlink commands:**
 
@@ -183,93 +183,93 @@ Three classes in one file, following the `DCCManager`/`DCCSession` pattern from 
 
 ---
 
-### Phase 7: Party line chat across bots
+### Phase 7: Party line chat across bots ✅ Complete
 
 **Goal:** DCC users connected to different bots can chat with each other in real time, just like Eggdrop's party line. This extends the existing local `broadcast()` in `dcc.ts` across the botnet.
 
 Currently, `DCCManager.broadcast()` sends chat to local sessions only. This phase makes the party line span all linked bots.
 
-- [ ] `src/core/dcc.ts` — when a DCC user sends non-command text, in addition to calling `broadcast()` locally, emit a `PARTY_CHAT` frame to the botlink layer
-- [ ] `src/core/dcc.ts` — on DCC session connect/disconnect, emit `PARTY_JOIN` / `PARTY_PART` frames
-- [ ] `src/core/botlink.ts` — hub: receive `PARTY_CHAT` from a leaf, fan out to all other leaves, and deliver to the hub's own `DCCManager.announce()` with `<handle@botname>` prefix
-- [ ] `src/core/botlink.ts` — leaf: receive `PARTY_CHAT` from hub, deliver to local `DCCManager.announce()` with `<handle@botname>` prefix
-- [ ] `src/core/botlink.ts` — hub: receive `PARTY_JOIN`/`PARTY_PART`, fan out to all leaves. Each bot's `DCCManager` shows `*** handle has joined the console (on botname)` / `*** handle has left the console (on botname)`
-- [ ] `.whom` command — sends `PARTY_WHOM` request to hub, hub collects local sessions + all leaf sessions, returns `PARTY_WHOM_REPLY`. Output shows all users across all bots:
+- [x] `src/core/dcc.ts` — when a DCC user sends non-command text, in addition to calling `broadcast()` locally, emit a `PARTY_CHAT` frame to the botlink layer
+- [x] `src/core/dcc.ts` — on DCC session connect/disconnect, emit `PARTY_JOIN` / `PARTY_PART` frames
+- [x] `src/core/botlink.ts` — hub: receive `PARTY_CHAT` from a leaf, fan out to all other leaves, and deliver to the hub's own `DCCManager.announce()` with `<handle@botname>` prefix
+- [x] `src/core/botlink.ts` — leaf: receive `PARTY_CHAT` from hub, deliver to local `DCCManager.announce()` with `<handle@botname>` prefix
+- [x] `src/core/botlink.ts` — hub: receive `PARTY_JOIN`/`PARTY_PART`, fan out to all leaves. Each bot's `DCCManager` shows `*** handle has joined the console (on botname)` / `*** handle has left the console (on botname)`
+- [x] `.whom` command — sends `PARTY_WHOM` request to hub, hub collects local sessions + all leaf sessions, returns `PARTY_WHOM_REPLY`. Output shows all users across all bots:
   ```
   Console (5 users across 3 bots):
     admin (admin!myident@my.vps.com) on hub — connected 2h ago
     oper1 (oper1!oper@shell.net) on leaf1 — connected 45m ago
     oper2 (oper2!op@host.com) on leaf2 — connected 12m ago (idle 5m)
   ```
-- [ ] Remote chat display format: `<handle@botname> message` (distinguishes local `<handle>` from remote `<handle@botname>`, matching Eggdrop convention)
-- [ ] Rate-limit `PARTY_CHAT` at 5/sec per leaf to prevent flood
-- [ ] **Verification**: Two mock bots linked — DCC user on bot A sends chat, DCC user on bot B receives it with `@botA` prefix. `.whom` shows users on both bots. Join/part notifications propagate.
+- [x] Remote chat display format: `<handle@botname> message` (distinguishes local `<handle>` from remote `<handle@botname>`, matching Eggdrop convention)
+- [x] Rate-limit `PARTY_CHAT` at 5/sec per leaf to prevent flood
+- [x] **Verification**: Two mock bots linked — DCC user on bot A sends chat, DCC user on bot B receives it with `@botA` prefix. `.whom` shows users on both bots. Join/part notifications propagate.
 
 ---
 
-### Phase 8: Channel-specific sharing
+### Phase 8: Channel-specific sharing ✅ Complete
 
 **Goal:** Per-channel ban, exempt, and invite list synchronization across linked bots. When one bot bans a hostile user, all bots sharing that channel learn about it and can enforce it. This is Eggdrop's `+shared` channel flag equivalent.
 
-- [ ] Add `shared` per-channel setting (default: `false`) — controls whether this channel's ban/exempt/invite lists are synced to linked bots
-- [ ] `src/core/botlink-sync.ts` — `BanListSyncer`:
+- [x] Add `shared` per-channel setting (default: `false`) — controls whether this channel's ban/exempt/invite lists are synced to linked bots
+- [x] `src/core/botlink-sync.ts` — `BanListSyncer`:
   - On link establish: send `CHAN_BAN_SYNC` and `CHAN_EXEMPT_SYNC` for each shared channel (full list)
   - On local ban add (chanmod sets a ban): send `CHAN_BAN_ADD` with `enforce: true` if `enforcebans` is set on the channel
   - On local ban remove: send `CHAN_BAN_DEL`
   - On receive `CHAN_BAN_ADD`: store in local ban tracking; if `enforce: true` and bot has ops, kick matching users (same logic as chanmod's enforcebans)
   - On receive `CHAN_BAN_DEL`: remove from local ban tracking; optionally unban if the ban is currently set on IRC
   - Same pattern for exempts
-- [ ] Hub fans out `CHAN_BAN_*` / `CHAN_EXEMPT_*` frames to all other leaves (not back to sender)
-- [ ] Only sync for channels that have `shared: true` on both the sending and receiving bot — a leaf that doesn't operate in `#channel` ignores ban frames for it
-- [ ] `src/core/botlink.ts` — on `SYNC_START`/`SYNC_END`, include `CHAN_BAN_SYNC` frames for shared channels
-- [ ] **Verification**: Bot A sets ban in shared channel → Bot B receives `CHAN_BAN_ADD` → if Bot B has ops and `enforcebans`, kicks matching users. Bans for non-shared channels are NOT synced.
+- [x] Hub fans out `CHAN_BAN_*` / `CHAN_EXEMPT_*` frames to all other leaves (not back to sender)
+- [x] Only sync for channels that have `shared: true` on both the sending and receiving bot — a leaf that doesn't operate in `#channel` ignores ban frames for it
+- [x] `src/core/botlink.ts` — on `SYNC_START`/`SYNC_END`, include `CHAN_BAN_SYNC` frames for shared channels
+- [x] **Verification**: Bot A sets ban in shared channel → Bot B receives `CHAN_BAN_ADD` → if Bot B has ops and `enforcebans`, kicks matching users. Bans for non-shared channels are NOT synced.
 
 ---
 
-### Phase 9: Session relay (`.relay`)
+### Phase 9: Session relay (`.relay`) ✅ Complete
 
 **Goal:** Transfer a DCC session to a remote bot so the operator interacts with it directly, as if they DCC'd into that bot. Eggdrop's `.relay <botname>` equivalent.
 
 The session is proxied, not transferred — the TCP connection stays with the origin bot. Input is forwarded to the target bot via `RELAY_INPUT` frames, and output comes back via `RELAY_OUTPUT` frames. The user sees a seamless experience.
 
-- [ ] `.relay <botname>` command — initiates relay:
+- [x] `.relay <botname>` command — initiates relay:
   1. Origin bot sends `RELAY_REQUEST` to hub, which forwards to target bot
   2. Target bot creates a virtual DCC session (no TCP socket, just a logical session) and responds with `RELAY_ACCEPT`
   3. Origin bot switches the DCC session into relay mode: all user input is forwarded as `RELAY_INPUT` frames instead of being processed locally
   4. Target bot feeds `RELAY_INPUT` into its virtual session's command handler; output is sent back as `RELAY_OUTPUT`
   5. Origin bot writes `RELAY_OUTPUT` lines to the user's DCC session
-- [ ] `.relay end` or `.quit` from the relayed session terminates the relay:
+- [x] `.relay end` or `.quit` from the relayed session terminates the relay:
   - `RELAY_END` frame sent, both sides clean up
   - User returns to their original bot's console
-- [ ] Virtual session on the target bot:
+- [x] Virtual session on the target bot:
   - Appears in the target bot's `.console` / `.whom` output (marked as `(relayed from botname)`)
   - Has the same handle and flags as on the origin bot (looked up from synced permissions)
   - Can run any command the user has flags for on the target bot
-- [ ] Display on relay start: `*** Relaying to <botname>. Type .relay end to return.`
-- [ ] Display on relay end: `*** Relay ended. Back on <originbot>.`
-- [ ] Relay broken if the botlink drops — user sees `*** Relay to <botname> lost (link disconnected).` and returns to local console
-- [ ] **Verification**: User DCC'd to bot A runs `.relay leaf1` → sees leaf1's prompt → runs `.status` (sees leaf1's status) → `.relay end` → back on bot A. Relay survives normal chat. Relay cleanly ends if link drops.
+- [x] Display on relay start: `*** Relaying to <botname>. Type .relay end to return.`
+- [x] Display on relay end: `*** Relay ended. Back on <originbot>.`
+- [x] Relay broken if the botlink drops — user sees `*** Relay to <botname> lost (link disconnected).` and returns to local console
+- [x] **Verification**: User DCC'd to bot A runs `.relay leaf1` → sees leaf1's prompt → runs `.status` (sees leaf1's status) → `.relay end` → back on bot A. Relay survives normal chat. Relay cleanly ends if link drops.
 
 ---
 
-### Phase 10: Protection request frames
+### Phase 10: Protection request frames ✅ Complete
 
 **Goal:** Add the `PROTECT_*` frame types that the `BotnetBackend` (from channel-takeover-protection plan) needs to ask peer bots to act on its behalf during takeover recovery.
 
 These frames are the bridge between the bot-linking transport layer and the `ProtectionBackend` interface. They must be implemented before the channel-takeover-protection plan's `BotnetBackend` can be built.
 
-- [ ] `src/core/botlink.ts` — handle incoming `PROTECT_*` frames on both hub and leaf:
+- [x] `src/core/botlink.ts` — handle incoming `PROTECT_*` frames on both hub and leaf:
   - `PROTECT_OP`: if this bot has ops in the channel, `api.op(channel, nick)`. Respond `PROTECT_ACK` with success/failure.
   - `PROTECT_DEOP`: if this bot has ops, `api.deop(channel, nick)`. Respond `PROTECT_ACK`.
   - `PROTECT_UNBAN`: if this bot has ops, find bans matching the requesting bot's hostmask and remove them. Respond `PROTECT_ACK`.
   - `PROTECT_INVITE`: if this bot is in the channel, `api.invite(channel, nick)`. Respond `PROTECT_ACK`.
   - `PROTECT_KICK`: if this bot has ops, `api.kick(channel, nick, reason)`. Respond `PROTECT_ACK`.
-- [ ] Hub routing: `PROTECT_*` frames are broadcast to all leaves in the target channel (any opped peer can respond). First `PROTECT_ACK` with `success: true` is considered authoritative; subsequent ACKs for the same ref are ignored by the requester.
-- [ ] `PROTECT_*` frames bypass the `CMD` rate limit — they must arrive instantly during takeover response
-- [ ] Guard: a bot only acts on `PROTECT_*` if it has ops in the named channel AND the requesting bot is a known linked bot (not a spoofed frame)
-- [ ] Guard: `PROTECT_OP` only ops nicks that are recognized users in the permissions DB (prevents a compromised leaf from opping arbitrary nicks)
-- [ ] `src/core/botlink.ts` — expose `sendProtect(type, channel, nick): Promise<boolean>` for the `BotnetBackend` to call. Returns true if any peer ACKed with success within a timeout (default 5s).
-- [ ] **Verification**: Bot A has ops, Bot B doesn't. Bot B sends `PROTECT_OP #chan BotB` → Hub forwards to Bot A → Bot A ops Bot B → `PROTECT_ACK` success. Test with no opped peers → timeout → ACK failure. Test that PROTECT_OP refuses to op nicks not in the permissions DB.
+- [x] Hub routing: `PROTECT_*` frames are broadcast to all leaves in the target channel (any opped peer can respond). First `PROTECT_ACK` with `success: true` is considered authoritative; subsequent ACKs for the same ref are ignored by the requester.
+- [x] `PROTECT_*` frames bypass the `CMD` rate limit — they must arrive instantly during takeover response
+- [x] Guard: a bot only acts on `PROTECT_*` if it has ops in the named channel AND the requesting bot is a known linked bot (not a spoofed frame)
+- [x] Guard: `PROTECT_OP` only ops nicks that are recognized users in the permissions DB (prevents a compromised leaf from opping arbitrary nicks)
+- [x] `src/core/botlink.ts` — expose `sendProtect(type, channel, nick): Promise<boolean>` for the `BotnetBackend` to call. Returns true if any peer ACKed with success within a timeout (default 5s).
+- [x] **Verification**: Bot A has ops, Bot B doesn't. Bot B sends `PROTECT_OP #chan BotB` → Hub forwards to Bot A → Bot A ops Bot B → `PROTECT_ACK` success. Test with no opped peers → timeout → ACK failure. Test that PROTECT_OP refuses to op nicks not in the permissions DB.
 
 ---
 
@@ -303,12 +303,12 @@ These frames are the bridge between the bot-linking transport layer and the `Pro
 
 ---
 
-### Phase 13: Documentation
+### Phase 13: Documentation ✅ Complete
 
-- [ ] `docs/BOTLINK.md` — user-facing guide: prerequisites, hub setup, leaf setup, firewall rules, admin commands, troubleshooting
-- [ ] `DESIGN.md` — add section 2.16 (Bot Linking): topology, protocol, sync strategy, command relay rules
-- [ ] `docs/plans/dcc-botnet.md` — update decision #3 to link here
-- [ ] `CHANGELOG.md` — entry under `### Added`
+- [x] `docs/BOTLINK.md` — user-facing guide: prerequisites, hub setup, leaf setup, firewall rules, admin commands, troubleshooting
+- [x] `DESIGN.md` — add section 2.16 (Bot Linking): topology, protocol, sync strategy, command relay rules
+- [x] `docs/plans/dcc-botnet.md` — update decision #3 to link here
+- [x] `CHANGELOG.md` — entry under `### Added`
 
 ---
 
@@ -517,55 +517,55 @@ None. Bot link sessions and topology are ephemeral (in-memory only). Permission 
 
 **Unit tests** (`tests/core/botlink.test.ts`):
 
-- [ ] `BotLinkProtocol`: frame serialization roundtrip, oversized frame rejected, `\r\n` stripped from string fields
-- [ ] Handshake: valid password accepted, wrong password → `ERROR` frame, handshake timeout fires at 30s
-- [ ] Hub fan-out: frame from leaf1 forwarded to leaf2 and leaf3 but not back to leaf1
-- [ ] Leaf reconnect: failure triggers retry after delay; succeeds on second attempt
-- [ ] `ChannelStateSyncer`: `buildSyncFrames` → `applyFrame` roundtrip without data loss
-- [ ] `PermissionSyncer`: `buildSyncFrames` → `applyFrame` roundtrip; `SETFLAGS` overrides; `DELUSER` removes user
+- [x] `BotLinkProtocol`: frame serialization roundtrip, oversized frame rejected, `\r\n` stripped from string fields
+- [x] Handshake: valid password accepted, wrong password → `ERROR` frame, handshake timeout fires at 30s
+- [x] Hub fan-out: frame from leaf1 forwarded to leaf2 and leaf3 but not back to leaf1
+- [x] Leaf reconnect: failure triggers retry after delay; succeeds on second attempt
+- [x] `ChannelStateSyncer`: `buildSyncFrames` → `applyFrame` roundtrip without data loss
+- [x] `PermissionSyncer`: `buildSyncFrames` → `applyFrame` roundtrip; `SETFLAGS` overrides; `DELUSER` removes user
 
 **Party line tests** (`tests/core/botlink-party.test.ts`):
 
-- [ ] `PARTY_CHAT` from leaf1 arrives at leaf2 and hub's local DCC sessions with `<handle@leaf1>` prefix
-- [ ] `PARTY_CHAT` does NOT echo back to the sending leaf
-- [ ] `PARTY_JOIN` / `PARTY_PART` notifications propagate to all bots
-- [ ] `.whom` returns users from all linked bots, including idle times
-- [ ] `PARTY_CHAT` rate limit: 6th message within 1 second is dropped with warning
+- [x] `PARTY_CHAT` from leaf1 arrives at leaf2 and hub's local DCC sessions with `<handle@leaf1>` prefix
+- [x] `PARTY_CHAT` does NOT echo back to the sending leaf
+- [x] `PARTY_JOIN` / `PARTY_PART` notifications propagate to all bots
+- [x] `.whom` returns users from all linked bots, including idle times
+- [x] `PARTY_CHAT` rate limit: 6th message within 1 second is dropped with warning
 
 **Channel sharing tests** (`tests/core/botlink-sharing.test.ts`):
 
-- [ ] `CHAN_BAN_ADD` with `enforce: true` → receiving bot kicks matching users if it has ops
-- [ ] `CHAN_BAN_ADD` for non-shared channel is ignored
-- [ ] `CHAN_BAN_SYNC` on link establish includes all bans for shared channels only
-- [ ] `CHAN_BAN_DEL` removes ban from local tracking
-- [ ] `CHAN_EXEMPT_*` frames follow the same pattern
+- [x] `CHAN_BAN_ADD` with `enforce: true` → receiving bot kicks matching users if it has ops
+- [x] `CHAN_BAN_ADD` for non-shared channel is ignored
+- [x] `CHAN_BAN_SYNC` on link establish includes all bans for shared channels only
+- [x] `CHAN_BAN_DEL` removes ban from local tracking
+- [x] `CHAN_EXEMPT_*` frames follow the same pattern
 
 **Session relay tests** (`tests/core/botlink-relay.test.ts`):
 
-- [ ] `.relay botname` → `RELAY_REQUEST` → `RELAY_ACCEPT` → session enters relay mode
-- [ ] Input in relay mode forwarded as `RELAY_INPUT`, output returned as `RELAY_OUTPUT`
-- [ ] `.relay end` sends `RELAY_END`, user returns to local console
-- [ ] Link drop during relay → clean teardown, user back on local console with error message
-- [ ] Relayed session appears in target bot's `.whom` output as `(relayed from botname)`
-- [ ] Relayed session can execute commands gated on the user's flags
+- [x] `.relay botname` → `RELAY_REQUEST` → `RELAY_ACCEPT` → session enters relay mode
+- [x] Input in relay mode forwarded as `RELAY_INPUT`, output returned as `RELAY_OUTPUT`
+- [x] `.relay end` sends `RELAY_END`, user returns to local console
+- [x] Link drop during relay → clean teardown, user back on local console with error message
+- [x] Relayed session appears in target bot's `.whom` output as `(relayed from botname)`
+- [x] Relayed session can execute commands gated on the user's flags
 
 **Protection frame tests** (`tests/core/botlink-protect.test.ts`):
 
-- [ ] `PROTECT_OP` from leaf → hub forwards to all peers in channel → opped peer acts, sends `PROTECT_ACK`
-- [ ] `PROTECT_OP` refused for nicks not in permissions DB
-- [ ] `PROTECT_*` not rate-limited (unlike CMD frames)
-- [ ] No opped peers → `sendProtect()` times out → returns false
-- [ ] `PROTECT_UNBAN` → peer finds and removes matching bans
+- [x] `PROTECT_OP` from leaf → hub forwards to all peers in channel → opped peer acts, sends `PROTECT_ACK`
+- [x] `PROTECT_OP` refused for nicks not in permissions DB
+- [x] `PROTECT_*` not rate-limited (unlike CMD frames)
+- [x] No opped peers → `sendProtect()` times out → returns false
+- [x] `PROTECT_UNBAN` → peer finds and removes matching bans
 
 **Integration tests** (mock TCP sockets):
 
-- [ ] Full handshake between mock hub and mock leaf over loopback
-- [ ] Sync complete: hub sends `CHAN` + `ADDUSER` + `CHAN_BAN_SYNC` frames, leaf's `ChannelState`, `Permissions`, and ban lists populated
-- [ ] Command relay: leaf sends `.adduser`, hub executes, both have the user after `CMD_RESULT`
-- [ ] Party line end-to-end: user on bot A chats → user on bot B sees it → `.whom` shows both
-- [ ] Session relay end-to-end: `.relay leaf1` → run command on leaf1 → `.relay end` → back on hub
-- [ ] Protection end-to-end: bot B deopped → sends `PROTECT_OP` → bot A (has ops) re-ops bot B → `PROTECT_ACK`
-- [ ] Idle timeout: no ping → link dropped after `link_timeout_ms`
+- [x] Full handshake between mock hub and mock leaf over loopback
+- [x] Sync complete: hub sends `CHAN` + `ADDUSER` + `CHAN_BAN_SYNC` frames, leaf's `ChannelState`, `Permissions`, and ban lists populated
+- [x] Command relay: leaf sends `.adduser`, hub executes, both have the user after `CMD_RESULT`
+- [x] Party line end-to-end: user on bot A chats → user on bot B sees it → `.whom` shows both
+- [x] Session relay end-to-end: `.relay leaf1` → run command on leaf1 → `.relay end` → back on hub
+- [x] Protection end-to-end: bot B deopped → sends `PROTECT_OP` → bot A (has ops) re-ops bot B → `PROTECT_ACK`
+- [x] Idle timeout: no ping → link dropped after `link_timeout_ms`
 
 ---
 
