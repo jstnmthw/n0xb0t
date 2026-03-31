@@ -2,7 +2,7 @@
 
 ## Summary
 
-Extend chanmod's protection capabilities to defend against coordinated channel takeover attempts by hostile users who gain ops. The current protections (chanserv_op, rejoin_on_kick, bitch mode, protect_ops) handle isolated incidents but fail against a determined attacker who simultaneously deops the bot, bans it, mass-deops friendly ops, and locks down the channel. This plan adds a ProtectionBackend abstraction with ChanServ implementations for both Atheme and Anope, takeover threat detection with automatic escalation, and recovery procedures that leverage the bot's ChanServ access level — the key being that the bot _must_ have ChanServ flags (not just IRC ops) to use ChanServ services.
+Extend chanmod's protection capabilities to defend against coordinated channel takeover attempts by hostile users who gain ops. The current protections (chanserv*op, rejoin_on_kick, bitch mode, protect_ops) handle isolated incidents but fail against a determined attacker who simultaneously deops the bot, bans it, mass-deops friendly ops, and locks down the channel. This plan adds a ProtectionBackend abstraction with ChanServ implementations for both Atheme and Anope, takeover threat detection with automatic escalation, and recovery procedures that leverage the bot's ChanServ access level — the key being that the bot \_must* have ChanServ flags (not just IRC ops) to use ChanServ services.
 
 ## Services Landscape
 
@@ -96,7 +96,7 @@ Supports three parallel access systems: XOP (named tiers), numerical levels, and
 | **Q** (newserv)     | QuakeNet              | `Q`        | Flags (+n/+m/+o/+v)                      | `RECOVER` = DEOPALL + UNBANALL + CLEARCHAN (requires +m)                                           | ~5,700       |
 | **ChanServ**        | DALnet                | `ChanServ` | Role hierarchy (Founder>Manager>SOP>AOP) | MKICK (nuclear: empties channel, sets +i +l1, bans `*!*@*`), MDEOP, OPGUARD                        | ~6,500       |
 | **ChanServ** (srvx) | GameSurge             | `ChanServ` | Numeric 1-500                            | UP/UPALL (self-op), standard OP/BAN                                                                | ~1,800       |
-| **Botnet**          | Non-services networks | N/A        | HexBot flags                             | Coordinated multi-bot response (planned in bot-linking.md)                                         | N/A          |
+| **Botnet**          | Non-services networks | N/A        | HexBot flags                             | Coordinated multi-bot response (see bot-linking.md)                                                | N/A          |
 
 **Key architectural differences that future backends must account for:**
 
@@ -104,6 +104,31 @@ Supports three parallel access systems: XOP (named tiers), numerical levels, and
 - QuakeNet Q: flag-based like Atheme but different flags, auth-based (`AUTH user pass`), no NickServ
 - DALnet: password-based channel identification (`IDENTIFY #chan pass`), unique MKICK nuclear option
 - GameSurge: no nick registration, AuthServ-based, `UP/DOWN` self-op model
+- **Botnet (HexBot bot-linking)**: No external services dependency. Peer bots in the same channel can re-op the local bot directly via IRC MODE. Recovery is fast (no services round-trip) but limited — peer bots can only act if they have ops themselves. If all linked bots are deopped simultaneously, botnet recovery fails and must escalate to ChanServ. See "Escalation Chain" design decision below.
+
+### Botnet as a ProtectionBackend
+
+The bot-linking feature (see `docs/plans/bot-linking.md`) provides the transport layer for a `BotnetBackend` that implements the same `ProtectionBackend` interface as Atheme/Anope. This is how Eggdrop has historically defended channels on networks without services (EFNet, IRCnet) — and it remains valuable even on networks WITH services because peer re-op is faster than a ChanServ round-trip.
+
+**How a BotnetBackend maps to the interface:**
+
+| Method                       | Botnet implementation                                                                        |
+| ---------------------------- | -------------------------------------------------------------------------------------------- |
+| `requestOp(channel, nick)`   | Ask a linked bot that has ops in the channel to `MODE #chan +o nick`                         |
+| `requestDeop(channel, nick)` | Ask an opped peer to `MODE #chan -o nick`                                                    |
+| `requestUnban(channel)`      | Ask an opped peer to find and remove bans matching the local bot                             |
+| `requestInvite(channel)`     | Ask a peer to `INVITE #chan localbot`                                                        |
+| `requestRecover(channel)`    | Coordinated: peer deops hostiles, unbans local bot, re-ops local bot (multi-step like Anope) |
+| `canOp/canDeop/etc.`         | True if any linked bot has ops in the channel                                                |
+| `verifyAccess(channel)`      | Check linked bots' op status in the channel via synced channel state                         |
+
+**Key differences from ChanServ backends:**
+
+- **No persistent authority** — peer bots only work if at least one has ops. A coordinated mass-deop defeats all peers simultaneously.
+- **No AKICK equivalent** — botnet can kick+ban but the ban isn't enforced by services. The attacker can rejoin unless a ChanServ AKICK is also applied.
+- **Faster response** — no services message queue or processing delay. Peer op is a single MODE command.
+- **No RECOVER** — there is no nuclear "reset the channel" option. Recovery is always incremental (deop hostiles one by one, re-op friendlies).
+- **Distributed resilience** — even if the local bot is kicked+banned, a peer bot can unban and invite it back without any services dependency.
 
 ## Feasibility
 
@@ -120,6 +145,8 @@ Supports three parallel access systems: XOP (named tiers), numerical levels, and
   - **False positives**: A legitimate mass mode change (e.g., ChanServ syncing after netsplit) shouldn't trigger takeover response. nodesynch_nicks must be respected.
   - **Idempotency**: Recovery actions must be safe to repeat — requesting OP when already opped, unbanning when not banned, etc.
   - **Template customization**: Network admins can customize Atheme XOP templates and Anope privilege levels. Our access tier mapping assumes defaults. The auto-verify probe catches mismatches, but operators with custom templates should use the raw flag config option (future enhancement) or adjust their `.chanset` accordingly.
+  - **Botnet escalation timing**: The escalation chain must not introduce perceptible delay when a backend can't act. If botnet has no opped peers, `canOp()` must return false instantly (from cached channel state) so ChanServ is tried without waiting. The `ProtectionChain` should never await a backend that can answer synchronously.
+  - **Duplicate actions across backends**: If botnet `requestOp()` succeeds but the response hasn't arrived yet, and the chain falls through to ChanServ which also sends OP — the bot gets opped twice (harmless but noisy). Acceptable for now; the chain can be made smarter later by tracking pending requests.
 
 ## Dependencies
 
@@ -139,11 +166,26 @@ These decisions were resolved before implementation:
 
 3. **Topic recovery**: Included in this plan. Each channel tracks a "known-good" topic snapshot. After takeover recovery, the bot restores the pre-attack topic if it was changed during the threat window. Gated on a `topic_protect` per-channel setting.
 
-4. **Protection backend abstraction**: We define a `ProtectionBackend` interface (`requestOps`, `requestUnban`, `requestRecover`, etc.) and implement two concrete backends: `AthemeBackend` and `AnopeBackend`. The takeover logic calls the backend interface only. When future backends (Undernet X, QuakeNet Q, botnet) arrive, they implement the same interface.
+4. **Protection backend abstraction**: We define a `ProtectionBackend` interface (`requestOps`, `requestUnban`, `requestRecover`, etc.) and implement concrete backends. The takeover logic calls the backend interface only — it never knows whether it's talking to ChanServ, a peer bot, or both. Atheme and Anope are implemented in this plan. The interface is explicitly designed to accommodate a `BotnetBackend` (see bot-linking.md) where peer bots fulfill the same operations via direct IRC commands rather than services messages.
 
-5. **RECOVER across services**: Atheme has a native `RECOVER` command (founder only, `+R` flag). Anope does not — we synthesize it from `MODE CLEAR ops` + `UNBAN` + `INVITE` + `OP` (requires QOP/founder for MODE CLEAR). Both paths are encapsulated behind `requestRecover()` in their respective backends, so the takeover logic doesn't need to know which services package is running.
+5. **Escalation chain (Eggdrop-inspired)**: Protection responses follow an ordered escalation chain rather than dispatching to a single backend. Each level is attempted in order; if a level cannot act (e.g., no peers have ops, or ChanServ access is 'none'), it is skipped and the next level is tried:
 
-6. **Access tier model**: Three tiers map to both Atheme flags and Anope levels:
+   | Priority | Source                  | Method                                         | Speed             | Authority                     | When it fails                    |
+   | -------- | ----------------------- | ---------------------------------------------- | ----------------- | ----------------------------- | -------------------------------- |
+   | 1        | **Direct IRC**          | Bot issues MODE commands itself                | Instant           | Requires bot to have ops      | Bot was deopped                  |
+   | 2        | **Botnet peers**        | Linked bot with ops acts on behalf             | Fast (~100ms)     | Requires any peer to have ops | All peers deopped simultaneously |
+   | 3        | **ChanServ (standard)** | `OP`, `UNBAN`, `INVITE`, `DEOP`                | Moderate (~500ms) | Requires declared access tier | Access level insufficient        |
+   | 4        | **ChanServ (nuclear)**  | `RECOVER` (Atheme) / synthetic RECOVER (Anope) | Slow (~1-2s)      | Requires founder access       | Not founder, or services down    |
+
+   The `MAX_ENFORCEMENTS` suppression in `mode-enforce.ts` is the trigger for escalation: when direct IRC enforcement is suppressed (3 attempts in 10s), this signals that something is fighting back and the system should escalate to the next available level rather than give up. The threat detection system (Phase 2) consumes this suppression event as a threat score input.
+
+   **Multiple backends can be active simultaneously.** On a network with both linked bots and ChanServ, the escalation chain tries botnet first (faster, no services dependency) and ChanServ second (higher authority, persistent enforcement). The `ProtectionChain` wrapper iterates backends in priority order, calling `can*()` on each to find the first that can act.
+
+   This mirrors Eggdrop's philosophy: **escalate, don't surrender.** The bot should always have a next move. The only true dead end is when all backends are exhausted and the channel is lost — and even then, the bot should log the failure and retry on a longer timer (ChanServ may have been temporarily unreachable).
+
+6. **RECOVER across services**: Atheme has a native `RECOVER` command (founder only, `+R` flag). Anope does not — we synthesize it from `MODE CLEAR ops` + `UNBAN` + `INVITE` + `OP` (requires QOP/founder for MODE CLEAR). Both paths are encapsulated behind `requestRecover()` in their respective backends, so the takeover logic doesn't need to know which services package is running. The botnet backend has no RECOVER equivalent — recovery is always incremental.
+
+7. **Access tier model**: Three tiers map to both Atheme flags and Anope levels:
 
    | Tier      | Atheme flags (default XOP)     | Anope level     | Available commands                               |
    | --------- | ------------------------------ | --------------- | ------------------------------------------------ |
@@ -162,31 +204,67 @@ These decisions were resolved before implementation:
 - [ ] Define `ProtectionBackend` interface in `plugins/chanmod/protection-backend.ts`:
 
   ```typescript
-  type ChanServAccess = 'none' | 'op' | 'superop' | 'founder';
+  type BackendAccess = 'none' | 'op' | 'superop' | 'founder';
 
   interface ProtectionBackend {
-    readonly name: string; // 'atheme' | 'anope'
+    /** Backend identifier — 'atheme' | 'anope' | 'botnet' | future backends */
+    readonly name: string;
+    /** Priority in the escalation chain (lower = tried first). Botnet: 1, ChanServ: 2. */
+    readonly priority: number;
     canOp(channel: string): boolean;
     canDeop(channel: string): boolean;
     canUnban(channel: string): boolean;
     canInvite(channel: string): boolean;
     canRecover(channel: string): boolean;
     canClearBans(channel: string): boolean;
+    /** Persistent ban enforcement (ChanServ AKICK). Botnet returns false. */
     canAkick(channel: string): boolean;
     requestOp(channel: string, nick?: string): void;
     requestDeop(channel: string, nick: string): void;
     requestUnban(channel: string): void;
     requestInvite(channel: string): void;
-    /** Full channel recovery. Atheme: single RECOVER command. Anope: synthetic multi-step. */
+    /** Full channel recovery. Atheme: RECOVER. Anope: synthetic multi-step. Botnet: incremental. */
     requestRecover(channel: string): void;
     requestClearBans(channel: string): void;
     requestAkick(channel: string, mask: string, reason?: string): void;
-    /** Verify declared access level against actual (called on bot join). */
+    /** Verify actual access level (called on bot join). ChanServ: probe FLAGS/ACCESS. Botnet: check peer ops. */
     verifyAccess(channel: string): void;
     /** Get the effective (possibly downgraded) access level for a channel. */
-    getAccess(channel: string): ChanServAccess;
+    getAccess(channel: string): BackendAccess;
   }
   ```
+
+- [ ] Define `ProtectionChain` in `plugins/chanmod/protection-backend.ts` — wraps multiple backends in priority order:
+
+  ```typescript
+  class ProtectionChain {
+    private backends: ProtectionBackend[]; // sorted by priority ascending
+
+    /** Register a backend. Backends are tried in priority order. */
+    addBackend(backend: ProtectionBackend): void;
+
+    /**
+     * For each can*/request* method: iterate backends in priority order,
+     * call can*() on each, and dispatch to the first that returns true.
+     * Returns true if any backend handled the request.
+     *
+     * Example: requestOp(channel) tries botnet first (priority 1),
+     * falls back to ChanServ (priority 2) if no peer has ops.
+     */
+    requestOp(channel: string, nick?: string): boolean;
+    requestDeop(channel: string, nick: string): boolean;
+    // ... same pattern for all request* methods
+
+    /** Returns the highest access level across all backends for a channel. */
+    getAccess(channel: string): BackendAccess;
+
+    /** Returns true if any backend can perform the operation. */
+    canOp(channel: string): boolean;
+    // ... same pattern for all can* methods
+  }
+  ```
+
+  The takeover detection and recovery code calls `ProtectionChain` methods exclusively — it never references a specific backend. This ensures the escalation chain is always respected and adding a new backend is zero-touch for the takeover logic.
 
 - [ ] Add `ChanServAccess` type and per-channel setting in `plugins/chanmod/state.ts`
 - [ ] Create `plugins/chanmod/atheme-backend.ts` implementing `ProtectionBackend`:
@@ -212,14 +290,17 @@ These decisions were resolved before implementation:
 - [ ] Register `chanserv_access` as a per-channel setting (default: 'none')
 - [ ] Add `chanserv_services_type` config option (default: inherit from `bot.json` `services.type`). Values: 'atheme' | 'anope'
 - [ ] Wire `verifyAccess()` into the bot-join handler (existing auto-op.ts `isBotNick` path)
-- [ ] Migrate existing `chanserv_op` logic in mode-enforce.ts to use the backend's `requestOp()`
-- [ ] **Verification**: Unit test each backend independently:
+- [ ] Migrate existing `chanserv_op` logic in mode-enforce.ts to use `ProtectionChain.requestOp()` instead of direct ChanServ message
+- [ ] **Verification**: Unit test each backend independently, plus chain behavior:
   - Each command produces correct PRIVMSG format
   - Commands gated on access level — 'op' can't RECOVER, 'none' can't OP
   - Atheme verify parses `FLAGS` response correctly
   - Anope verify parses `ACCESS LIST` response correctly
   - Verify downgrades on mismatch with warning log
   - Anope synthetic RECOVER sends correct multi-step sequence with timing
+  - `ProtectionChain` dispatches to highest-priority backend that returns `can*() === true`
+  - Chain falls through correctly when first backend can't act (e.g., botnet has no opped peers → ChanServ used)
+  - Chain returns false when no backend can act (all exhausted)
 
 ### Phase 2: Takeover Threat Detection
 
@@ -238,18 +319,20 @@ A single deop might be a prank. A simultaneous deop + mass deop of friendlies + 
     | Friendly op deopped | 2 each | Stripping allies' power |
     | Channel mode locked (+i, +k changed, +s) | 1 each | Locking out rejoins |
     | Unauthorized +o (bitch trigger) | 2 | Attacker opping allies |
-  - Threat level thresholds (configurable):
+    | Enforcement suppressed (MAX_ENFORCEMENTS hit) | 2 | Direct IRC enforcement failed — something is fighting back |
+  - Threat level thresholds (configurable). At each level, the `ProtectionChain` is invoked — it tries backends in escalation order (botnet → ChanServ standard → ChanServ nuclear):
     | Level | Score | Name | Description |
     |-------|-------|------|-------------|
-    | 0 | 0-2 | Normal | No action beyond existing protections |
-    | 1 | 3-5 | Alert | Backend requestOp, re-op friendlies |
-    | 2 | 6-9 | Active | Backend requestUnban, deop hostiles, requestAkick repeat offenders |
-    | 3 | 10+ | Critical | Backend requestRecover (founder only), clear all unauthorized state |
+    | 0 | 0-2 | Normal | No action beyond existing direct IRC protections |
+    | 1 | 3-5 | Alert | Chain.requestOp, re-op friendlies via first available backend |
+    | 2 | 6-9 | Active | Chain.requestUnban, deop hostiles, Chain.requestAkick (ChanServ only — botnet has no AKICK) |
+    | 3 | 10+ | Critical | Chain.requestRecover (ChanServ founder only), clear all unauthorized state. If no backend can recover, log and retry on timer |
   - `assessThreat(channel, event, points)` — add points, check thresholds, return current level
   - `getThreatLevel(channel)` — current threat level
   - `resetThreat(channel)` — decay/reset after threat window expires
   - Only score events from non-nodesynch, non-bot sources
 - [ ] Wire threat detection into existing mode/kick/ban handlers — each relevant event calls `assessThreat()`
+  - **Critical:** Wire `MAX_ENFORCEMENTS` suppression in `mode-enforce.ts` as a threat input. When enforcement is suppressed (line 359–361), call `assessThreat(channel, 'enforcement_suppressed', 2)` instead of just logging a warning and returning. This is the escalation trigger — direct IRC enforcement has failed, so the threat system should escalate to higher-authority backends (botnet peers, then ChanServ).
 - [ ] Add threat state to `SharedState`:
   ```typescript
   interface ThreatEvent {
@@ -331,12 +414,14 @@ New flow:
 
 - [ ] Add `topic_protect` per-channel setting (default: false)
 - [ ] Track "known-good" topic per channel in `SharedState`:
+
   ```typescript
   knownGoodTopics: Map<string, { topic: string; setAt: number }>;
   ```
 
   - Update the known-good snapshot whenever the topic is changed by a nodesynch nick, a user with op_flags, or when threat level is 0 (normal)
   - Freeze the snapshot when threat level > 0 — topic changes during elevated threat are considered vandalism
+
 - [ ] After recovery (bot re-opped, threat level returning to 0):
   - If `topic_protect` is enabled and the current topic differs from the known-good snapshot, restore it via `api.topic(channel, savedTopic)`
   - Log the restoration
@@ -436,6 +521,9 @@ None. Threat state is ephemeral (in-memory). Takeover events are logged to the e
    - Full Atheme scenario: hostile gets ops → deops bot → kicks bot → bans bot → sets +i → bot recovers via ChanServ RECOVER → removes +i +m → re-ops friendlies → deops hostile
    - Full Anope scenario: same attack → bot sends MODE CLEAR + UNBAN + INVITE + OP sequence → re-ops friendlies → deops hostile
    - chanserv_access='none' — verify graceful degradation (rejoin attempt only, no services commands)
+   - **Escalation chain**: mock botnet backend (priority 1) + ChanServ backend (priority 2) — verify chain tries botnet first, falls through to ChanServ when botnet `canOp()` returns false
+   - **MAX_ENFORCEMENTS → escalation**: direct IRC enforcement hits MAX_ENFORCEMENTS → threat score increases → chain.requestOp() called (not just a warning log)
+   - **Full escalation sequence**: bot deopped → direct re-op fails (MAX_ENFORCEMENTS) → botnet peer re-ops (if available) → if no peers, ChanServ requestOp → if still failing at critical threat, ChanServ RECOVER
 
 7. **Topic recovery** (`tests/plugins/chanmod-takeover.test.ts`):
    - Topic changes at threat level 0 update the known-good snapshot
@@ -445,4 +533,8 @@ None. Threat state is ephemeral (in-memory). Takeover events are logged to the e
 
 ## Open Questions
 
-None — all design decisions resolved. Future backends (Undernet X, QuakeNet Q, DALnet, GameSurge srvx, botnet) are documented in the Services Landscape section and supported by the ProtectionBackend abstraction.
+1. **Botnet backend message types**: The bot-linking protocol (bot-linking.md) needs new frame types for protection requests — e.g., `{ type: 'PROTECT_OP', channel: '#chan', nick: 'hexbot' }`. Should these be dedicated frame types, or should they reuse the existing `CMD` relay frame (sending `.op #chan hexbot` as a relayed command)? Dedicated frames are cleaner and can bypass the CMD rate limit; relayed commands reuse existing infrastructure but are subject to the 10 CMD/sec rate limit which could matter during a fast-moving takeover.
+
+2. **Coordinated mass-deop detection**: When all linked bots lose ops simultaneously (the one scenario botnet can't self-recover from), how quickly should we detect this and skip straight to ChanServ? The current threat scoring is per-channel on a single bot — it doesn't know that peers also lost ops until the next channel-state sync frame arrives. Should bots broadcast a "lost ops" alert frame so peers (and the hub) can aggregate the situation faster?
+
+3. **Botnet recovery ordering**: Resolved — first responder wins. Any opped peer acts immediately; duplicate MODEs are harmless. Matches Eggdrop's approach. See bot-linking.md decision #12.
