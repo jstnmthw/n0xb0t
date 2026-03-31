@@ -152,6 +152,12 @@ describe('sanitizeFrame', () => {
     expect(frame.count).toBe(42);
     expect(frame.flag).toBe(true);
   });
+
+  it('skips null elements in arrays', () => {
+    const frame: Record<string, unknown> = { type: 'T', items: ['a\rb', null, 42, true] };
+    sanitizeFrame(frame);
+    expect(frame.items).toEqual(['ab', null, 42, true]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1608,6 +1614,45 @@ describe('BotLinkHub handleCmdRelay edge cases', () => {
     hub.close();
   });
 
+  it('relays CMD with channel field', async () => {
+    const eventBus = new BotEventBus();
+    const perms = new Permissions(null, null, eventBus);
+    perms.addUser('admin', '*!a@host', 'nmov');
+    const handler = new CommandHandler(perms);
+    handler.registerCommand(
+      'test',
+      { flags: '-', description: '', usage: '', category: '' },
+      (_a, ctx) => ctx.reply('ok'),
+    );
+
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+    hub.setCommandRelay(handler, perms, eventBus);
+
+    const socket = createMockSocket();
+    hub.addConnection(socket);
+    pushFrame(socket, { type: 'HELLO', botname: 'leaf1', password: TEST_HASH, version: '1' });
+    await tick();
+    socket.written.length = 0;
+
+    pushFrame(socket, {
+      type: 'CMD',
+      command: 'test',
+      args: '',
+      fromHandle: 'admin',
+      fromBot: 'leaf1',
+      channel: '#ops',
+      ref: 'ref-ch',
+    });
+    await tick();
+    await tick();
+
+    const frames = parseWritten(socket.written);
+    const result = frames.find((f) => f.type === 'CMD_RESULT');
+    expect(result).toBeDefined();
+    expect(result!.ref).toBe('ref-ch');
+    hub.close();
+  });
+
   it('returns error message when command handler throws', async () => {
     const eventBus = new BotEventBus();
     const perms = new Permissions(null, null, eventBus);
@@ -2074,6 +2119,14 @@ describe('BotLinkProtocol edge cases', () => {
     (socket as unknown as Duplex).destroy();
     expect(protocol.send({ type: 'TEST' })).toBe(false);
   });
+
+  it('close() is idempotent (double-close does not throw)', () => {
+    const socket = createMockSocket();
+    const protocol = new BotLinkProtocol(socket, null);
+    protocol.close();
+    protocol.close(); // second call returns early
+    expect(protocol.isClosed).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -2394,6 +2447,25 @@ describe('frame field fallback branches', () => {
     hub.close();
   });
 
+  it('PARTY_JOIN with all fields undefined uses empty-string defaults', async () => {
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+    const socket = createMockSocket();
+    hub.addConnection(socket);
+    pushFrame(socket, { type: 'HELLO', botname: 'leaf1', password: TEST_HASH, version: '1' });
+    await tick();
+
+    // handle, nick, fromBot all undefined — exercises every ?? fallback
+    pushFrame(socket, { type: 'PARTY_JOIN' });
+    await tick();
+
+    const users = hub.getRemotePartyUsers();
+    expect(users).toHaveLength(1);
+    expect(users[0].handle).toBe('');
+    expect(users[0].nick).toBe('');
+    expect(users[0].botname).toBe('leaf1');
+    hub.close();
+  });
+
   it('RELAY_REQUEST with missing toBot rejects with error', async () => {
     const hub = new BotLinkHub(hubConfig(), '1.0.0');
     const socket = createMockSocket();
@@ -2417,6 +2489,8 @@ describe('frame field fallback branches', () => {
       botname: 'test',
       password: 'p',
       hub: { host: '127.0.0.1', port: 5051 },
+      ping_interval_ms: 30_000,
+      link_timeout_ms: 90_000,
     };
     // Should not throw — uses defaults for missing optional fields
     const leaf = new BotLinkLeaf(minConfig, '1.0.0');
@@ -2493,6 +2567,92 @@ describe('frame field fallback branches', () => {
     leaf.disconnect();
   });
 
+  it('HELLO with missing botname/password fields exercises ?? coercions', async () => {
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+    const socket = createMockSocket();
+    hub.addConnection(socket);
+
+    // Send HELLO without botname and password fields — ?? coerces to ''
+    pushFrame(socket, { type: 'HELLO' });
+    await tick();
+
+    // Should reject: password hash won't match
+    const frames = parseWritten(socket.written);
+    expect(frames[0].type).toBe('ERROR');
+    hub.close();
+  });
+
+  it('PARTY_WHOM with missing ref field exercises ?? coercion', async () => {
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+    const socket = createMockSocket();
+    hub.addConnection(socket);
+    pushFrame(socket, { type: 'HELLO', botname: 'leaf1', password: TEST_HASH, version: '1' });
+    await tick();
+    socket.written.length = 0;
+
+    // Send PARTY_WHOM without ref — ?? coerces to ''
+    pushFrame(socket, { type: 'PARTY_WHOM' });
+    await tick();
+
+    const frames = parseWritten(socket.written);
+    const reply = frames.find((f) => f.type === 'PARTY_WHOM_REPLY');
+    expect(reply).toBeDefined();
+    expect(reply!.ref).toBe('');
+    hub.close();
+  });
+
+  it('leaf CMD_RESULT/WHOM_REPLY/PROTECT_ACK with missing ref exercises ?? coercion', async () => {
+    const leaf = new BotLinkLeaf(leafConfig(), '1.0.0');
+    const socket = createMockSocket();
+    leaf.connectWithSocket(socket);
+    pushFrame(socket, { type: 'WELCOME', botname: 'hub', version: '1.0' });
+    await tick();
+
+    const frames: LinkFrame[] = [];
+    leaf.onFrame = (f) => frames.push(f);
+
+    // Send frames without ref — ?? coerces to '', no pending match, falls through to onFrame
+    pushFrame(socket, { type: 'CMD_RESULT', output: ['x'] });
+    pushFrame(socket, { type: 'PARTY_WHOM_REPLY', users: [] });
+    pushFrame(socket, { type: 'PROTECT_ACK', success: true });
+    await tick();
+
+    expect(frames).toHaveLength(3);
+    leaf.disconnect();
+  });
+
+  it('leaf setCommandRelay exercises ident/hostname ?? coercion', async () => {
+    const leaf = new BotLinkLeaf(leafConfig(), '1.0.0');
+    const socket = createMockSocket();
+    leaf.connectWithSocket(socket);
+    pushFrame(socket, { type: 'WELCOME', botname: 'hub', version: '1.0' });
+    await tick();
+
+    const perms = new Permissions();
+    // Add user matching nick!@  (empty ident/hostname from ?? coercion)
+    perms.addUser('admin', '*!*@*', 'n');
+    const handler = new CommandHandler(perms);
+    handler.registerCommand(
+      'test',
+      { flags: '-', description: '', usage: '', category: '', relayToHub: true },
+      () => {},
+    );
+    leaf.setCommandRelay(handler, perms);
+
+    const replies: string[] = [];
+    // Context without ident and hostname — exercises the ?? '' fallback
+    const ctx = {
+      source: 'irc' as const,
+      nick: 'admin',
+      channel: null,
+      reply: (m: string) => replies.push(m),
+    };
+    handler.execute('.test', ctx);
+    await tick();
+
+    leaf.disconnect();
+  });
+
   it('hub handleConnection: second frame during handshake is ignored', async () => {
     const hub = new BotLinkHub(hubConfig(), '1.0.0');
     const socket = createMockSocket();
@@ -2506,6 +2666,103 @@ describe('frame field fallback branches', () => {
     // Should only connect once
     expect(hub.getLeaves()).toEqual(['leaf1']);
     hub.close();
+  });
+
+  it('leaf ignores CMD_RESULT with unknown ref', async () => {
+    const leaf = new BotLinkLeaf(leafConfig(), '1.0.0');
+    const socket = createMockSocket();
+    leaf.connectWithSocket(socket);
+    pushFrame(socket, { type: 'WELCOME', botname: 'hub', version: '1.0' });
+    await tick();
+
+    const frames: LinkFrame[] = [];
+    leaf.onFrame = (f) => frames.push(f);
+
+    // Send CMD_RESULT with a ref that has no pending command
+    pushFrame(socket, { type: 'CMD_RESULT', ref: 'nonexistent', output: ['hello'] });
+    await tick();
+
+    // Should fall through to onFrame since no pending cmd matched
+    expect(frames).toHaveLength(1);
+    expect(frames[0].type).toBe('CMD_RESULT');
+    leaf.disconnect();
+  });
+
+  it('leaf ignores PARTY_WHOM_REPLY with unknown ref', async () => {
+    const leaf = new BotLinkLeaf(leafConfig(), '1.0.0');
+    const socket = createMockSocket();
+    leaf.connectWithSocket(socket);
+    pushFrame(socket, { type: 'WELCOME', botname: 'hub', version: '1.0' });
+    await tick();
+
+    const frames: LinkFrame[] = [];
+    leaf.onFrame = (f) => frames.push(f);
+
+    pushFrame(socket, { type: 'PARTY_WHOM_REPLY', ref: 'nonexistent', users: [] });
+    await tick();
+
+    expect(frames).toHaveLength(1);
+    expect(frames[0].type).toBe('PARTY_WHOM_REPLY');
+    leaf.disconnect();
+  });
+
+  it('leaf ignores PROTECT_ACK with unknown ref', async () => {
+    const leaf = new BotLinkLeaf(leafConfig(), '1.0.0');
+    const socket = createMockSocket();
+    leaf.connectWithSocket(socket);
+    pushFrame(socket, { type: 'WELCOME', botname: 'hub', version: '1.0' });
+    await tick();
+
+    const frames: LinkFrame[] = [];
+    leaf.onFrame = (f) => frames.push(f);
+
+    pushFrame(socket, { type: 'PROTECT_ACK', ref: 'nonexistent', success: true });
+    await tick();
+
+    expect(frames).toHaveLength(1);
+    expect(frames[0].type).toBe('PROTECT_ACK');
+    leaf.disconnect();
+  });
+
+  it('leaf reconnect() when already disconnected (protocol null)', async () => {
+    const leaf = new BotLinkLeaf(leafConfig(), '1.0.0');
+    // Protocol is null — never connected
+    leaf.reconnect();
+    // Should not crash; leaf tries to connect
+    expect(leaf.isConnected).toBe(false);
+    leaf.disconnect();
+  });
+
+  it('leaf handles non-AUTH_FAILED ERROR during handshake (schedules reconnect)', async () => {
+    const leaf = new BotLinkLeaf(leafConfig(), '1.0.0');
+    const socket = createMockSocket();
+    leaf.connectWithSocket(socket);
+
+    pushFrame(socket, { type: 'ERROR', code: 'DUPLICATE', message: 'Already connected' });
+    await tick();
+
+    expect(leaf.isConnected).toBe(false);
+    // scheduleReconnect was called; clean up
+    leaf.disconnect();
+  });
+
+  it('leaf ignores unknown frame type during handshake', async () => {
+    const leaf = new BotLinkLeaf(leafConfig(), '1.0.0');
+    const socket = createMockSocket();
+    leaf.connectWithSocket(socket);
+
+    // Send an unrecognized frame during handshake — handler should ignore it
+    pushFrame(socket, { type: 'RANDOM_FRAME' });
+    await tick();
+
+    expect(leaf.isConnected).toBe(false);
+
+    // Now send WELCOME — should still work
+    pushFrame(socket, { type: 'WELCOME', botname: 'hub', version: '1.0' });
+    await tick();
+
+    expect(leaf.isConnected).toBe(true);
+    leaf.disconnect();
   });
 
   it('hub onSteadyState returns early when conn is null (race)', async () => {
@@ -2523,6 +2780,200 @@ describe('frame field fallback branches', () => {
     pushFrame(socket, { type: 'JOIN', channel: '#test', nick: 'u' });
     await tick();
 
+    hub.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Coverage: setCommandRelay event handler guard branches
+// ---------------------------------------------------------------------------
+
+describe('BotLinkHub setCommandRelay event handler guards', () => {
+  it('user:added event for non-existent user does not broadcast', async () => {
+    const eventBus = new BotEventBus();
+    const perms = new Permissions(null, null, eventBus);
+    const handler = new CommandHandler(perms);
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+    hub.setCommandRelay(handler, perms, eventBus);
+
+    const socket = createMockSocket();
+    hub.addConnection(socket);
+    pushFrame(socket, { type: 'HELLO', botname: 'leaf1', password: TEST_HASH, version: '1' });
+    await tick();
+    socket.written.length = 0;
+
+    // Fire user:added for a handle that doesn't exist in permissions
+    eventBus.emit('user:added', 'ghost');
+    await tick();
+
+    const frames = parseWritten(socket.written);
+    expect(frames.filter((f) => f.type === 'ADDUSER')).toEqual([]);
+    hub.close();
+  });
+
+  it('user:flagsChanged event for non-existent user does not broadcast', async () => {
+    const eventBus = new BotEventBus();
+    const perms = new Permissions(null, null, eventBus);
+    const handler = new CommandHandler(perms);
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+    hub.setCommandRelay(handler, perms, eventBus);
+
+    const socket = createMockSocket();
+    hub.addConnection(socket);
+    pushFrame(socket, { type: 'HELLO', botname: 'leaf1', password: TEST_HASH, version: '1' });
+    await tick();
+    socket.written.length = 0;
+
+    eventBus.emit('user:flagsChanged', 'ghost', 'n', {});
+    await tick();
+
+    const frames = parseWritten(socket.written);
+    expect(frames.filter((f) => f.type === 'SETFLAGS')).toEqual([]);
+    hub.close();
+  });
+
+  it('user:hostmaskAdded event for non-existent user does not broadcast', async () => {
+    const eventBus = new BotEventBus();
+    const perms = new Permissions(null, null, eventBus);
+    const handler = new CommandHandler(perms);
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+    hub.setCommandRelay(handler, perms, eventBus);
+
+    const socket = createMockSocket();
+    hub.addConnection(socket);
+    pushFrame(socket, { type: 'HELLO', botname: 'leaf1', password: TEST_HASH, version: '1' });
+    await tick();
+    socket.written.length = 0;
+
+    eventBus.emit('user:hostmaskAdded', 'ghost', '*!*@ghost');
+    await tick();
+
+    const frames = parseWritten(socket.written);
+    expect(frames.filter((f) => f.type === 'ADDUSER')).toEqual([]);
+    hub.close();
+  });
+
+  it('user:hostmaskRemoved event for non-existent user does not broadcast', async () => {
+    const eventBus = new BotEventBus();
+    const perms = new Permissions(null, null, eventBus);
+    const handler = new CommandHandler(perms);
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+    hub.setCommandRelay(handler, perms, eventBus);
+
+    const socket = createMockSocket();
+    hub.addConnection(socket);
+    pushFrame(socket, { type: 'HELLO', botname: 'leaf1', password: TEST_HASH, version: '1' });
+    await tick();
+    socket.written.length = 0;
+
+    eventBus.emit('user:hostmaskRemoved', 'ghost', '*!*@ghost');
+    await tick();
+
+    const frames = parseWritten(socket.written);
+    expect(frames.filter((f) => f.type === 'ADDUSER')).toEqual([]);
+    hub.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Coverage: relay routing with no active relay
+// ---------------------------------------------------------------------------
+
+describe('BotLinkHub relay routing with no active relay', () => {
+  it('RELAY_ACCEPT with unknown handle is silently dropped', async () => {
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+    const socket1 = createMockSocket();
+    hub.addConnection(socket1);
+    pushFrame(socket1, { type: 'HELLO', botname: 'leaf1', password: TEST_HASH, version: '1' });
+    await tick();
+    socket1.written.length = 0;
+
+    pushFrame(socket1, { type: 'RELAY_ACCEPT', handle: 'nobody' });
+    await tick();
+
+    // No crash, no frames sent
+    expect(parseWritten(socket1.written)).toEqual([]);
+    hub.close();
+  });
+
+  it('RELAY_INPUT with unknown handle is silently dropped', async () => {
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+    const socket1 = createMockSocket();
+    hub.addConnection(socket1);
+    pushFrame(socket1, { type: 'HELLO', botname: 'leaf1', password: TEST_HASH, version: '1' });
+    await tick();
+    socket1.written.length = 0;
+
+    pushFrame(socket1, { type: 'RELAY_INPUT', handle: 'nobody', data: 'test' });
+    await tick();
+
+    expect(parseWritten(socket1.written)).toEqual([]);
+    hub.close();
+  });
+
+  it('RELAY_OUTPUT with unknown handle is silently dropped', async () => {
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+    const socket1 = createMockSocket();
+    hub.addConnection(socket1);
+    pushFrame(socket1, { type: 'HELLO', botname: 'leaf1', password: TEST_HASH, version: '1' });
+    await tick();
+    socket1.written.length = 0;
+
+    pushFrame(socket1, { type: 'RELAY_OUTPUT', handle: 'nobody', data: 'test' });
+    await tick();
+
+    expect(parseWritten(socket1.written)).toEqual([]);
+    hub.close();
+  });
+
+  it('RELAY_END with unknown handle is silently dropped', async () => {
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+    const socket1 = createMockSocket();
+    hub.addConnection(socket1);
+    pushFrame(socket1, { type: 'HELLO', botname: 'leaf1', password: TEST_HASH, version: '1' });
+    await tick();
+    socket1.written.length = 0;
+
+    pushFrame(socket1, { type: 'RELAY_END', handle: 'nobody' });
+    await tick();
+
+    expect(parseWritten(socket1.written)).toEqual([]);
+    hub.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Coverage: onLeafClose with non-matching remote party users
+// ---------------------------------------------------------------------------
+
+describe('BotLinkHub onLeafClose remote user cleanup', () => {
+  it('only removes party users from the disconnected leaf', async () => {
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+
+    const socket1 = createMockSocket();
+    hub.addConnection(socket1);
+    pushFrame(socket1, { type: 'HELLO', botname: 'leaf1', password: TEST_HASH, version: '1' });
+    await tick();
+
+    const socket2 = createMockSocket();
+    hub.addConnection(socket2);
+    pushFrame(socket2, { type: 'HELLO', botname: 'leaf2', password: TEST_HASH, version: '1' });
+    await tick();
+
+    // Add party users from both leaves
+    pushFrame(socket1, { type: 'PARTY_JOIN', handle: 'user1', nick: 'User1', fromBot: 'leaf1' });
+    pushFrame(socket2, { type: 'PARTY_JOIN', handle: 'user2', nick: 'User2', fromBot: 'leaf2' });
+    await tick();
+
+    expect(hub.getRemotePartyUsers()).toHaveLength(2);
+
+    // Disconnect leaf1 — user1 should be removed, user2 should remain
+    socket1.destroy();
+    await tick();
+
+    const remaining = hub.getRemotePartyUsers();
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].handle).toBe('user2');
     hub.close();
   });
 });

@@ -84,7 +84,7 @@ export class Permissions {
     this.users.set(lower, { handle, hostmasks, global: flags, channels: channelFlags });
     this.persist();
 
-    /* v8 ignore next */
+    /* v8 ignore next -- source always provided by callers; ?? 'botlink' is a defensive default */
     const by = source ?? 'botlink';
     this.logger?.info(`User synced: ${handle} (flags: ${flags}) from ${by}`);
   }

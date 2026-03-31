@@ -795,3 +795,33 @@ describe('branch coverage edge cases', () => {
     hub.close();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Edge case: config enabled but both hub and leaf are null
+// ---------------------------------------------------------------------------
+
+describe('botlink commands with neither hub nor leaf', () => {
+  it('.botlink status produces no output when hub and leaf are both null', async () => {
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, null, null, hubConfig());
+    const replies: string[] = [];
+    await handler.execute('.botlink status', makeCtx(replies));
+    expect(replies).toEqual([]);
+  });
+
+  it('.bots produces no output when hub and leaf are both null', async () => {
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, null, null, hubConfig());
+    const replies: string[] = [];
+    await handler.execute('.bots', makeCtx(replies));
+    expect(replies).toEqual([]);
+  });
+
+  it('.bottree produces no output when hub and leaf are both null', async () => {
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, null, null, hubConfig());
+    const replies: string[] = [];
+    await handler.execute('.bottree', makeCtx(replies));
+    expect(replies).toEqual([]);
+  });
+});

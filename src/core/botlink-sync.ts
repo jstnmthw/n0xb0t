@@ -53,12 +53,10 @@ export class ChannelStateSyncer {
       limit: typeof frame.limit === 'number' ? frame.limit : undefined,
       users: Array.isArray(frame.users)
         ? (frame.users as Array<Record<string, unknown>>).map((u) => ({
-            /* v8 ignore start */
             nick: String(u.nick ?? ''),
             ident: String(u.ident ?? ''),
             hostname: String(u.hostname ?? ''),
             modes: Array.isArray(u.modes) ? (u.modes as string[]) : [],
-            /* v8 ignore stop */
           }))
         : [],
     });
@@ -89,11 +87,9 @@ export class PermissionSyncer {
     switch (frame.type) {
       case 'ADDUSER':
       case 'SETFLAGS': {
-        /* v8 ignore next */
         const handle = String(frame.handle ?? '');
         if (!handle) return;
         const hostmasks = Array.isArray(frame.hostmasks) ? (frame.hostmasks as string[]) : [];
-        /* v8 ignore next */
         const globalFlags = String(frame.globalFlags ?? '');
         const channelFlags =
           frame.channelFlags && typeof frame.channelFlags === 'object'
@@ -104,7 +100,6 @@ export class PermissionSyncer {
       }
 
       case 'DELUSER': {
-        /* v8 ignore next */
         const handle = String(frame.handle ?? '');
         if (!handle) return;
         if (permissions.getUser(handle)) {

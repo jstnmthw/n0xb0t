@@ -42,8 +42,7 @@ export function registerBotlinkCommands(
               const leafInfo = leaves
                 .map((name) => {
                   const info = hub.getLeafInfo(name);
-                  /* v8 ignore next */
-                  const ago = info ? Math.floor((Date.now() - info.connectedAt) / 1000) : 0;
+                  const ago = Math.floor((Date.now() - info!.connectedAt) / 1000);
                   return `  ${name} (connected ${ago}s ago)`;
                 })
                 .join('\n');
@@ -115,9 +114,8 @@ export function registerBotlinkCommands(
         const leaves = hub.getLeaves();
         const lines = [`${config.botname} (hub, this bot)`];
         for (const name of leaves) {
-          const info = hub.getLeafInfo(name);
-          /* v8 ignore next */
-          const ago = info ? Math.floor((Date.now() - info.connectedAt) / 1000) : 0;
+          const info = hub.getLeafInfo(name)!;
+          const ago = Math.floor((Date.now() - info.connectedAt) / 1000);
           lines.push(`${name} (leaf, connected ${ago}s ago)`);
         }
         ctx.reply(`Linked bots (${lines.length}):\n${lines.join('\n')}`);
@@ -211,7 +209,7 @@ export function registerBotlinkCommands(
         return;
       }
 
-      /* v8 ignore next 4 */
+      /* v8 ignore next 4 -- relay send helper only called from enterRelay callback during active relay; requires live DCC session */
       const sendFrame = (frame: import('../botlink').LinkFrame) => {
         if (hub) hub.send(targetBot, frame);
         else if (leaf) leaf.send(frame);
@@ -239,12 +237,14 @@ export function registerBotlinkCommands(
           return;
         }
         hub.send(targetBot, requestFrame);
+        /* v8 ignore start -- FALSE branch unreachable: hub ?? leaf guard at line 208 ensures at least one is non-null */
       } else if (leaf) {
         leaf.send(requestFrame);
       }
+      /* v8 ignore stop */
 
       // Enter relay mode — input goes to the remote bot
-      /* v8 ignore next 3 */
+      /* v8 ignore next 3 -- enterRelay callback only fires during active relay input; requires live DCC session */
       session.enterRelay(targetBot, (line: string) => {
         sendFrame({ type: 'RELAY_INPUT', handle: session.handle, line });
       });
@@ -266,9 +266,7 @@ export function registerBotlinkCommands(
         ? dccManager.getSessionList().map((s) => ({
             handle: s.handle,
             nick: s.nick,
-            /* v8 ignore start */
-            botname: config?.botname ?? 'local',
-            /* v8 ignore stop */
+            botname: config!.botname,
             connectedAt: s.connectedAt,
             idle: 0,
           }))

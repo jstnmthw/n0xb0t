@@ -48,10 +48,24 @@ describe('SharedBanList', () => {
     expect(list.getBans('#nonexistent')).toEqual([]);
   });
 
+  it('removeBan with non-existent mask is a no-op', () => {
+    const list = new SharedBanList();
+    list.addBan('#test', '*!*@evil.host', 'admin', 1000);
+    list.removeBan('#test', '*!*@does-not-exist');
+    expect(list.getBans('#test')).toHaveLength(1);
+  });
+
   it('removeExempt on unknown channel is a no-op', () => {
     const list = new SharedBanList();
     list.removeExempt('#nonexistent', '*!*@x'); // should not throw
     expect(list.getExempts('#nonexistent')).toEqual([]);
+  });
+
+  it('removeExempt with non-existent mask is a no-op', () => {
+    const list = new SharedBanList();
+    list.addExempt('#test', '*!*@good.host', 'admin', 1000);
+    list.removeExempt('#test', '*!*@does-not-exist');
+    expect(list.getExempts('#test')).toHaveLength(1);
   });
 
   it('deduplicates exempts by mask', () => {
@@ -111,6 +125,15 @@ describe('BanListSyncer', () => {
       const list = new SharedBanList();
       list.addBan('#ch', '*!*@evil', 'a', 0);
       expect(BanListSyncer.buildSyncFrames(list, neverShared)).toEqual([]);
+    });
+
+    it('skips empty ban list for channels with only exempts', () => {
+      const list = new SharedBanList();
+      list.addExempt('#ch', '*!*@good', 'a', 0);
+
+      const frames = BanListSyncer.buildSyncFrames(list, alwaysShared);
+      expect(frames).toHaveLength(1);
+      expect(frames[0].type).toBe('CHAN_EXEMPT_SYNC');
     });
   });
 

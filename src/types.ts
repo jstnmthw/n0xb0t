@@ -419,8 +419,8 @@ export interface BotlinkConfig {
   sync_permissions?: boolean;
   sync_channel_state?: boolean;
   sync_bans?: boolean;
-  ping_interval_ms?: number;
-  link_timeout_ms?: number;
+  ping_interval_ms: number;
+  link_timeout_ms: number;
 }
 
 /** Shape for config/bot.json. */

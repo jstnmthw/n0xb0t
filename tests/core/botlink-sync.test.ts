@@ -465,4 +465,44 @@ describe('PermissionSyncer', () => {
       expect(voice!.global).toBe('v');
     });
   });
+
+  describe('coercion of missing frame fields', () => {
+    it('CHAN frame with user entries missing fields uses ?? defaults', () => {
+      const client = new MockClient();
+      const bus = new BotEventBus();
+      const state = new ChannelState(client as never, bus);
+      const frame: LinkFrame = {
+        type: 'CHAN',
+        channel: '#test',
+        topic: 'hi',
+        modes: '',
+        users: [{ nick: undefined, ident: undefined, hostname: undefined, modes: 'not-an-array' }],
+      };
+      ChannelStateSyncer.applyFrame(frame, state);
+      const ch = state.getChannel('#test');
+      expect(ch).toBeDefined();
+      expect(ch!.users.size).toBe(1);
+    });
+
+    it('ADDUSER frame with missing handle is a no-op', () => {
+      const perms = new Permissions();
+      PermissionSyncer.applyFrame({ type: 'ADDUSER' }, perms);
+      expect(perms.listUsers()).toEqual([]);
+    });
+
+    it('ADDUSER frame with missing globalFlags uses empty string', () => {
+      const perms = new Permissions();
+      PermissionSyncer.applyFrame({ type: 'ADDUSER', handle: 'test', hostmasks: ['*!*@*'] }, perms);
+      const user = perms.getUser('test');
+      expect(user).toBeDefined();
+      expect(user!.global).toBe('');
+    });
+
+    it('DELUSER frame with missing handle is a no-op', () => {
+      const perms = new Permissions();
+      perms.addUser('existing', '*!*@*', 'n');
+      PermissionSyncer.applyFrame({ type: 'DELUSER' }, perms);
+      expect(perms.getUser('existing')).toBeDefined();
+    });
+  });
 });
