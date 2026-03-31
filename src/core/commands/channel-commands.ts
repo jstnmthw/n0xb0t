@@ -1,9 +1,48 @@
 // HexBot — Per-channel settings commands
 // Registers .chanset and .chaninfo with the command handler.
 import type { CommandHandler } from '../../command-handler';
+import type { ChannelSettingEntry, ChannelSettingValue } from '../../types';
 import { sanitize } from '../../utils/sanitize';
-import { formatTable } from '../../utils/table';
 import type { ChannelSettings } from '../channel-settings';
+
+// -------------------------------------------------------------------------
+// Formatting helpers — Eggdrop-style compact display
+// -------------------------------------------------------------------------
+
+type SnapshotItem = { entry: ChannelSettingEntry; value: ChannelSettingValue; isDefault: boolean };
+
+/**
+ * Format flag settings as an Eggdrop-style +/- grid.
+ * Overridden values are marked with `*` (e.g. `+enforce_modes*`).
+ * Pads entries to uniform width, 4 per row.
+ */
+function formatFlagGrid(flags: SnapshotItem[], prefix = '  ', perRow = 4): string[] {
+  if (flags.length === 0) return [];
+  const entries = flags.map(({ entry, value, isDefault }) => {
+    const sign = value ? '+' : '-';
+    const marker = isDefault ? '' : '*';
+    return `${sign}${entry.key}${marker}`;
+  });
+  const maxLen = Math.max(...entries.map((e) => e.length));
+  const lines: string[] = [];
+  for (let i = 0; i < entries.length; i += perRow) {
+    const row = entries.slice(i, i + perRow);
+    const padded = row.map((e, j) => (j < row.length - 1 ? e.padEnd(maxLen) : e));
+    lines.push(prefix + padded.join('  '));
+  }
+  return lines;
+}
+
+/**
+ * Format string/int settings one per line: `  key: value` or `  key*: value`.
+ */
+function formatValueLines(items: SnapshotItem[], prefix = '  '): string[] {
+  return items.map(({ entry, value, isDefault }) => {
+    const display = value === '' ? '(not set)' : String(value);
+    const marker = isDefault ? '' : '*';
+    return `${prefix}${entry.key}${marker}: ${display}`;
+  });
+}
 
 /**
  * Register .chanset and .chaninfo commands on the given command handler.
@@ -39,18 +78,12 @@ export function registerChannelCommands(
           ctx.reply('No channel settings registered (no plugins with settings loaded)');
           return;
         }
-        ctx.reply(`Settings for ${channel} — use .chanset ${channel} [+/-]key [value] to change:`);
-        const rows = snapshot.map(({ entry, value, isDefault }) => {
-          let display: string;
-          if (entry.type === 'flag') {
-            display = value ? 'ON' : 'OFF';
-          } else {
-            display = String(value) || '(not set)';
-          }
-          const marker = isDefault ? '' : '*';
-          return [entry.key, entry.type, display + (marker ? ` ${marker}` : ''), entry.description];
-        });
-        ctx.reply(formatTable(rows));
+        ctx.reply(`Settings for ${channel} — .chanset ${channel} <key> for details:`);
+
+        const flags = snapshot.filter((s) => s.entry.type === 'flag');
+        const others = snapshot.filter((s) => s.entry.type !== 'flag');
+        const lines = [...formatFlagGrid(flags), ...formatValueLines(others)];
+        ctx.reply(lines.join('\n'));
         return;
       }
 
@@ -88,13 +121,14 @@ export function registerChannelCommands(
         return;
       }
 
-      // No prefix: show current value or set value
+      // No prefix: show current value with description (detail view)
       if (parts.length === 2) {
-        // Show current value
         const value = channelSettings.get(channel, key);
         const isSet = channelSettings.isSet(channel, key);
-        const display = def.type === 'flag' ? (value ? 'ON' : 'OFF') : String(value);
-        ctx.reply(`${channel} ${key} = ${display}${isSet ? '' : ' (default)'}`);
+        const display = def.type === 'flag' ? (value ? 'ON' : 'OFF') : String(value) || '(not set)';
+        ctx.reply(
+          `${channel} ${key} (${def.type}): ${display}${isSet ? '' : ' (default)'} — ${def.description}`,
+        );
         return;
       }
 
@@ -151,37 +185,22 @@ export function registerChannelCommands(
       ctx.reply(`Channel settings for ${channel} (${setCount} set, ${defaultCount} default):`);
 
       // Group by plugin
-      const byPlugin = new Map<string, typeof snapshot>();
+      const byPlugin = new Map<string, SnapshotItem[]>();
       for (const item of snapshot) {
         const list = byPlugin.get(item.entry.pluginId) ?? [];
         list.push(item);
         byPlugin.set(item.entry.pluginId, list);
       }
 
-      const rows: string[][] = [];
+      const lines: string[] = [];
       for (const [pluginId, items] of byPlugin) {
-        for (const { entry, value, isDefault } of items) {
-          const marker = isDefault ? '' : '*';
-          let displayValue: string;
-          if (entry.type === 'flag') {
-            displayValue = value ? 'ON' : 'OFF';
-          } else if (value === '' && isDefault) {
-            displayValue = '(default)';
-          } else if (value === '') {
-            displayValue = '(not set)';
-          } else {
-            displayValue = String(value);
-          }
-          rows.push([
-            `[${pluginId}]`,
-            entry.key,
-            entry.type,
-            displayValue + (marker ? ` ${marker}` : ''),
-            entry.description,
-          ]);
-        }
+        const pluginPrefix = `[${pluginId}] `;
+        const flags = items.filter((s) => s.entry.type === 'flag');
+        const others = items.filter((s) => s.entry.type !== 'flag');
+        lines.push(...formatFlagGrid(flags, pluginPrefix));
+        lines.push(...formatValueLines(others, pluginPrefix));
       }
-      ctx.reply(formatTable(rows));
+      ctx.reply(lines.join('\n'));
     },
   );
 }

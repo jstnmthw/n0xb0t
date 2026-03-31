@@ -54,32 +54,29 @@ describe('channel-commands', () => {
       expect(ctx.reply.mock.calls[0][0]).toContain('#test');
     });
 
-    it('lists settings showing ON for true flag, (not set) for empty string, and * for non-defaults', async () => {
+    it('lists settings with +/- flag grid and * for non-defaults', async () => {
       channelSettings.register('myplugin', [
         { key: 'myflag', type: 'flag', default: false, description: 'A flag' },
         { key: 'mystr', type: 'string', default: '', description: 'A string' },
       ]);
-      // Set flag to true (covers value ? 'ON' branch) and string to non-default (covers ' *' marker)
       channelSettings.set('#test', 'myflag', true);
       channelSettings.set('#test', 'mystr', 'hello');
 
       const ctx = makeCtx();
       await handler.execute('.chanset #test', ctx);
       const output = ctx.reply.mock.calls.map((c) => c[0]).join('\n');
-      expect(output).toContain('ON');
-      expect(output).toContain('hello');
-      expect(output).toContain('*'); // non-default marker
+      expect(output).toContain('+myflag*'); // flag ON, overridden
+      expect(output).toContain('mystr*: hello'); // string overridden
     });
 
     it('shows (not set) for empty string settings at default value', async () => {
       channelSettings.register('myplugin', [
         { key: 'mystr', type: 'string', default: '', description: 'A string' },
       ]);
-      // default is '' — String('') is falsy, so display = '(not set)'
       const ctx = makeCtx();
       await handler.execute('.chanset #test', ctx);
       const output = ctx.reply.mock.calls.map((c) => c[0]).join('\n');
-      expect(output).toContain('(not set)');
+      expect(output).toContain('mystr: (not set)');
     });
 
     it('shows unknown setting error', async () => {

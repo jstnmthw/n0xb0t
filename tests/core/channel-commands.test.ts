@@ -103,17 +103,23 @@ describe('channel-commands', () => {
       expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('+protect_topic'));
     });
 
-    it('show current flag value (false/OFF)', async () => {
+    it('show current flag value with description (false/OFF)', async () => {
       const ctx = makeCtx();
       await handler.execute('.chanset #test protect_topic', ctx);
-      expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('OFF'));
+      const msg = ctx.reply.mock.calls[0][0];
+      expect(msg).toContain('OFF');
+      expect(msg).toContain('(flag)');
+      expect(msg).toContain('Restore topic if changed');
     });
 
-    it('show current flag value (true/ON)', async () => {
+    it('show current flag value with description (true/ON)', async () => {
       cs.set('#test', 'protect_topic', true);
       const ctx = makeCtx();
       await handler.execute('.chanset #test protect_topic', ctx);
-      expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('ON'));
+      const msg = ctx.reply.mock.calls[0][0];
+      expect(msg).toContain('ON');
+      expect(msg).toContain('(flag)');
+      expect(msg).toContain('Restore topic if changed');
     });
   });
 
@@ -129,17 +135,33 @@ describe('channel-commands', () => {
       expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('Hello {nick}!'));
     });
 
-    it('key (no value) shows current value', async () => {
+    it('key (no value) shows current value with description', async () => {
       cs.set('#test', 'greet_msg', 'Custom greeting');
       const ctx = makeCtx();
       await handler.execute('.chanset #test greet_msg', ctx);
-      expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('Custom greeting'));
+      const msg = ctx.reply.mock.calls[0][0];
+      expect(msg).toContain('Custom greeting');
+      expect(msg).toContain('(string)');
+      expect(msg).toContain('Join greeting');
     });
 
-    it('key (no value) shows default when not set', async () => {
+    it('key (no value) shows default with description when not set', async () => {
       const ctx = makeCtx();
       await handler.execute('.chanset #test greet_msg', ctx);
-      expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('default'));
+      const msg = ctx.reply.mock.calls[0][0];
+      expect(msg).toContain('default');
+      expect(msg).toContain('(string)');
+      expect(msg).toContain('Join greeting');
+    });
+
+    it('key (no value) shows (not set) for empty string with description', async () => {
+      cs.register('tmp', [{ key: 'prefix', type: 'string', default: '', description: 'A prefix' }]);
+      const ctx = makeCtx();
+      await handler.execute('.chanset #test prefix', ctx);
+      const msg = ctx.reply.mock.calls[0][0];
+      expect(msg).toContain('(not set)');
+      expect(msg).toContain('(string)');
+      expect(msg).toContain('A prefix');
     });
   });
 
@@ -185,13 +207,41 @@ describe('channel-commands', () => {
       expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('Unknown setting'));
     });
 
-    it('missing key arg → lists available settings', async () => {
+    it('missing key arg → lists settings with flag grid and value lines', async () => {
       const ctx = makeCtx();
       await handler.execute('.chanset #test', ctx);
-      // First reply is the header line
       expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('Settings for #test'));
-      // Subsequent replies list individual settings
-      expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('protect_topic'));
+      const output = ctx.reply.mock.calls.map((c: string[]) => c[0]).join('\n');
+      // Flags shown as +/- grid
+      expect(output).toContain('-protect_topic');
+      // String/int shown as key: value
+      expect(output).toContain('greet_msg: Welcome!');
+      expect(output).toContain('max_lines: 5');
+    });
+
+    it('pads multiple flags into aligned grid rows', async () => {
+      cs.register('multi', [
+        { key: 'flagA', type: 'flag', default: false, description: 'A' },
+        { key: 'flagB', type: 'flag', default: true, description: 'B' },
+      ]);
+      const ctx = makeCtx();
+      await handler.execute('.chanset #test', ctx);
+      const output = ctx.reply.mock.calls.map((c: string[]) => c[0]).join('\n');
+      // Multiple flags on same line, padded to uniform width
+      expect(output).toMatch(/-protect_topic\s+-flagA\s+\+flagB/);
+    });
+
+    it('lists only value lines when no flags are registered', async () => {
+      cs.unregister('testplugin');
+      cs.register('stronly', [
+        { key: 'mystr', type: 'string', default: 'hi', description: 'A string' },
+      ]);
+      const ctx = makeCtx();
+      await handler.execute('.chanset #test', ctx);
+      const output = ctx.reply.mock.calls.map((c: string[]) => c[0]).join('\n');
+      expect(output).toContain('mystr: hi');
+      expect(output).not.toContain('+');
+      expect(output).not.toContain('-');
     });
 
     it('empty key after stripping prefix → usage error', async () => {
@@ -206,28 +256,28 @@ describe('channel-commands', () => {
   // ---------------------------------------------------------------------------
 
   describe('.chaninfo', () => {
-    it('lists all defs grouped by plugin with * markers for set values', async () => {
+    it('lists all defs grouped by plugin with +/- flags and * markers', async () => {
       cs.set('#test', 'protect_topic', true);
       const ctx = makeCtx();
       await handler.execute('.chaninfo #test', ctx);
 
-      // First reply is the header, second is the table
       const calls = ctx.reply.mock.calls.map((c: string[]) => c[0]);
       const header = calls.find((l: string) => l.includes('Channel settings'));
       expect(header).toBeDefined();
       expect(header).toContain('1 set');
       expect(header).toContain('2 default');
 
-      // Split all output into individual lines for per-row assertions
       const allLines = calls.flatMap((c: string) => c.split('\n'));
 
+      // Flag displayed as +protect_topic* (ON, overridden)
       const protectLine = allLines.find((l: string) => l.includes('protect_topic'));
       expect(protectLine).toBeDefined();
-      expect(protectLine).toContain('ON');
-      expect(protectLine).toContain('*');
+      expect(protectLine).toContain('+protect_topic*');
 
+      // String at default — no * marker
       const greetLine = allLines.find((l: string) => l.includes('greet_msg'));
       expect(greetLine).toBeDefined();
+      expect(greetLine).toContain('greet_msg: Welcome!');
       expect(greetLine).not.toContain('*');
     });
 
@@ -253,15 +303,15 @@ describe('channel-commands', () => {
       expect(settingsHeader).toBeUndefined();
     });
 
-    it('shows OFF for an unset flag (default=false)', async () => {
+    it('shows -flag for an unset flag (default=false)', async () => {
       const ctx = makeCtx();
       await handler.execute('.chaninfo #test', ctx);
       const allLines = ctx.reply.mock.calls.flatMap((c: string[]) => c[0].split('\n'));
       const protectLine = allLines.find((l: string) => l.includes('protect_topic'));
-      expect(protectLine).toContain('OFF');
+      expect(protectLine).toContain('-protect_topic');
     });
 
-    it('shows (default) for a string setting with empty-string default', async () => {
+    it('shows (not set) for a string setting with empty-string default', async () => {
       cs.register('tmpplugin', [
         { key: 'prefix', type: 'string', default: '', description: 'Prefix' },
       ]);
@@ -269,16 +319,16 @@ describe('channel-commands', () => {
       await handler.execute('.chaninfo #test', ctx);
       const allLines = ctx.reply.mock.calls.flatMap((c: string[]) => c[0].split('\n'));
       const prefixLine = allLines.find((l: string) => l.includes('prefix'));
-      expect(prefixLine).toContain('(default)');
+      expect(prefixLine).toContain('prefix: (not set)');
     });
 
-    it('shows (not set) for a string explicitly set to empty', async () => {
+    it('shows (not set) with * for a string explicitly set to empty', async () => {
       cs.set('#test', 'greet_msg', '');
       const ctx = makeCtx();
       await handler.execute('.chaninfo #test', ctx);
       const allLines = ctx.reply.mock.calls.flatMap((c: string[]) => c[0].split('\n'));
       const greetLine = allLines.find((l: string) => l.includes('greet_msg'));
-      expect(greetLine).toContain('(not set)');
+      expect(greetLine).toContain('greet_msg*: (not set)');
     });
   });
 });
