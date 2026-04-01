@@ -1,50 +1,13 @@
-import type { Socket } from 'node:net';
 import { Duplex } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 
 import { CommandHandler } from '../../src/command-handler';
 import type { CommandContext } from '../../src/command-handler';
 import { BotLinkHub, BotLinkLeaf, hashPassword } from '../../src/core/botlink';
-import type { LinkFrame } from '../../src/core/botlink';
 import { Permissions } from '../../src/core/permissions';
 import { BotEventBus } from '../../src/event-bus';
 import type { BotlinkConfig } from '../../src/types';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function createMockSocket(): Socket & { written: string[] } {
-  const written: string[] = [];
-  const socket = new Duplex({
-    read() {},
-    write(chunk, _enc, cb) {
-      written.push(chunk.toString());
-      cb();
-    },
-  });
-  (socket as unknown as { written: string[] }).written = written;
-  return socket as unknown as Socket & { written: string[] };
-}
-
-function pushFrame(socket: Socket, frame: LinkFrame): void {
-  (socket as unknown as Duplex).push(JSON.stringify(frame) + '\r\n');
-}
-
-function parseWritten(written: string[]): LinkFrame[] {
-  const frames: LinkFrame[] = [];
-  for (const chunk of written) {
-    for (const line of chunk.split('\r\n')) {
-      if (!line.trim()) continue;
-      try {
-        frames.push(JSON.parse(line));
-      } catch {
-        /* skip */
-      }
-    }
-  }
-  return frames;
-}
+import { createMockSocket, parseWritten, pushFrame } from '../helpers/mock-socket';
 
 async function tick(): Promise<void> {
   await new Promise((resolve) => setImmediate(resolve));
@@ -83,8 +46,8 @@ function leafConfig(): BotlinkConfig {
 async function setupLinkedPair(): Promise<{
   hub: BotLinkHub;
   leaf: BotLinkLeaf;
-  hubSocket: Socket & { written: string[] };
-  leafSocket: Socket & { written: string[] };
+  hubSocket: { written: string[]; duplex: Duplex };
+  leafSocket: { written: string[]; duplex: Duplex };
   hubPerms: Permissions;
   leafPerms: Permissions;
   hubHandler: CommandHandler;
@@ -139,25 +102,25 @@ async function setupLinkedPair(): Promise<{
   leaf.setCommandRelay(leafHandler, leafPerms);
 
   // Connect via mock sockets
-  const hubSocket = createMockSocket();
-  hub.addConnection(hubSocket);
-  pushFrame(hubSocket, { type: 'HELLO', botname: 'leaf1', password: HASH, version: '1.0' });
+  const { socket: hubSock, written: hubWritten, duplex: hubDuplex } = createMockSocket();
+  hub.addConnection(hubSock);
+  pushFrame(hubDuplex, { type: 'HELLO', botname: 'leaf1', password: HASH, version: '1.0' });
   await tick();
 
-  const leafSocket = createMockSocket();
-  leaf.connectWithSocket(leafSocket);
-  pushFrame(leafSocket, { type: 'WELCOME', botname: 'hub', version: '1.0' });
+  const { socket: leafSock, written: leafWritten, duplex: leafDuplex } = createMockSocket();
+  leaf.connectWithSocket(leafSock);
+  pushFrame(leafDuplex, { type: 'WELCOME', botname: 'hub', version: '1.0' });
   await tick();
 
   // Clear handshake frames
-  hubSocket.written.length = 0;
-  leafSocket.written.length = 0;
+  hubWritten.length = 0;
+  leafWritten.length = 0;
 
   return {
     hub,
     leaf,
-    hubSocket,
-    leafSocket,
+    hubSocket: { written: hubWritten, duplex: hubDuplex },
+    leafSocket: { written: leafWritten, duplex: leafDuplex },
     hubPerms,
     leafPerms,
     hubHandler,
@@ -189,7 +152,7 @@ describe('Command relay', () => {
       expect(cmdFrame!.fromHandle).toBe('admin');
 
       // Simulate hub processing: push CMD_RESULT back to leaf
-      pushFrame(leafSocket, {
+      pushFrame(leafSocket.duplex, {
         type: 'CMD_RESULT',
         ref: String(cmdFrame!.ref),
         output: ['User "newuser" added'],
@@ -229,7 +192,7 @@ describe('Command relay', () => {
       const { hub, hubSocket, hubPerms } = await setupLinkedPair();
 
       // Send a CMD frame as if from leaf
-      pushFrame(hubSocket, {
+      pushFrame(hubSocket.duplex, {
         type: 'CMD',
         command: 'adduser',
         args: 'newuser *!new@host.com o',
@@ -258,7 +221,7 @@ describe('Command relay', () => {
     it('rejects CMD from unknown user handle', async () => {
       const { hub, hubSocket } = await setupLinkedPair();
 
-      pushFrame(hubSocket, {
+      pushFrame(hubSocket.duplex, {
         type: 'CMD',
         command: 'adduser',
         args: 'someone *!s@h o',
@@ -283,7 +246,7 @@ describe('Command relay', () => {
       // Add a user with only 'v' flag (insufficient for .adduser which needs +n)
       hubPerms.addUser('viewer', '*!v@host', 'v');
 
-      pushFrame(hubSocket, {
+      pushFrame(hubSocket.duplex, {
         type: 'CMD',
         command: 'adduser',
         args: 'someone *!s@h o',

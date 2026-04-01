@@ -102,7 +102,7 @@ export function setupProtection(
       api.log(`Rejoined ${channel} after being kicked`);
 
       // Schedule revenge after rejoin (if configured per-channel)
-      const revenge = api.channelSettings.get(channel, 'revenge') as boolean;
+      const revenge = api.channelSettings.getFlag(channel, 'revenge');
       if (!revenge || !kickerNick) return;
 
       const revengeTimer = setTimeout(() => {

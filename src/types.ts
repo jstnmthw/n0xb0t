@@ -476,8 +476,14 @@ export type ChannelSettingChangeCallback = (
 export interface PluginChannelSettings {
   /** Declare per-channel setting definitions for this plugin. Call once in init(). */
   register(defs: ChannelSettingDef[]): void;
-  /** Read a per-channel setting. Returns def.default if not set by an operator. */
+  /** Read a per-channel setting (untyped union). Returns def.default if not set. */
   get(channel: string, key: string): ChannelSettingValue;
+  /** Read a flag (boolean) setting. Returns `false` for unknown keys. */
+  getFlag(channel: string, key: string): boolean;
+  /** Read a string setting. Returns `''` for unknown keys. */
+  getString(channel: string, key: string): string;
+  /** Read an int setting. Returns `0` for unknown keys. */
+  getInt(channel: string, key: string): number;
   /** Write a per-channel setting (for plugin-managed settings, e.g. topic text). */
   set(channel: string, key: string, value: ChannelSettingValue): void;
   /** True if an operator has explicitly set this value (not relying on default). */

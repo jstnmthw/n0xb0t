@@ -317,6 +317,26 @@ describe('IRCBridge', () => {
 
       dispatcher.unbindAll('test');
     });
+
+    it('should skip mode event when modes entry has a non-string mode value (isModeEntry type check)', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('mode', '-', '*', handler, 'test');
+
+      client.simulateEvent('mode', {
+        nick: 'chanop',
+        ident: 'op',
+        hostname: 'op.host',
+        target: '#test',
+        modes: [{ mode: 123 }],
+      });
+
+      await Promise.resolve();
+
+      // isModeArray([{mode: 123}]) returns false → onMode returns early
+      expect(handler).not.toHaveBeenCalled();
+
+      dispatcher.unbindAll('test');
+    });
   });
 
   describe('notice events', () => {

@@ -193,10 +193,10 @@ export function init(api: PluginAPI): void {
   api.bind('topic', '-', '*', (ctx: HandlerContext) => {
     const channel = ctx.channel!;
 
-    const protect = api.channelSettings.get(channel, 'protect_topic') as boolean;
+    const protect = api.channelSettings.getFlag(channel, 'protect_topic');
     if (!protect) return;
 
-    const enforced = api.channelSettings.get(channel, 'topic_text') as string;
+    const enforced = api.channelSettings.getString(channel, 'topic_text');
     if (!enforced) return; // no lock set
     if (ctx.text === enforced) return; // already correct — bot's own echo or a matching change
 

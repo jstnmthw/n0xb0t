@@ -62,6 +62,24 @@ export class ChannelSettings {
     return this.coerce(def, stored);
   }
 
+  /** Read a flag (boolean) setting. Returns false for unknown keys. */
+  getFlag(channel: string, key: string): boolean {
+    const val = this.get(channel, key);
+    return typeof val === 'boolean' ? val : false;
+  }
+
+  /** Read a string setting. Returns '' for unknown keys. */
+  getString(channel: string, key: string): string {
+    const val = this.get(channel, key);
+    return typeof val === 'string' ? val : '';
+  }
+
+  /** Read an int setting. Returns 0 for unknown keys. */
+  getInt(channel: string, key: string): number {
+    const val = this.get(channel, key);
+    return typeof val === 'number' ? val : 0;
+  }
+
   /**
    * Store a per-channel setting value. No-ops with a warning if the key is unknown.
    */

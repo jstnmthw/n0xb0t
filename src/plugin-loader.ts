@@ -215,7 +215,7 @@ export class PluginLoader {
       mod = await this.importWithCacheBust(absPath);
     } catch (err) {
       const name = this.inferPluginName(absPath);
-      const message = (err as Error).message;
+      const message = err instanceof Error ? err.message : String(err);
       return { name, status: 'error', error: `Failed to import plugin: ${message}` };
     }
 
@@ -263,7 +263,7 @@ export class PluginLoader {
         await result;
       }
     } catch (err) {
-      const message = (err as Error).message;
+      const message = err instanceof Error ? err.message : String(err);
       // Clean up any binds registered before the error
       this.dispatcher.unbindAll(pluginName);
       return { name: pluginName, status: 'error', error: `Plugin init() threw: ${message}` };
@@ -849,6 +849,15 @@ function createPluginChannelSettingsApi(
     },
     get(channel: string, key: string): ChannelSettingValue {
       return channelSettings!.get(channel, key);
+    },
+    getFlag(channel: string, key: string): boolean {
+      return channelSettings!.getFlag(channel, key);
+    },
+    getString(channel: string, key: string): string {
+      return channelSettings!.getString(channel, key);
+    },
+    getInt(channel: string, key: string): number {
+      return channelSettings!.getInt(channel, key);
     },
     set(channel: string, key: string, value: ChannelSettingValue): void {
       channelSettings?.set(channel, key, value);

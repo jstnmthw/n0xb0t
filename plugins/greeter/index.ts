@@ -70,7 +70,7 @@ export function init(api: PluginAPI): void {
     const channel = ctx.channel!;
 
     // Precedence: user custom greet > channel greet_msg setting > global default
-    let greeting = api.channelSettings.get(channel, 'greet_msg') as string;
+    let greeting = api.channelSettings.getString(channel, 'greet_msg');
 
     const hostmask = `${ctx.nick}!${ctx.ident}@${ctx.hostname}`;
     const record = api.permissions.findByHostmask(hostmask);

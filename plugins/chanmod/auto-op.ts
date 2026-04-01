@@ -20,7 +20,7 @@ export function setupAutoOp(
       return;
     }
 
-    const autoOp = api.channelSettings.get(channel, 'auto_op') as boolean;
+    const autoOp = api.channelSettings.getFlag(channel, 'auto_op');
     if (!autoOp) return;
 
     const { ident, hostname } = ctx;

@@ -1,16 +1,22 @@
-import { Duplex } from 'node:stream';
+import type { Socket } from 'node:net';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { CommandHandler } from '../../src/command-handler';
 import {
   DCCManager,
   DCCSession,
+  RangePortAllocator,
   ipToDecimal,
   isPassiveDcc,
   parseDccChatPayload,
 } from '../../src/core/dcc';
-import type { DCCIRCClient } from '../../src/core/dcc';
-import type { Logger } from '../../src/logger';
+import type { DCCIRCClient, DCCSessionManager } from '../../src/core/dcc';
+import type { Permissions } from '../../src/core/permissions';
+import type { Services } from '../../src/core/services';
+import type { EventDispatcher } from '../../src/dispatcher';
 import type { DccConfig, HandlerContext, UserRecord } from '../../src/types';
+import { createMockLogger } from '../helpers/mock-logger';
+import { createMockSocket } from '../helpers/mock-socket';
 
 // ---------------------------------------------------------------------------
 // Helpers — unit tests
@@ -147,35 +153,37 @@ function makePermissions(user: UserRecord | null) {
   return {
     findByHostmask: vi.fn().mockReturnValue(user),
     checkFlags: vi.fn().mockReturnValue(true),
-  } as unknown as import('../../src/core/permissions.js').Permissions;
+  } as unknown as Permissions;
 }
 
 function makeServices(verified = true) {
   return {
     verifyUser: vi.fn().mockResolvedValue({ verified, account: 'testaccount' }),
     isAvailable: vi.fn().mockReturnValue(true),
-  } as unknown as import('../../src/core/services.js').Services;
+  } as unknown as Services;
 }
 
 function makeDispatcher() {
   return {
     bind: vi.fn(),
     unbindAll: vi.fn(),
-  } as unknown as import('../../src/dispatcher.js').EventDispatcher;
+  } as unknown as EventDispatcher;
 }
 
 function makeCommandHandler() {
   return {
     execute: vi.fn(),
-  } as unknown as import('../../src/command-handler.js').CommandHandler;
+  } as unknown as CommandHandler;
 }
 
 describe('DCCManager', () => {
   let client: MockIRCClient;
   let manager: DCCManager;
+  let sessions: Map<string, DCCSession>;
 
   beforeEach(() => {
     client = new MockIRCClient();
+    sessions = new Map<string, DCCSession>();
     manager = new DCCManager({
       client,
       dispatcher: makeDispatcher(),
@@ -185,6 +193,7 @@ describe('DCCManager', () => {
       config: makeConfig(),
       version: '1.0.0',
       botNick: 'hexbot',
+      sessions,
     });
   });
 
@@ -344,9 +353,9 @@ describe('DCCManager', () => {
     const sessionA = { handle: 'alice', nick: 'alice', writeLine: writeA } as unknown as DCCSession;
     const sessionB = { handle: 'bob', nick: 'bob', writeLine: writeB } as unknown as DCCSession;
 
-    // Manually inject sessions for testing broadcast
-    (manager as unknown as { sessions: Map<string, DCCSession> }).sessions.set('alice', sessionA);
-    (manager as unknown as { sessions: Map<string, DCCSession> }).sessions.set('bob', sessionB);
+    // Inject sessions for testing broadcast
+    sessions.set('alice', sessionA);
+    sessions.set('bob', sessionB);
 
     manager.broadcast('alice', 'hello');
 
@@ -360,8 +369,8 @@ describe('DCCManager', () => {
     const sessionA = { handle: 'alice', nick: 'alice', writeLine: writeA } as unknown as DCCSession;
     const sessionB = { handle: 'bob', nick: 'bob', writeLine: writeB } as unknown as DCCSession;
 
-    (manager as unknown as { sessions: Map<string, DCCSession> }).sessions.set('alice', sessionA);
-    (manager as unknown as { sessions: Map<string, DCCSession> }).sessions.set('bob', sessionB);
+    sessions.set('alice', sessionA);
+    sessions.set('bob', sessionB);
 
     manager.announce('*** bot is shutting down');
 
@@ -370,20 +379,17 @@ describe('DCCManager', () => {
   });
 
   it('allocatePort returns null when range is exhausted', () => {
-    const m = new DCCManager({
-      client,
-      dispatcher: makeDispatcher(),
-      permissions: makePermissions(makeUser()),
-      services: makeServices(),
-      commandHandler: makeCommandHandler(),
-      config: makeConfig({ port_range: [50000, 50000] }), // only one port
-      version: '1.0.0',
-      botNick: 'hexbot',
-    });
-    // Mark the only port as in use
-    (m as unknown as { allocatedPorts: Set<number> }).allocatedPorts.add(50000);
-    const port = (m as unknown as { allocatePort: () => number | null }).allocatePort();
-    expect(port).toBeNull();
+    const portAllocator = new RangePortAllocator([50000, 50000]);
+    portAllocator.markUsed(50000);
+    expect(portAllocator.allocate()).toBeNull();
+  });
+
+  it('RangePortAllocator.release frees a port', () => {
+    const portAllocator = new RangePortAllocator([50000, 50000]);
+    portAllocator.markUsed(50000);
+    expect(portAllocator.allocate()).toBeNull();
+    portAllocator.release(50000);
+    expect(portAllocator.allocate()).toBe(50000);
   });
 
   it('respects max_sessions limit', async () => {
@@ -394,6 +400,7 @@ describe('DCCManager', () => {
         handler = fn;
       },
     );
+    const localSessions = new Map<string, DCCSession>();
     const m = new DCCManager({
       client,
       dispatcher,
@@ -403,6 +410,7 @@ describe('DCCManager', () => {
       config: makeConfig({ max_sessions: 1 }),
       version: '1.0.0',
       botNick: 'hexbot',
+      sessions: localSessions,
     });
     m.attach();
 
@@ -412,7 +420,7 @@ describe('DCCManager', () => {
       nick: 'other',
       writeLine: vi.fn(),
     } as unknown as DCCSession;
-    (m as unknown as { sessions: Map<string, DCCSession> }).sessions.set('other', fakeSession);
+    localSessions.set('other', fakeSession);
 
     await handler(makeCtx('testnick'));
     expect(client.notices.some((n) => n.message.includes('maximum sessions'))).toBe(true);
@@ -426,6 +434,7 @@ describe('DCCManager', () => {
         handler = fn;
       },
     );
+    const localSessions = new Map<string, DCCSession>();
     const m = new DCCManager({
       client,
       dispatcher,
@@ -435,6 +444,7 @@ describe('DCCManager', () => {
       config: makeConfig(),
       version: '1.0.0',
       botNick: 'hexbot',
+      sessions: localSessions,
     });
     m.attach();
 
@@ -444,7 +454,7 @@ describe('DCCManager', () => {
       writeLine: vi.fn(),
       close: vi.fn(),
     } as unknown as DCCSession;
-    (m as unknown as { sessions: Map<string, DCCSession> }).sessions.set('testnick', fakeSession);
+    localSessions.set('testnick', fakeSession);
 
     await handler(makeCtx('testnick'));
     expect(client.notices.some((n) => n.message.includes('active session'))).toBe(true);
@@ -458,6 +468,8 @@ describe('DCCManager', () => {
         handler = fn;
       },
     );
+    const portAllocator = new RangePortAllocator([50000, 50000]);
+    portAllocator.markUsed(50000);
     const m = new DCCManager({
       client,
       dispatcher,
@@ -467,10 +479,9 @@ describe('DCCManager', () => {
       config: makeConfig({ nickserv_verify: true, port_range: [50000, 50000] }),
       version: '1.0.0',
       botNick: 'hexbot',
+      portAllocator,
     });
     m.attach();
-    // Exhaust the port range so we bail before real TCP
-    (m as unknown as { allocatedPorts: Set<number> }).allocatedPorts.add(50000);
 
     await handler(makeCtx());
     // Port exhausted → notice (proves the NickServ check passed without rejecting)
@@ -511,6 +522,8 @@ describe('DCCManager', () => {
         handler = fn;
       },
     );
+    const portAllocator = new RangePortAllocator([50000, 50000]);
+    portAllocator.markUsed(50000);
     const m = new DCCManager({
       client,
       dispatcher,
@@ -520,9 +533,9 @@ describe('DCCManager', () => {
       config: makeConfig({ port_range: [50000, 50000] }),
       version: '1.0.0',
       botNick: 'hexbot',
+      portAllocator,
     });
     m.attach();
-    (m as unknown as { allocatedPorts: Set<number> }).allocatedPorts.add(50000);
 
     await handler(makeCtx());
     expect(client.notices.some((n) => n.message.includes('no ports available'))).toBe(true);
@@ -536,10 +549,7 @@ describe('DCCManager', () => {
       writeLine: vi.fn(),
       close: closeSpy,
     } as unknown as DCCSession;
-    (manager as unknown as { sessions: Map<string, DCCSession> }).sessions.set(
-      'alice',
-      fakeSession,
-    );
+    sessions.set('alice', fakeSession);
 
     manager.detach('test shutdown');
     expect(closeSpy).toHaveBeenCalledWith('test shutdown');
@@ -552,10 +562,7 @@ describe('DCCManager', () => {
       writeLine: vi.fn(),
       connectedAt: Date.now(),
     } as unknown as DCCSession;
-    (manager as unknown as { sessions: Map<string, DCCSession> }).sessions.set(
-      'alice',
-      fakeSession,
-    );
+    sessions.set('alice', fakeSession);
     expect(manager.getSessionList().length).toBe(1);
     manager.removeSession('alice');
     expect(manager.getSessionList().length).toBe(0);
@@ -569,7 +576,7 @@ describe('DCCManager', () => {
       writeLine: vi.fn(),
       connectedAt: Date.now(),
     } as unknown as DCCSession;
-    (manager as unknown as { sessions: Map<string, DCCSession> }).sessions.set('bob', fakeSession);
+    sessions.set('bob', fakeSession);
     manager.removeSession('bob');
     expect(manager.getSessionList().length).toBe(0);
   });
@@ -579,41 +586,31 @@ describe('DCCManager', () => {
 // DCCSession — unit tests using a mock Duplex socket
 // ---------------------------------------------------------------------------
 
-function makeMockSocket(): {
-  socket: import('node:net').Socket;
-  written: string[];
-  duplex: Duplex;
-} {
-  const written: string[] = [];
-  const duplex = new Duplex({
-    read() {},
-    write(chunk, _enc, cb) {
-      written.push(Buffer.isBuffer(chunk) ? chunk.toString() : String(chunk));
-      cb();
-    },
-  });
-  return { socket: duplex as unknown as import('node:net').Socket, written, duplex };
+function makeMockSocket() {
+  return createMockSocket();
 }
 
 function makeMockManagerForSession(
   overrides: Partial<{
     sessionList: Array<{ handle: string; nick: string; connectedAt: number }>;
   }> = {},
-) {
+): DCCSessionManager {
   return {
     getSessionList: vi.fn().mockReturnValue(overrides.sessionList ?? []),
     broadcast: vi.fn(),
     removeSession: vi.fn(),
     announce: vi.fn(),
     notifyPartyPart: vi.fn(),
-  } as unknown as DCCManager;
+    getBotName: vi.fn().mockReturnValue('hexbot'),
+    onRelayEnd: null,
+  };
 }
 
 function buildSession(
-  socket: import('node:net').Socket,
+  socket: Socket,
   overrides: {
-    manager?: DCCManager;
-    commandHandler?: import('../../src/command-handler.js').CommandHandler;
+    manager?: DCCSessionManager;
+    commandHandler?: CommandHandler;
     idleTimeoutMs?: number;
     user?: UserRecord;
   } = {},
@@ -671,13 +668,7 @@ describe('DCCSession', () => {
 
   it('close logs with "unknown" fallback when no reason is given (with a logger)', () => {
     const { socket } = makeMockSocket();
-    const logger = {
-      info: vi.fn(),
-      debug: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-      child: vi.fn(),
-    } as unknown as Logger;
+    const logger = createMockLogger();
     const session = new DCCSession({
       manager: makeMockManagerForSession(),
       user: makeUser(),
@@ -926,8 +917,8 @@ describe('DCCSession relay mode', () => {
   it('.relay end exits relay mode', async () => {
     const { socket, written, duplex } = makeMockSocket();
     const mgr = makeMockManagerForSession();
-    (mgr as unknown as Record<string, unknown>).getBotName = vi.fn().mockReturnValue('mybot');
-    (mgr as unknown as Record<string, unknown>).onRelayEnd = vi.fn();
+    (mgr.getBotName as ReturnType<typeof vi.fn>).mockReturnValue('mybot');
+    mgr.onRelayEnd = vi.fn();
     const session = buildSession(socket, { manager: mgr });
     session.start('1.0.0', 'hexbot');
 
@@ -943,8 +934,8 @@ describe('DCCSession relay mode', () => {
   it('.quit exits relay mode', async () => {
     const { socket, written, duplex } = makeMockSocket();
     const mgr = makeMockManagerForSession();
-    (mgr as unknown as Record<string, unknown>).getBotName = vi.fn().mockReturnValue('mybot');
-    (mgr as unknown as Record<string, unknown>).onRelayEnd = vi.fn();
+    (mgr.getBotName as ReturnType<typeof vi.fn>).mockReturnValue('mybot');
+    mgr.onRelayEnd = vi.fn();
     const session = buildSession(socket, { manager: mgr });
     session.start('1.0.0', 'hexbot');
 
@@ -989,16 +980,16 @@ describe('DCCManager new methods', () => {
       removeListener: vi.fn(),
     };
     const mgr = new DCCManager({
-      client: client as unknown as import('../../src/core/dcc').DCCIRCClient,
+      client: client as unknown as DCCIRCClient,
       dispatcher: {
         bind: vi.fn(),
         unbindAll: vi.fn(),
-      } as unknown as import('../../src/dispatcher').EventDispatcher,
+      } as unknown as EventDispatcher,
       permissions: {
         findByHostmask: vi.fn(),
         checkFlags: vi.fn(),
-      } as unknown as import('../../src/core/permissions').Permissions,
-      services: { verifyUser: vi.fn() } as unknown as import('../../src/core/services').Services,
+      } as unknown as Permissions,
+      services: { verifyUser: vi.fn() } as unknown as Services,
       commandHandler: makeCommandHandler(),
       config: {
         enabled: true,
@@ -1025,16 +1016,16 @@ describe('DCCManager new methods', () => {
       removeListener: vi.fn(),
     };
     const mgr = new DCCManager({
-      client: client as unknown as import('../../src/core/dcc').DCCIRCClient,
+      client: client as unknown as DCCIRCClient,
       dispatcher: {
         bind: vi.fn(),
         unbindAll: vi.fn(),
-      } as unknown as import('../../src/dispatcher').EventDispatcher,
+      } as unknown as EventDispatcher,
       permissions: {
         findByHostmask: vi.fn(),
         checkFlags: vi.fn(),
-      } as unknown as import('../../src/core/permissions').Permissions,
-      services: { verifyUser: vi.fn() } as unknown as import('../../src/core/services').Services,
+      } as unknown as Permissions,
+      services: { verifyUser: vi.fn() } as unknown as Services,
       commandHandler: makeCommandHandler(),
       config: {
         enabled: true,
@@ -1064,16 +1055,16 @@ describe('DCCManager new methods', () => {
       removeListener: vi.fn(),
     };
     const mgr = new DCCManager({
-      client: client as unknown as import('../../src/core/dcc').DCCIRCClient,
+      client: client as unknown as DCCIRCClient,
       dispatcher: {
         bind: vi.fn(),
         unbindAll: vi.fn(),
-      } as unknown as import('../../src/dispatcher').EventDispatcher,
+      } as unknown as EventDispatcher,
       permissions: {
         findByHostmask: vi.fn(),
         checkFlags: vi.fn(),
-      } as unknown as import('../../src/core/permissions').Permissions,
-      services: { verifyUser: vi.fn() } as unknown as import('../../src/core/services').Services,
+      } as unknown as Permissions,
+      services: { verifyUser: vi.fn() } as unknown as Services,
       commandHandler: makeCommandHandler(),
       config: {
         enabled: true,

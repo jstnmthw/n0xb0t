@@ -17,8 +17,8 @@ export function toEventObject(val: unknown): Record<string, unknown> {
 /** Validate that a single value is an irc-framework mode entry. */
 function isModeEntry(m: unknown): m is { mode?: string; param?: string } {
   if (typeof m !== 'object' || m === null) return false;
-  const rec = m as Record<string, unknown>;
-  return rec.mode === undefined || typeof rec.mode === 'string';
+  if ('mode' in m && m.mode !== undefined && typeof m.mode !== 'string') return false;
+  return true;
 }
 
 /**

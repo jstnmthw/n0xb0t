@@ -1,5 +1,5 @@
 import type { Socket } from 'node:net';
-import { Duplex } from 'node:stream';
+import type { Duplex } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CommandHandler } from '../../../src/command-handler';
@@ -7,7 +7,9 @@ import type { CommandContext } from '../../../src/command-handler';
 import { BotLinkHub, BotLinkLeaf, hashPassword } from '../../../src/core/botlink';
 import type { LinkFrame } from '../../../src/core/botlink';
 import { registerBotlinkCommands } from '../../../src/core/commands/botlink-commands';
+import type { DCCManager } from '../../../src/core/dcc';
 import type { BotlinkConfig } from '../../../src/types';
+import { createMockSocket, parseWritten, pushFrame } from '../../helpers/mock-socket';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -48,40 +50,8 @@ function leafConfig(): BotlinkConfig {
   };
 }
 
-function createMockSocket(): Socket & { written: string[] } {
-  const written: string[] = [];
-  const socket = new Duplex({
-    read() {},
-    write(chunk, _enc, cb) {
-      written.push(chunk.toString());
-      cb();
-    },
-  });
-  (socket as unknown as { written: string[] }).written = written;
-  return socket as unknown as Socket & { written: string[] };
-}
-
-function pushFrame(socket: Socket, frame: LinkFrame): void {
-  (socket as unknown as Duplex).push(JSON.stringify(frame) + '\r\n');
-}
-
 async function tick(): Promise<void> {
   await new Promise((resolve) => setImmediate(resolve));
-}
-
-function parseWritten(written: string[]): LinkFrame[] {
-  const frames: LinkFrame[] = [];
-  for (const chunk of written) {
-    for (const line of chunk.split('\r\n')) {
-      if (!line.trim()) continue;
-      try {
-        frames.push(JSON.parse(line));
-      } catch {
-        /* skip */
-      }
-    }
-  }
-  return frames;
 }
 
 /**
@@ -90,13 +60,13 @@ function parseWritten(written: string[]): LinkFrame[] {
  */
 async function connectLeaf(
   cfg?: BotlinkConfig,
-): Promise<{ leaf: BotLinkLeaf; socket: Socket & { written: string[] } }> {
+): Promise<{ leaf: BotLinkLeaf; socket: Socket; written: string[]; duplex: Duplex }> {
   const leaf = new BotLinkLeaf(cfg ?? leafConfig(), '1.0.0');
-  const socket = createMockSocket();
+  const { socket, written, duplex } = createMockSocket();
   leaf.connectWithSocket(socket);
-  pushFrame(socket, { type: 'WELCOME', botname: 'thehub', version: '1.0' });
+  pushFrame(duplex, { type: 'WELCOME', botname: 'thehub', version: '1.0' });
   await tick();
-  return { leaf, socket };
+  return { leaf, socket, written, duplex };
 }
 
 // ---------------------------------------------------------------------------
@@ -207,16 +177,16 @@ describe('botlink commands', () => {
     async function hubWithLeaf(): Promise<{
       hub: BotLinkHub;
       handler: CommandHandler;
-      leafSocket: Socket & { written: string[] };
+      leafWritten: string[];
     }> {
       hub = new BotLinkHub(hubConfig(), '1.0.0');
       const handler = new CommandHandler();
       registerBotlinkCommands(handler, hub, null, hubConfig());
 
       // Simulate a leaf connecting through the hub
-      const leafSocket = createMockSocket();
+      const { socket: leafSocket, written: leafWritten, duplex: leafDuplex } = createMockSocket();
       hub.addConnection(leafSocket);
-      pushFrame(leafSocket, {
+      pushFrame(leafDuplex, {
         type: 'HELLO',
         botname: 'leaf1',
         password: (await import('../../../src/core/botlink')).hashPassword('secret'),
@@ -224,7 +194,7 @@ describe('botlink commands', () => {
       });
       await tick();
 
-      return { hub, handler, leafSocket };
+      return { hub, handler, leafWritten };
     }
 
     it('.botlink status shows connected leaves', async () => {
@@ -238,16 +208,18 @@ describe('botlink commands', () => {
       expect(replies[1]).toContain('leaf1');
     });
 
-    it('.botlink disconnect with valid leaf sends ERROR frame', async () => {
-      const { handler, leafSocket } = await hubWithLeaf();
+    it('.botlink disconnect with valid leaf closes connection and removes leaf', async () => {
+      const { hub, handler, leafWritten } = await hubWithLeaf();
       const replies: string[] = [];
       await handler.execute('.botlink disconnect leaf1', makeCtx(replies));
 
-      expect(replies[0]).toBe('Disconnecting "leaf1".');
+      expect(replies[0]).toBe('Disconnected "leaf1".');
       // Verify an ERROR frame was sent to the leaf
-      const sent = leafSocket.written.join('');
+      const sent = leafWritten.join('');
       expect(sent).toContain('CLOSING');
       expect(sent).toContain('Disconnected by admin');
+      // Leaf should actually be removed from the hub
+      expect(hub.getLeaves()).toEqual([]);
     });
 
     it('.botlink disconnect with unknown leaf says not found', async () => {
@@ -455,7 +427,7 @@ describe('botlink commands', () => {
       const mockDcc = {
         getSessionList: () => [],
         getSession: () => undefined,
-      } as unknown as import('../../../src/core/dcc').DCCManager;
+      } as unknown as DCCManager;
       registerBotlinkCommands(handler, hub, null, hubConfig(), mockDcc);
 
       const replies: string[] = [];
@@ -472,7 +444,7 @@ describe('botlink commands', () => {
       const mockDcc = {
         getSessionList: () => [],
         getSession: () => mockSession,
-      } as unknown as import('../../../src/core/dcc').DCCManager;
+      } as unknown as DCCManager;
       registerBotlinkCommands(handler, hub, null, hubConfig(), mockDcc);
 
       const replies: string[] = [];
@@ -489,7 +461,7 @@ describe('botlink commands', () => {
       const mockDcc = {
         getSessionList: () => [],
         getSession: () => mockSession,
-      } as unknown as import('../../../src/core/dcc').DCCManager;
+      } as unknown as DCCManager;
       registerBotlinkCommands(handler, hub, null, hubConfig(), mockDcc);
 
       const replies: string[] = [];
@@ -501,16 +473,16 @@ describe('botlink commands', () => {
     it('hub mode: sends relay request and enters relay mode', async () => {
       const hub = new BotLinkHub(hubConfig(), '1.0.0');
       // Connect a leaf so it's a valid target
-      const leafSocket = createMockSocket();
+      const { socket: leafSocket, written: leafWritten, duplex: leafDuplex } = createMockSocket();
       hub.addConnection(leafSocket);
-      pushFrame(leafSocket, {
+      pushFrame(leafDuplex, {
         type: 'HELLO',
         botname: 'leaf1',
         password: hashPassword('secret'),
         version: '1',
       });
       await tick();
-      leafSocket.written.length = 0;
+      leafWritten.length = 0;
 
       const allowAll = { checkFlags: () => true };
       const handler = new CommandHandler(allowAll);
@@ -519,7 +491,7 @@ describe('botlink commands', () => {
       const mockDcc = {
         getSessionList: () => [],
         getSession: () => mockSession,
-      } as unknown as import('../../../src/core/dcc').DCCManager;
+      } as unknown as DCCManager;
       registerBotlinkCommands(handler, hub, null, hubConfig(), mockDcc);
 
       const replies: string[] = [];
@@ -531,8 +503,8 @@ describe('botlink commands', () => {
     });
 
     it('leaf mode: sends relay request via leaf', async () => {
-      const { leaf, socket } = await connectLeaf();
-      socket.written.length = 0;
+      const { leaf, written } = await connectLeaf();
+      written.length = 0;
 
       const allowAll = { checkFlags: () => true };
       const handler = new CommandHandler(allowAll);
@@ -541,7 +513,7 @@ describe('botlink commands', () => {
       const mockDcc = {
         getSessionList: () => [],
         getSession: () => mockSession,
-      } as unknown as import('../../../src/core/dcc').DCCManager;
+      } as unknown as DCCManager;
       registerBotlinkCommands(handler, null, leaf, leafConfig(), mockDcc);
 
       const replies: string[] = [];
@@ -559,7 +531,7 @@ describe('botlink commands', () => {
       const mockDcc = {
         getSessionList: () => [],
         getSession: () => mockSession,
-      } as unknown as import('../../../src/core/dcc').DCCManager;
+      } as unknown as DCCManager;
       registerBotlinkCommands(handler, null, null, hubConfig(), mockDcc);
 
       const replies: string[] = [];
@@ -570,8 +542,8 @@ describe('botlink commands', () => {
 
   describe('.whom command — leaf with hub', () => {
     it('leaf requests whom from hub when connected', async () => {
-      const { leaf, socket } = await connectLeaf();
-      socket.written.length = 0;
+      const { leaf, written, duplex } = await connectLeaf();
+      written.length = 0;
 
       const handler = new CommandHandler();
       registerBotlinkCommands(handler, null, leaf, leafConfig());
@@ -580,12 +552,12 @@ describe('botlink commands', () => {
       await tick();
 
       // Leaf should have sent PARTY_WHOM
-      const sent = parseWritten(socket.written);
+      const sent = parseWritten(written);
       const whom = sent.find((f: LinkFrame) => f.type === 'PARTY_WHOM');
       expect(whom).toBeDefined();
 
       // Respond with a user
-      pushFrame(socket, {
+      pushFrame(duplex, {
         type: 'PARTY_WHOM_REPLY',
         ref: whom!.ref,
         users: [{ handle: 'remote', nick: 'R', botname: 'hub', connectedAt: Date.now(), idle: 0 }],
@@ -598,6 +570,23 @@ describe('botlink commands', () => {
   });
 
   describe('.whom command', () => {
+    it('does not crash when config is null but DCC is enabled', async () => {
+      const handler = new CommandHandler();
+      const mockDcc = {
+        getSessionList: () => [{ handle: 'alice', nick: 'Alice', connectedAt: Date.now() - 5_000 }],
+        getSession: () => undefined,
+      };
+      // config=null simulates DCC enabled without botlink configured
+      registerBotlinkCommands(handler, null, null, null, mockDcc as unknown as DCCManager);
+
+      const replies: string[] = [];
+      await handler.execute('.whom', makeCtx(replies));
+
+      expect(replies[0]).toContain('Console (1 user)');
+      expect(replies[0]).toContain('alice');
+      expect(replies[0]).toContain('unknown'); // fallback botname
+    });
+
     it('reports no users when DCC is not available and no link', async () => {
       const handler = new CommandHandler();
       registerBotlinkCommands(handler, null, null, { ...hubConfig(), enabled: true });
@@ -641,13 +630,7 @@ describe('botlink commands', () => {
         ],
         getSession: () => undefined,
       };
-      registerBotlinkCommands(
-        handler,
-        hub,
-        null,
-        hubConfig(),
-        mockDcc as unknown as import('../../../src/core/dcc').DCCManager,
-      );
+      registerBotlinkCommands(handler, hub, null, hubConfig(), mockDcc as unknown as DCCManager);
 
       const replies: string[] = [];
       await handler.execute('.whom', makeCtx(replies));
@@ -666,13 +649,7 @@ describe('botlink commands', () => {
         getSessionList: () => [{ handle: 'solo', nick: 'Solo', connectedAt: Date.now() - 5_000 }],
         getSession: () => undefined,
       };
-      registerBotlinkCommands(
-        handler,
-        null,
-        null,
-        hubConfig(),
-        mockDcc as unknown as import('../../../src/core/dcc').DCCManager,
-      );
+      registerBotlinkCommands(handler, null, null, hubConfig(), mockDcc as unknown as DCCManager);
 
       const replies: string[] = [];
       await handler.execute('.whom', makeCtx(replies));
@@ -691,13 +668,7 @@ describe('botlink commands', () => {
         ],
         getSession: () => undefined,
       };
-      registerBotlinkCommands(
-        handler,
-        null,
-        null,
-        hubConfig(),
-        mockDcc as unknown as import('../../../src/core/dcc').DCCManager,
-      );
+      registerBotlinkCommands(handler, null, null, hubConfig(), mockDcc as unknown as DCCManager);
 
       const replies: string[] = [];
       await handler.execute('.whom', makeCtx(replies));
@@ -740,18 +711,18 @@ describe('branch coverage edge cases', () => {
 
   it('.bottree with multiple leaves shows ├─ and └─ prefixes', async () => {
     const hub = new BotLinkHub(hubConfig(), '1.0.0');
-    const s1 = createMockSocket();
+    const { socket: s1, duplex: d1 } = createMockSocket();
     hub.addConnection(s1);
-    pushFrame(s1, {
+    pushFrame(d1, {
       type: 'HELLO',
       botname: 'leaf1',
       password: hashPassword('secret'),
       version: '1',
     });
     await tick();
-    const s2 = createMockSocket();
+    const { socket: s2, duplex: d2 } = createMockSocket();
     hub.addConnection(s2);
-    pushFrame(s2, {
+    pushFrame(d2, {
       type: 'HELLO',
       botname: 'leaf2',
       password: hashPassword('secret'),
@@ -771,16 +742,16 @@ describe('branch coverage edge cases', () => {
   it('.whom shows idle time when idle > 0', async () => {
     const hub = new BotLinkHub(hubConfig(), '1.0.0');
     // Inject a remote party user with idle time
-    const socket = createMockSocket();
+    const { socket, duplex } = createMockSocket();
     hub.addConnection(socket);
-    pushFrame(socket, {
+    pushFrame(duplex, {
       type: 'HELLO',
       botname: 'leaf1',
       password: hashPassword('secret'),
       version: '1',
     });
     await tick();
-    pushFrame(socket, { type: 'PARTY_JOIN', handle: 'idler', nick: 'Idler', fromBot: 'leaf1' });
+    pushFrame(duplex, { type: 'PARTY_JOIN', handle: 'idler', nick: 'Idler', fromBot: 'leaf1' });
     await tick();
 
     // Manually set idle on the remote user (hack for testing)
@@ -823,5 +794,350 @@ describe('botlink commands with neither hub nor leaf', () => {
     const replies: string[] = [];
     await handler.execute('.bottree', makeCtx(replies));
     expect(replies).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// .bot command
+// ---------------------------------------------------------------------------
+
+describe('.bot command', () => {
+  it('replies disabled when botlink is not enabled', async () => {
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, null, null, { ...hubConfig(), enabled: false });
+    const replies: string[] = [];
+    await handler.execute('.bot leaf1 status', makeCtx(replies));
+    expect(replies[0]).toBe('Bot link is not enabled.');
+  });
+
+  it('shows usage with no args', async () => {
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, null, null, hubConfig());
+    const replies: string[] = [];
+    await handler.execute('.bot', makeCtx(replies));
+    expect(replies[0]).toContain('Usage');
+  });
+
+  it('shows usage with only botname and no command', async () => {
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, null, null, hubConfig());
+    const replies: string[] = [];
+    await handler.execute('.bot leaf1', makeCtx(replies));
+    expect(replies[0]).toContain('Usage');
+  });
+
+  it('executes locally when target is self', async () => {
+    const allowAll = { checkFlags: () => true };
+    const handler = new CommandHandler(allowAll);
+    handler.registerCommand(
+      'status',
+      { flags: '-', description: 'test', usage: '.status', category: 'test' },
+      (_a, c) => {
+        c.reply('I am alive');
+      },
+    );
+    registerBotlinkCommands(handler, null, null, hubConfig());
+    const replies: string[] = [];
+    await handler.execute('.bot myhub status', makeCtx(replies));
+    expect(replies[0]).toBe('I am alive');
+  });
+
+  it('strips leading dot from command', async () => {
+    const allowAll = { checkFlags: () => true };
+    const handler = new CommandHandler(allowAll);
+    handler.registerCommand(
+      'status',
+      { flags: '-', description: 'test', usage: '.status', category: 'test' },
+      (_a, c) => {
+        c.reply('alive');
+      },
+    );
+    registerBotlinkCommands(handler, null, null, hubConfig());
+    const replies: string[] = [];
+    await handler.execute('.bot myhub .status', makeCtx(replies));
+    expect(replies[0]).toBe('alive');
+  });
+
+  it('hub sends command to connected leaf', async () => {
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+    const { socket, written, duplex } = createMockSocket();
+    hub.addConnection(socket);
+    pushFrame(duplex, {
+      type: 'HELLO',
+      botname: 'leaf1',
+      password: hashPassword('secret'),
+      version: '1',
+    });
+    await tick();
+    written.length = 0;
+
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, hub, null, hubConfig());
+    const replies: string[] = [];
+
+    const promise = handler.execute('.bot leaf1 status', makeCtx(replies));
+    await tick();
+
+    // Respond with CMD_RESULT
+    const frames = parseWritten(written);
+    const cmd = frames.find((f) => f.type === 'CMD');
+    expect(cmd).toBeDefined();
+    pushFrame(duplex, { type: 'CMD_RESULT', ref: cmd!.ref, output: ['OK'] });
+    await tick();
+    await promise;
+
+    expect(replies).toContain('OK');
+    hub.close();
+  });
+
+  it('hub returns error for unknown leaf', async () => {
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, hub, null, hubConfig());
+    const replies: string[] = [];
+    await handler.execute('.bot nobot status', makeCtx(replies));
+    expect(replies[0]).toContain('not connected');
+    hub.close();
+  });
+
+  it('leaf relays command to hub', async () => {
+    const { leaf, written, duplex } = await connectLeaf();
+    written.length = 0;
+
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, null, leaf, leafConfig());
+    const replies: string[] = [];
+
+    const promise = handler.execute('.bot myhub status', makeCtx(replies));
+    await tick();
+
+    const frames = parseWritten(written);
+    const cmd = frames.find((f) => f.type === 'CMD');
+    expect(cmd).toBeDefined();
+    pushFrame(duplex, { type: 'CMD_RESULT', ref: cmd!.ref, output: ['hub OK'] });
+    await tick();
+    await promise;
+
+    expect(replies).toContain('hub OK');
+    leaf.disconnect();
+  });
+
+  it('returns not connected when no hub or leaf', async () => {
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, null, null, hubConfig());
+    const replies: string[] = [];
+    await handler.execute('.bot remote status', makeCtx(replies));
+    expect(replies[0]).toBe('Not connected to any bot link.');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// .bsay command
+// ---------------------------------------------------------------------------
+
+describe('.bsay command', () => {
+  it('replies disabled when botlink is not enabled', async () => {
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, null, null, { ...hubConfig(), enabled: false });
+    const replies: string[] = [];
+    await handler.execute('.bsay hub #test hello', makeCtx(replies));
+    expect(replies[0]).toBe('Bot link is not enabled.');
+  });
+
+  it('shows usage with missing args', async () => {
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, null, null, hubConfig());
+    const replies: string[] = [];
+    await handler.execute('.bsay', makeCtx(replies));
+    expect(replies[0]).toContain('Usage');
+  });
+
+  it('sends locally when target is self', async () => {
+    const handler = new CommandHandler();
+    const ircSay = vi.fn();
+    registerBotlinkCommands(handler, null, null, hubConfig(), null, ircSay);
+    const replies: string[] = [];
+    await handler.execute('.bsay myhub #test hello world', makeCtx(replies));
+    expect(ircSay).toHaveBeenCalledWith('#test', 'hello world');
+    expect(replies[0]).toContain('local');
+  });
+
+  it('sends locally and reports no IRC client when ircSay is null', async () => {
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, null, null, hubConfig(), null, null);
+    const replies: string[] = [];
+    await handler.execute('.bsay myhub #test hello', makeCtx(replies));
+    expect(replies[0]).toContain('IRC client not available');
+  });
+
+  it('broadcasts to all bots when target is *', async () => {
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+    const { socket, written, duplex } = createMockSocket();
+    hub.addConnection(socket);
+    pushFrame(duplex, {
+      type: 'HELLO',
+      botname: 'leaf1',
+      password: hashPassword('secret'),
+      version: '1',
+    });
+    await tick();
+    written.length = 0;
+
+    const ircSay = vi.fn();
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, hub, null, hubConfig(), null, ircSay);
+    const replies: string[] = [];
+    await handler.execute('.bsay * #test broadcast msg', makeCtx(replies));
+
+    expect(ircSay).toHaveBeenCalledWith('#test', 'broadcast msg');
+    const frames = parseWritten(written);
+    expect(frames.some((f) => f.type === 'BSAY')).toBe(true);
+    expect(replies[0]).toContain('all linked bots');
+    hub.close();
+  });
+
+  it('leaf broadcasts to all bots via hub when target is *', async () => {
+    const { leaf, written } = await connectLeaf();
+    written.length = 0;
+
+    const ircSay = vi.fn();
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, null, leaf, leafConfig(), null, ircSay);
+    const replies: string[] = [];
+    await handler.execute('.bsay * #test hi', makeCtx(replies));
+
+    expect(ircSay).toHaveBeenCalledWith('#test', 'hi');
+    const frames = parseWritten(written);
+    expect(frames.some((f) => f.type === 'BSAY')).toBe(true);
+    expect(replies[0]).toContain('all linked bots');
+    leaf.disconnect();
+  });
+
+  it('hub sends to specific remote bot', async () => {
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+    const { socket, written, duplex } = createMockSocket();
+    hub.addConnection(socket);
+    pushFrame(duplex, {
+      type: 'HELLO',
+      botname: 'leaf1',
+      password: hashPassword('secret'),
+      version: '1',
+    });
+    await tick();
+    written.length = 0;
+
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, hub, null, hubConfig());
+    const replies: string[] = [];
+    await handler.execute('.bsay leaf1 #test remote msg', makeCtx(replies));
+
+    const frames = parseWritten(written);
+    expect(frames.some((f) => f.type === 'BSAY' && f.message === 'remote msg')).toBe(true);
+    expect(replies[0]).toContain('via leaf1');
+    hub.close();
+  });
+
+  it('hub returns error for unknown bot', async () => {
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, hub, null, hubConfig());
+    const replies: string[] = [];
+    await handler.execute('.bsay nobot #test msg', makeCtx(replies));
+    expect(replies[0]).toContain('not connected');
+    hub.close();
+  });
+
+  it('leaf sends to specific remote bot via hub', async () => {
+    const { leaf, written } = await connectLeaf();
+    written.length = 0;
+
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, null, leaf, leafConfig());
+    const replies: string[] = [];
+    await handler.execute('.bsay somehub #test msg', makeCtx(replies));
+
+    const frames = parseWritten(written);
+    expect(frames.some((f) => f.type === 'BSAY')).toBe(true);
+    expect(replies[0]).toContain('via somehub');
+    leaf.disconnect();
+  });
+
+  it('returns not connected when no hub or leaf', async () => {
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, null, null, hubConfig());
+    const replies: string[] = [];
+    await handler.execute('.bsay remotebot #test msg', makeCtx(replies));
+    expect(replies[0]).toBe('Not connected to any bot link.');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// .bannounce command
+// ---------------------------------------------------------------------------
+
+describe('.bannounce command', () => {
+  it('replies disabled when botlink is not enabled', async () => {
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, null, null, { ...hubConfig(), enabled: false });
+    const replies: string[] = [];
+    await handler.execute('.bannounce test', makeCtx(replies));
+    expect(replies[0]).toBe('Bot link is not enabled.');
+  });
+
+  it('shows usage with empty message', async () => {
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, null, null, hubConfig());
+    const replies: string[] = [];
+    await handler.execute('.bannounce', makeCtx(replies));
+    expect(replies[0]).toContain('Usage');
+  });
+
+  it('announces to local DCC and hub leaves', async () => {
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+    const { socket, written, duplex } = createMockSocket();
+    hub.addConnection(socket);
+    pushFrame(duplex, {
+      type: 'HELLO',
+      botname: 'leaf1',
+      password: hashPassword('secret'),
+      version: '1',
+    });
+    await tick();
+    written.length = 0;
+
+    const mockDcc = { announce: vi.fn(), getSessionList: () => [], getSession: () => undefined };
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, hub, null, hubConfig(), mockDcc as unknown as DCCManager);
+    const replies: string[] = [];
+    await handler.execute('.bannounce hello everyone', makeCtx(replies));
+
+    expect(mockDcc.announce).toHaveBeenCalledWith('*** hello everyone');
+    const frames = parseWritten(written);
+    expect(frames.some((f) => f.type === 'ANNOUNCE')).toBe(true);
+    expect(replies[0]).toContain('Announcement sent');
+    hub.close();
+  });
+
+  it('leaf sends announce frame to hub', async () => {
+    const { leaf, written } = await connectLeaf();
+    written.length = 0;
+
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, null, leaf, leafConfig());
+    const replies: string[] = [];
+    await handler.execute('.bannounce test msg', makeCtx(replies));
+
+    const frames = parseWritten(written);
+    expect(frames.some((f) => f.type === 'ANNOUNCE')).toBe(true);
+    expect(replies[0]).toContain('Announcement sent');
+    leaf.disconnect();
+  });
+
+  it('works with no hub, leaf, or DCC (local only)', async () => {
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, null, null, hubConfig());
+    const replies: string[] = [];
+    await handler.execute('.bannounce solo message', makeCtx(replies));
+    expect(replies[0]).toContain('Announcement sent');
   });
 });

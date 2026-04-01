@@ -300,6 +300,10 @@ export class Bot {
               `*** ${frame.handle} has left the console (on ${frame.fromBot})`,
             );
           }
+          // System announcements from linked bots
+          if (frame.type === 'ANNOUNCE' && this._dccManager) {
+            this._dccManager.announce(String(frame.message ?? ''));
+          }
           // Ban sharing: apply incoming ban frames
           if (frame.type.startsWith('CHAN_BAN') || frame.type.startsWith('CHAN_EXEMPT')) {
             if (this._sharedBanList) {
@@ -311,6 +315,8 @@ export class Bot {
           // Protection: act on PROTECT_* if we have ops
           this.handleProtectFrame(frame);
         };
+        // BSAY: when a linked bot asks the hub to send an IRC message
+        this._botLinkHub.onBsay = (target, message) => this.client.say(target, message);
         // Party line: provide local DCC sessions for PARTY_WHOM
         this._botLinkHub.getLocalPartyUsers = () => {
           if (!this._dccManager) return [];
@@ -332,6 +338,10 @@ export class Bot {
         this._botLinkLeaf.onFrame = (frame) => {
           ChannelStateSyncer.applyFrame(frame, this.channelState);
           PermissionSyncer.applyFrame(frame, this.permissions);
+          // Sync complete notification
+          if (frame.type === 'SYNC_END') {
+            this.eventBus.emit('botlink:syncComplete', this.config.botlink!.botname);
+          }
           // Party line: deliver incoming to local DCC
           if (frame.type === 'PARTY_CHAT' && this._dccManager) {
             this._dccManager.announce(`<${frame.handle}@${frame.fromBot}> ${frame.message}`);
@@ -345,6 +355,14 @@ export class Bot {
             this._dccManager.announce(
               `*** ${frame.handle} has left the console (on ${frame.fromBot})`,
             );
+          }
+          // System announcements from hub
+          if (frame.type === 'ANNOUNCE' && this._dccManager) {
+            this._dccManager.announce(String(frame.message ?? ''));
+          }
+          // BSAY: hub asks this leaf to send an IRC message
+          if (frame.type === 'BSAY') {
+            this.client.say(String(frame.target ?? ''), String(frame.message ?? ''));
           }
           // Ban sharing: apply incoming ban frames
           if (frame.type.startsWith('CHAN_BAN') || frame.type.startsWith('CHAN_EXEMPT')) {
@@ -373,6 +391,7 @@ export class Bot {
       this._botLinkLeaf,
       this.config.botlink ?? null,
       this._dccManager,
+      (target, message) => this.client.say(target, message),
     );
 
     // 8. Load plugins (sets up binds before connection so all handlers are

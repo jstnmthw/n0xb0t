@@ -56,8 +56,8 @@ export function syncChannelModes(
   const timer = setTimeout(() => {
     if (!botHasOps(api, channel)) return;
 
-    const enforceModes = api.channelSettings.get(channel, 'enforce_modes') as boolean;
-    const channelModes = api.channelSettings.get(channel, 'channel_modes') as string;
+    const enforceModes = api.channelSettings.getFlag(channel, 'enforce_modes');
+    const channelModes = api.channelSettings.getString(channel, 'channel_modes');
     const paramModes = getParamModes(api);
     if (hasParamModes(channelModes)) {
       api.warn(
@@ -91,7 +91,7 @@ export function syncChannelModes(
     }
 
     // Enforce channel key
-    const channelKey = api.channelSettings.get(channel, 'channel_key') as string;
+    const channelKey = api.channelSettings.getString(channel, 'channel_key');
     if (channelKey) {
       // Set or overwrite the key if it doesn't match
       if (!ch?.key || ch.key !== channelKey) {
@@ -105,7 +105,7 @@ export function syncChannelModes(
     }
 
     // Enforce channel limit
-    const channelLimit = api.channelSettings.get(channel, 'channel_limit') as number;
+    const channelLimit = api.channelSettings.getInt(channel, 'channel_limit');
     if (channelLimit > 0) {
       if (!ch?.limit || ch.limit !== channelLimit) {
         api.mode(channel, '+l', String(channelLimit));
@@ -143,12 +143,12 @@ export function setupModeEnforce(
     const channel = ctx.channel!;
 
     // Read per-channel settings (fall back to config default via channelSettings)
-    const channelModes = api.channelSettings.get(channel, 'channel_modes') as string;
+    const channelModes = api.channelSettings.getString(channel, 'channel_modes');
     const paramModes = getParamModes(api);
     const parsed = parseChannelModes(channelModes, paramModes);
 
     // Shared guards reused by all channel-mode enforcement blocks below.
-    const enforceModes = api.channelSettings.get(channel, 'enforce_modes') as boolean;
+    const enforceModes = api.channelSettings.getFlag(channel, 'enforce_modes');
     const isNodesynch = config.nodesynch_nicks.some(
       (n) => api.ircLower(n) === api.ircLower(setter),
     );
@@ -184,7 +184,7 @@ export function setupModeEnforce(
     }
 
     // --- Channel key enforcement (+k / -k) ---
-    const channelKey = api.channelSettings.get(channel, 'channel_key') as string;
+    const channelKey = api.channelSettings.getString(channel, 'channel_key');
     if (channelKey && canEnforce) {
       if (modeStr === '-k') {
         // Key was removed — restore it
@@ -213,7 +213,7 @@ export function setupModeEnforce(
     }
 
     // --- Channel limit enforcement (+l / -l) ---
-    const channelLimit = api.channelSettings.get(channel, 'channel_limit') as number;
+    const channelLimit = api.channelSettings.getInt(channel, 'channel_limit');
     if (channelLimit > 0 && canEnforce) {
       const limitStr = String(channelLimit);
       if (modeStr === '-l') {
@@ -245,7 +245,7 @@ export function setupModeEnforce(
     // --- Bot self-deop → ChanServ OP recovery + cycle ---
     if (modeStr === '-o' && isBotNick(api, target)) {
       // Ask ChanServ to re-op the bot
-      const chanservOp = api.channelSettings.get(channel, 'chanserv_op') as boolean;
+      const chanservOp = api.channelSettings.getFlag(channel, 'chanserv_op');
       if (chanservOp) {
         const ch = api.getChannel(channel);
         const csNickLower = api.ircLower(config.chanserv_nick);
@@ -294,7 +294,7 @@ export function setupModeEnforce(
     }
 
     // --- Bitch mode: strip unauthorized +o / +h ---
-    const bitch = api.channelSettings.get(channel, 'bitch') as boolean;
+    const bitch = api.channelSettings.getFlag(channel, 'bitch');
     if (bitch && (modeStr === '+o' || modeStr === '+h') && target) {
       if (isBotNick(api, setter) || isBotNick(api, target)) return;
       if (!isNodesynch && botHasOps(api, channel)) {
@@ -318,7 +318,7 @@ export function setupModeEnforce(
     }
 
     // --- Enforcebans: kick channel members matching a new ban mask ---
-    const enforcebans = api.channelSettings.get(channel, 'enforcebans') as boolean;
+    const enforcebans = api.channelSettings.getFlag(channel, 'enforcebans');
     if (enforcebans && modeStr === '+b' && target && botHasOps(api, channel)) {
       const ch = api.getChannel(channel)!;
       for (const user of ch.users.values()) {
@@ -339,7 +339,7 @@ export function setupModeEnforce(
     if (wasIntentional(state, api, channel, target)) return;
 
     // -h/-v: only enforce if enforce_modes is on; punish_deop only applies to -o
-    const protectOps = api.channelSettings.get(channel, 'protect_ops') as boolean;
+    const protectOps = api.channelSettings.getFlag(channel, 'protect_ops');
     if ((modeStr === '-h' || modeStr === '-v') && !enforceModes) return;
     // -o: process if either feature is enabled
     if (modeStr === '-o' && !enforceModes && !protectOps) return;
@@ -458,10 +458,14 @@ function punishDeop(
   markIntentional(state, api, channel, setter);
 
   if (config.punish_action === 'kickban') {
-    const hostmask = api.getUserHostmask(channel, setter)!;
-    const mask = buildBanMask(hostmask, 1)!;
-    api.ban(channel, mask);
-    storeBan(api, channel, mask, getBotNick(api), config.default_ban_duration);
+    const hostmask = api.getUserHostmask(channel, setter);
+    if (hostmask) {
+      const mask = buildBanMask(hostmask, 1);
+      if (mask) {
+        api.ban(channel, mask);
+        storeBan(api, channel, mask, getBotNick(api), config.default_ban_duration);
+      }
+    }
   }
   api.kick(channel, setter, config.punish_kick_reason);
   api.log(`Punished ${setter} in ${channel} for unauthorized deop (${config.punish_action})`);

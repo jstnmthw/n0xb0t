@@ -10,6 +10,7 @@ import {
 import { BotEventBus } from '../../src/event-bus';
 import type { Logger } from '../../src/logger';
 import type { BotConfig } from '../../src/types';
+import { createMockLogger } from '../helpers/mock-logger';
 
 // ---------------------------------------------------------------------------
 // Mock IRC client
@@ -71,15 +72,7 @@ function makeConfig(overrides?: Partial<BotConfig>): BotConfig {
   };
 }
 
-function makeLogger(): Logger {
-  return {
-    info: vi.fn(),
-    debug: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    child: vi.fn().mockReturnValue(null),
-  } as unknown as Logger;
-}
+const makeLogger = createMockLogger;
 
 interface TestContext {
   client: MockClient;

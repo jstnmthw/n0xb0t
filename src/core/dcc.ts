@@ -35,6 +35,50 @@ export interface DCCIRCClient {
   removeListener(event: string, listener: (...args: unknown[]) => void): void;
 }
 
+/** Port allocation strategy — injectable for testing. */
+export interface PortAllocator {
+  /** Find a free port, or null if exhausted. Does NOT mark as used. */
+  allocate(): number | null;
+  /** Mark a port as in use. */
+  markUsed(port: number): void;
+  /** Release a port back to the pool. */
+  release(port: number): void;
+}
+
+/** Default port allocator: scans a contiguous range [min, max]. */
+export class RangePortAllocator implements PortAllocator {
+  private readonly used = new Set<number>();
+
+  constructor(private readonly range: [number, number]) {}
+
+  allocate(): number | null {
+    const [min, max] = this.range;
+    for (let p = min; p <= max; p++) {
+      if (!this.used.has(p)) return p;
+    }
+    return null;
+  }
+
+  markUsed(port: number): void {
+    this.used.add(port);
+  }
+
+  release(port: number): void {
+    this.used.delete(port);
+  }
+}
+
+/** The subset of DCCManager that DCCSession depends on. */
+export interface DCCSessionManager {
+  getSessionList(): Array<{ handle: string; nick: string; connectedAt: number }>;
+  broadcast(fromHandle: string, message: string): void;
+  announce(message: string): void;
+  removeSession(nick: string): void;
+  notifyPartyPart(handle: string, nick: string): void;
+  getBotName(): string;
+  onRelayEnd?: ((handle: string, targetBot: string) => void) | null;
+}
+
 export interface DCCManagerDeps {
   client: DCCIRCClient;
   dispatcher: EventDispatcher;
@@ -45,6 +89,10 @@ export interface DCCManagerDeps {
   version: string;
   botNick: string;
   logger?: Logger | null;
+  /** Injectable session store. Default: new Map(). */
+  sessions?: Map<string, DCCSession>;
+  /** Injectable port allocator. Default: RangePortAllocator from config.port_range. */
+  portAllocator?: PortAllocator;
 }
 
 interface PendingDCC {
@@ -140,7 +188,7 @@ export class DCCSession {
   readonly connectedAt: number;
 
   private socket: Socket;
-  private manager: DCCManager;
+  private manager: DCCSessionManager;
   private commandHandler: CommandHandler;
   private idleTimeoutMs: number;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -148,7 +196,7 @@ export class DCCSession {
   private logger: Logger | null;
 
   constructor(opts: {
-    manager: DCCManager;
+    manager: DCCSessionManager;
     user: UserRecord;
     nick: string;
     ident: string;
@@ -376,7 +424,7 @@ export class DCCSession {
 const PENDING_TIMEOUT_MS = 30_000;
 const PLUGIN_ID = 'core:dcc';
 
-export class DCCManager {
+export class DCCManager implements DCCSessionManager {
   private client: DCCIRCClient;
   private dispatcher: EventDispatcher;
   private permissions: Permissions;
@@ -386,8 +434,8 @@ export class DCCManager {
   private version: string;
   private logger: Logger | null;
 
-  private sessions: Map<string, DCCSession> = new Map(); // key = ircLower(nick)
-  private allocatedPorts: Set<number> = new Set();
+  private readonly sessions: Map<string, DCCSession>;
+  private readonly portAllocator: PortAllocator;
   private pending: Map<number, PendingDCC> = new Map(); // key = port
   private casemapping: Casemapping = 'rfc1459';
   private botNick: string;
@@ -403,6 +451,8 @@ export class DCCManager {
     this.version = deps.version;
     this.botNick = deps.botNick;
     this.logger = deps.logger?.child('dcc') ?? null;
+    this.sessions = deps.sessions ?? new Map();
+    this.portAllocator = deps.portAllocator ?? new RangePortAllocator(deps.config.port_range);
   }
 
   setCasemapping(cm: Casemapping): void {
@@ -458,7 +508,7 @@ export class DCCManager {
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
       pending.server.close();
-      this.allocatedPorts.delete(pending.port);
+      this.portAllocator.release(pending.port);
     }
     /* v8 ignore stop */
     this.pending.clear();
@@ -618,10 +668,10 @@ export class DCCManager {
     nick: string,
     ident: string,
     hostname: string,
-    user: import('../types').UserRecord,
+    user: UserRecord,
     parsed: DccChatPayload,
   ): Promise<void> {
-    const port = this.allocatePort();
+    const port = this.portAllocator.allocate();
     /* v8 ignore next -- FALSE branch: port available leads to createServer block already ignored; unreachable without real TCP */
     if (port === null) {
       this.logger?.error(`DCC port range exhausted for ${nick}`);
@@ -642,12 +692,12 @@ export class DCCManager {
     nick: string,
     ident: string,
     hostname: string,
-    user: import('../types').UserRecord,
+    user: UserRecord,
     parsed: DccChatPayload,
   ): void {
     /* v8 ignore start -- TCP server lifecycle (listen, connection, timeout, close); requires real TCP */
     const server = createServer();
-    this.allocatedPorts.add(port);
+    this.portAllocator.markUsed(port);
 
     server.listen(port, '0.0.0.0', () => {
       const ipDecimal = ipToDecimal(this.config.ip);
@@ -665,7 +715,7 @@ export class DCCManager {
       port,
       timer: setTimeout(() => {
         server.close();
-        this.allocatedPorts.delete(port);
+        this.portAllocator.release(port);
         this.pending.delete(port);
         this.logger?.info(`DCC offer to ${nick} timed out`);
       }, PENDING_TIMEOUT_MS),
@@ -675,14 +725,14 @@ export class DCCManager {
     server.once('connection', (socket: Socket) => {
       clearTimeout(pending.timer);
       server.close();
-      this.allocatedPorts.delete(port);
+      this.portAllocator.release(port);
       this.pending.delete(port);
       this.openSession(pending, socket);
     });
 
     server.on('error', (err) => {
       this.logger?.error(`DCC server error on port ${port}:`, err);
-      this.allocatedPorts.delete(port);
+      this.portAllocator.release(port);
       this.pending.delete(port);
     });
     /* v8 ignore stop */
@@ -720,14 +770,5 @@ export class DCCManager {
       session.close(reason);
     }
     this.sessions.clear();
-  }
-
-  private allocatePort(): number | null {
-    const [min, max] = this.config.port_range;
-    for (let p = min; p <= max; p++) {
-      /* v8 ignore next -- TRUE branch: returning a free port leads to TCP path (createServer block); unreachable in tests */
-      if (!this.allocatedPorts.has(p)) return p;
-    }
-    return null;
   }
 }

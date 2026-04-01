@@ -228,6 +228,28 @@ describe('ChannelStateSyncer', () => {
       const user = state.getUser('#test3', 'u');
       expect(user!.modes).toEqual([]);
     });
+
+    it('filters out invalid mode characters (non-alphabetic, multi-char, non-string)', () => {
+      ChannelStateSyncer.applyFrame(
+        {
+          type: 'CHAN',
+          channel: '#test4',
+          topic: '',
+          modes: '',
+          users: [
+            {
+              nick: 'u',
+              ident: 'i',
+              hostname: 'h',
+              modes: ['o', '☠', '', 'ov', 'h', 42, null],
+            },
+          ],
+        },
+        state,
+      );
+      const user = state.getUser('#test4', 'u');
+      expect(user!.modes).toEqual(['o', 'h']);
+    });
   });
 
   describe('roundtrip', () => {

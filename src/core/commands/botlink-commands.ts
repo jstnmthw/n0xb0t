@@ -1,5 +1,5 @@
 // HexBot — Bot link admin commands
-// Registers .botlink, .bots, .bottree, .whom with the command handler.
+// Registers .botlink, .bots, .bottree, .whom, .bot, .bsay, .bannounce with the command handler.
 import type { CommandHandler } from '../../command-handler';
 import type { BotlinkConfig } from '../../types';
 import type { BotLinkHub, BotLinkLeaf, PartyLineUser } from '../botlink';
@@ -16,6 +16,7 @@ export function registerBotlinkCommands(
   leaf: BotLinkLeaf | null,
   config: BotlinkConfig | null,
   dccManager?: DCCManager | null,
+  ircSay?: ((target: string, message: string) => void) | null,
 ): void {
   handler.registerCommand(
     'botlink',
@@ -71,12 +72,11 @@ export function registerBotlinkCommands(
             ctx.reply('Usage: .botlink disconnect <botname>');
             return;
           }
-          if (!hub.getLeaves().includes(botname)) {
+          if (!hub.disconnectLeaf(botname)) {
             ctx.reply(`Leaf "${botname}" not found.`);
             return;
           }
-          hub.send(botname, { type: 'ERROR', code: 'CLOSING', message: 'Disconnected by admin' });
-          ctx.reply(`Disconnecting "${botname}".`);
+          ctx.reply(`Disconnected "${botname}".`);
           break;
         }
 
@@ -262,11 +262,12 @@ export function registerBotlinkCommands(
       category: 'botlink',
     },
     async (_args, ctx) => {
+      const myBotname = config?.botname ?? 'unknown';
       const localUsers: PartyLineUser[] = dccManager
         ? dccManager.getSessionList().map((s) => ({
             handle: s.handle,
             nick: s.nick,
-            botname: config!.botname,
+            botname: myBotname,
             connectedAt: s.connectedAt,
             idle: 0,
           }))
@@ -293,6 +294,164 @@ export function registerBotlinkCommands(
         lines.push(`  ${u.handle} (${u.nick}) on ${u.botname} — connected ${ago}s ago${idle}`);
       }
       ctx.reply(lines.join('\n'));
+    },
+  );
+
+  handler.registerCommand(
+    'bot',
+    {
+      flags: '+m',
+      description: 'Execute a command on a remote bot',
+      usage: '.bot <botname> <command>',
+      category: 'botlink',
+    },
+    async (args, ctx) => {
+      if (!config?.enabled) {
+        ctx.reply('Bot link is not enabled.');
+        return;
+      }
+
+      const parts = args.trim().split(/\s+/);
+      const targetBot = parts[0];
+      const command = parts.slice(1).join(' ');
+      if (!targetBot || !command) {
+        ctx.reply('Usage: .bot <botname> <command>');
+        return;
+      }
+
+      // Strip leading dot if present (user may type `.bot leaf1 .status` or `.bot leaf1 status`)
+      const cmdText = command.startsWith('.') ? command.slice(1) : command;
+      const [cmdName, ...cmdArgs] = cmdText.split(/\s+/);
+
+      // Execute on self — just run the command locally
+      if (targetBot === config.botname) {
+        await handler.execute(`.${cmdText}`, ctx);
+        return;
+      }
+
+      const handle = ctx.nick;
+      let output: string[];
+
+      if (hub) {
+        if (!hub.getLeaves().includes(targetBot)) {
+          ctx.reply(`Bot "${targetBot}" is not connected.`);
+          return;
+        }
+        output = await hub.sendCommandToBot(
+          targetBot,
+          cmdName,
+          cmdArgs.join(' '),
+          handle,
+          ctx.channel,
+        );
+      } else if (leaf?.isConnected) {
+        const captured: string[] = [];
+        const relayCtx = { ...ctx, reply: (msg: string) => captured.push(msg) };
+        await leaf.relayCommand(cmdName, cmdArgs.join(' '), handle, relayCtx, targetBot);
+        output = captured;
+      } else {
+        ctx.reply('Not connected to any bot link.');
+        return;
+      }
+
+      for (const line of output) ctx.reply(line);
+    },
+  );
+
+  handler.registerCommand(
+    'bsay',
+    {
+      flags: '+m',
+      description: 'Send a message via another linked bot',
+      usage: '.bsay <botname|*> <target> <message>',
+      category: 'botlink',
+    },
+    (_args, ctx) => {
+      if (!config?.enabled) {
+        ctx.reply('Bot link is not enabled.');
+        return;
+      }
+
+      const match = _args.trim().match(/^(\S+)\s+(\S+)\s+(.+)$/);
+      if (!match) {
+        ctx.reply('Usage: .bsay <botname|*> <target> <message>');
+        return;
+      }
+      const [, botname, target, message] = match;
+
+      const sendLocal = () => {
+        if (ircSay) ircSay(target, message);
+        else ctx.reply('IRC client not available on this bot.');
+      };
+
+      const bsayFrame = { type: 'BSAY', target, message, toBot: botname };
+
+      if (botname === config.botname) {
+        sendLocal();
+        ctx.reply(`Sent to ${target} (local).`);
+        return;
+      }
+
+      if (botname === '*') {
+        sendLocal();
+        if (hub) {
+          for (const leafName of hub.getLeaves()) hub.send(leafName, bsayFrame);
+        } else if (leaf?.isConnected) {
+          leaf.send(bsayFrame);
+        }
+        ctx.reply(`Sent to ${target} on all linked bots.`);
+        return;
+      }
+
+      // Specific remote bot
+      if (hub) {
+        if (!hub.getLeaves().includes(botname)) {
+          ctx.reply(`Bot "${botname}" is not connected.`);
+          return;
+        }
+        hub.send(botname, bsayFrame);
+      } else if (leaf?.isConnected) {
+        leaf.send(bsayFrame);
+      } else {
+        ctx.reply('Not connected to any bot link.');
+        return;
+      }
+      ctx.reply(`Sent to ${target} via ${botname}.`);
+    },
+  );
+
+  handler.registerCommand(
+    'bannounce',
+    {
+      flags: '+m',
+      description: 'Broadcast to all console sessions across linked bots',
+      usage: '.bannounce <message>',
+      category: 'botlink',
+    },
+    (_args, ctx) => {
+      if (!config?.enabled) {
+        ctx.reply('Bot link is not enabled.');
+        return;
+      }
+
+      const message = _args.trim();
+      if (!message) {
+        ctx.reply('Usage: .bannounce <message>');
+        return;
+      }
+
+      // Announce to local DCC sessions
+      dccManager?.announce(`*** ${message}`);
+
+      // Send ANNOUNCE frame to all linked bots
+      const frame = { type: 'ANNOUNCE', message: `*** ${message}`, fromBot: config.botname };
+      if (hub) {
+        for (const leafName of hub.getLeaves()) hub.send(leafName, frame);
+      } else if (leaf?.isConnected) {
+        leaf.send(frame);
+      }
+
+      ctx.reply('Announcement sent to all linked bots.');
     },
   );
 }

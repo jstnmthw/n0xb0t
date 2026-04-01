@@ -56,7 +56,9 @@ export class ChannelStateSyncer {
             nick: String(u.nick ?? ''),
             ident: String(u.ident ?? ''),
             hostname: String(u.hostname ?? ''),
-            modes: Array.isArray(u.modes) ? (u.modes as string[]) : [],
+            modes: Array.isArray(u.modes)
+              ? (u.modes as string[]).filter((m) => typeof m === 'string' && /^[a-zA-Z]$/.test(m))
+              : [],
           }))
         : [],
     });

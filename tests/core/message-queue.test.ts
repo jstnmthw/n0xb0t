@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MessageQueue } from '../../src/core/message-queue';
+import type { Logger } from '../../src/logger';
 
 describe('MessageQueue', () => {
   beforeEach(() => {
@@ -207,7 +208,7 @@ describe('MessageQueue', () => {
       child: function () {
         return this;
       },
-    } as unknown as import('../../src/logger').Logger;
+    } as unknown as Logger;
 
     const q = new MessageQueue({ rate: 1, burst: 0, logger: mockLogger });
     expect(q.pending).toBe(0);
@@ -242,7 +243,7 @@ describe('MessageQueue', () => {
       info: () => {},
       error: () => {},
       child: () => mockLogger,
-    } as unknown as import('../../src/logger').Logger;
+    } as unknown as Logger;
 
     const q = new MessageQueue({ rate: 2, burst: 0, logger: mockLogger });
 

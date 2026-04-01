@@ -6,7 +6,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 // ---------------------------------------------------------------------------
 
 import { PARAM_MODES, getParamModes, parseChannelModes } from '../../plugins/chanmod/helpers';
-import type { BotConfig } from '../../src/types';
+import type { BotConfig, PluginAPI } from '../../src/types';
 import { type MockBot, createMockBot } from '../helpers/mock-bot';
 
 // ---------------------------------------------------------------------------
@@ -4762,7 +4762,7 @@ describe('getParamModes()', () => {
   it('parses CHANMODES ISUPPORT into param mode set', () => {
     const mockApi = {
       getServerSupports: () => ({ CHANMODES: 'beI,k,l,imnpst' }),
-    } as unknown as import('../../src/types').PluginAPI;
+    } as unknown as PluginAPI;
     const result = getParamModes(mockApi);
     expect(result.has('b')).toBe(true);
     expect(result.has('e')).toBe(true);
@@ -4777,7 +4777,7 @@ describe('getParamModes()', () => {
   it('handles short CHANMODES with missing categories', () => {
     const mockApi = {
       getServerSupports: () => ({ CHANMODES: 'beI,k' }),
-    } as unknown as import('../../src/types').PluginAPI;
+    } as unknown as PluginAPI;
     const result = getParamModes(mockApi);
     expect(result.has('b')).toBe(true);
     expect(result.has('e')).toBe(true);
@@ -4790,7 +4790,7 @@ describe('getParamModes()', () => {
   it('falls back to PARAM_MODES when CHANMODES is unavailable', () => {
     const mockApi = {
       getServerSupports: () => ({}),
-    } as unknown as import('../../src/types').PluginAPI;
+    } as unknown as PluginAPI;
     const result = getParamModes(mockApi);
     expect(result).toBe(PARAM_MODES);
     expect(result.has('k')).toBe(true);

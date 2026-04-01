@@ -1,7 +1,7 @@
 // HexBot — Bot Link Protocol Layer
 // Hub-and-leaf bot linking: frame serialization, connection management,
 // handshake, rate limiting, heartbeat. See docs/plans/bot-linking.md.
-import { createHash } from 'node:crypto';
+import { scryptSync } from 'node:crypto';
 import { connect, createServer } from 'node:net';
 import type { Server as NetServer, Socket } from 'node:net';
 import { createInterface as createReadline } from 'node:readline';
@@ -24,23 +24,35 @@ export const MAX_FRAME_SIZE = 64 * 1024;
 /** Handshake timeout: close if HELLO not received within this window. */
 const HANDSHAKE_TIMEOUT_MS = 30_000;
 
-/** Frames handled exclusively by the hub — never fanned out to other leaves. */
+/** Frames handled exclusively by the hub — never fanned out to other leaves.
+ *  SECURITY: Permission-mutation frames (ADDUSER, SETFLAGS, DELUSER) MUST be
+ *  hub-only. The hub is the single source of truth for permissions and broadcasts
+ *  these via setCommandRelay event subscriptions. If a leaf could fan out these
+ *  frames, a compromised leaf could inject owner-level permissions across the
+ *  entire botnet. */
 const HUB_ONLY_FRAMES = new Set([
   'CMD',
+  'CMD_RESULT',
+  'BSAY',
   'PARTY_WHOM',
   'PROTECT_ACK',
   'RELAY_REQUEST',
   'RELAY_INPUT',
   'RELAY_END',
+  'ADDUSER',
+  'SETFLAGS',
+  'DELUSER',
 ]);
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Hash a password for link authentication. Never send plaintext over the wire. */
+/** Hash a password for link authentication. Never send plaintext over the wire.
+ *  Uses scrypt (memory-hard KDF) to resist brute-force attacks on intercepted hashes. */
 export function hashPassword(password: string): string {
-  return 'sha256:' + createHash('sha256').update(password).digest('hex');
+  const key = scryptSync(password, 'hexbot-botlink-v1', 32);
+  return 'scrypt:' + key.toString('hex');
 }
 
 /** Recursively sanitize all string values in a frame (strip \r\n\0). */
@@ -220,6 +232,11 @@ export class BotLinkHub {
   private activeRelays: Map<string, { originBot: string; targetBot: string }> = new Map();
   /** Pending protect requests. Key: ref. Value: requesting botname. */
   private protectRequests: Map<string, string> = new Map();
+  /** CMD routing table — tracks toBot-routed commands for CMD_RESULT forwarding. Key: ref. Value: originating leaf botname. */
+  private cmdRoutes: Map<string, string> = new Map();
+  /** Pending commands sent by the hub itself (from .bot). Key: ref. */
+  private pendingCmds: Map<string, { resolve: (output: string[]) => void }> = new Map();
+  private cmdRefCounter = 0;
   private config: BotlinkConfig;
   private version: string;
   private logger: Logger | null;
@@ -235,6 +252,8 @@ export class BotLinkHub {
   onLeafFrame: ((botname: string, frame: LinkFrame) => void) | null = null;
   /** Called during handshake to populate sync frames (between SYNC_START and SYNC_END). */
   onSyncRequest: ((botname: string, send: (frame: LinkFrame) => void) => void) | null = null;
+  /** Called when a BSAY frame targets this hub — the bot should send the IRC message. */
+  onBsay: ((target: string, message: string) => void) | null = null;
 
   constructor(config: BotlinkConfig, version: string, logger?: Logger | null) {
     this.config = config;
@@ -365,6 +384,22 @@ export class BotLinkHub {
     const channel =
       frame.channel !== null && frame.channel !== undefined ? String(frame.channel) : null;
 
+    // Route to a specific target bot if toBot is set and not this hub
+    const toBot = frame.toBot != null ? String(frame.toBot) : null;
+    if (toBot && toBot !== this.config.botname) {
+      if (!this.leaves.has(toBot)) {
+        this.send(fromBot, {
+          type: 'CMD_RESULT',
+          ref,
+          output: [`Bot "${toBot}" is not connected.`],
+        });
+        return;
+      }
+      this.cmdRoutes.set(ref, fromBot);
+      this.send(toBot, frame);
+      return;
+    }
+
     // Look up the command to get required flags
     const entry = this.cmdHandler!.getCommand(command);
     if (!entry) {
@@ -406,6 +441,58 @@ export class BotLinkHub {
         });
       });
     /* v8 ignore stop */
+  }
+
+  /** Send a command to a specific leaf and await the result. Used by .bot command. */
+  async sendCommandToBot(
+    botname: string,
+    command: string,
+    args: string,
+    fromHandle: string,
+    channel: string | null,
+  ): Promise<string[]> {
+    if (!this.leaves.has(botname)) return [`Bot "${botname}" is not connected.`];
+    const ref = `hubcmd:${++this.cmdRefCounter}`;
+    this.send(botname, {
+      type: 'CMD',
+      command,
+      args,
+      fromHandle,
+      fromBot: this.config.botname,
+      channel,
+      ref,
+      toBot: botname,
+    });
+
+    const CMD_TIMEOUT_MS = 10_000;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingCmds.delete(ref);
+        resolve(['Command relay timed out.']);
+      }, CMD_TIMEOUT_MS);
+      this.pendingCmds.set(ref, {
+        resolve: (output) => {
+          clearTimeout(timer);
+          resolve(output);
+        },
+      });
+    });
+  }
+
+  /** Handle BSAY frame: route to target bot(s) and/or deliver locally. */
+  private handleBsay(fromBot: string, frame: LinkFrame): void {
+    const target = String(frame.target ?? '');
+    const message = String(frame.message ?? '');
+    const toBot = String(frame.toBot ?? '*');
+
+    if (toBot === '*') {
+      this.broadcast(frame, fromBot);
+      this.onBsay?.(target, message);
+    } else if (toBot === this.config.botname) {
+      this.onBsay?.(target, message);
+    } else if (this.leaves.has(toBot)) {
+      this.send(toBot, frame);
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -470,6 +557,29 @@ export class BotLinkHub {
         this.activeRelays.delete(handle);
       }
     }
+  }
+
+  /** Forcibly disconnect a single leaf by botname. Returns true if the leaf was found and disconnected. */
+  disconnectLeaf(botname: string, reason = 'Disconnected by admin'): boolean {
+    const conn = this.leaves.get(botname);
+    if (!conn) return false;
+
+    clearInterval(conn.pingTimer!);
+    conn.pingTimer = null;
+    conn.protocol.onClose = null; // Prevent double-handling via onLeafClose
+    conn.protocol.send({ type: 'ERROR', code: 'CLOSING', message: reason });
+    conn.protocol.close();
+    this.leaves.delete(botname);
+
+    // Clean up remote party users from this leaf
+    for (const key of this.remotePartyUsers.keys()) {
+      if (key.endsWith(`@${botname}`)) this.remotePartyUsers.delete(key);
+    }
+
+    this.broadcast({ type: 'BOTPART', botname, reason });
+    this.logger?.info(`Leaf "${botname}" disconnected: ${reason}`);
+    this.onLeafDisconnected?.(botname, reason);
+    return true;
   }
 
   /** Shut down the hub: close all leaf connections and the server. */
@@ -632,9 +742,31 @@ export class BotLinkHub {
       this.broadcast(frame, botname);
     }
 
+    // Route CMD_RESULT back to originating bot (for toBot-routed commands)
+    if (frame.type === 'CMD_RESULT') {
+      const ref = String(frame.ref ?? '');
+      const pending = this.pendingCmds.get(ref);
+      if (pending) {
+        this.pendingCmds.delete(ref);
+        pending.resolve(Array.isArray(frame.output) ? (frame.output as string[]) : []);
+        return;
+      }
+      const origin = this.cmdRoutes.get(ref);
+      if (origin) {
+        this.cmdRoutes.delete(ref);
+        this.send(origin, frame);
+        return;
+      }
+    }
+
     // Handle CMD frames internally (command relay)
     if (frame.type === 'CMD' && this.cmdHandler) {
       this.handleCmdRelay(botname, frame);
+    }
+
+    // Route BSAY to target bot(s)
+    if (frame.type === 'BSAY') {
+      this.handleBsay(botname, frame);
     }
 
     // Track remote party line users
@@ -746,6 +878,8 @@ export class BotLinkLeaf {
   private pendingWhom: Map<string, { resolve: (users: PartyLineUser[]) => void }> = new Map();
   private pendingProtect: Map<string, { resolve: (success: boolean) => void }> = new Map();
   private cmdRefCounter = 0;
+  private cmdHandler: CommandHandler | null = null;
+  private cmdPermissions: Permissions | null = null;
 
   /** Fired when handshake completes. */
   onConnected: ((hubBotname: string) => void) | null = null;
@@ -869,6 +1003,8 @@ export class BotLinkLeaf {
 
   /** Wire command relay: relayToHub commands are sent to hub instead of executing locally. */
   setCommandRelay(commandHandler: CommandHandler, permissions: Permissions): void {
+    this.cmdHandler = commandHandler;
+    this.cmdPermissions = permissions;
     commandHandler.setPreExecuteHook(async (entry, args, ctx) => {
       if (!entry.options.relayToHub || !this.isConnected || ctx.source === 'botlink') return false;
       const hostmask = `${ctx.nick}!${ctx.ident ?? ''}@${ctx.hostname ?? ''}`;
@@ -884,6 +1020,7 @@ export class BotLinkLeaf {
     args: string,
     handle: string,
     ctx: CommandContext,
+    toBot?: string,
   ): Promise<boolean> {
     const ref = String(++this.cmdRefCounter);
 
@@ -895,6 +1032,7 @@ export class BotLinkLeaf {
       fromBot: this.config.botname,
       channel: ctx.channel,
       ref,
+      ...(toBot ? { toBot } : {}),
     });
 
     const CMD_TIMEOUT_MS = 10_000;
@@ -1085,7 +1223,59 @@ export class BotLinkLeaf {
       }
     }
 
+    // Execute incoming CMD frames locally (from .bot command routed via hub)
+    if (frame.type === 'CMD' && this.cmdHandler) {
+      this.handleIncomingCmd(frame);
+      return;
+    }
+
     this.onFrame?.(frame);
+  }
+
+  /** Handle a CMD frame received from the hub (routed via .bot command). */
+  private handleIncomingCmd(frame: LinkFrame): void {
+    const handle = String(frame.fromHandle ?? '');
+    const ref = String(frame.ref ?? '');
+    const command = String(frame.command ?? '');
+    const args = String(frame.args ?? '');
+    const channel =
+      frame.channel !== null && frame.channel !== undefined ? String(frame.channel) : null;
+
+    const entry = this.cmdHandler!.getCommand(command);
+    if (!entry) {
+      this.send({ type: 'CMD_RESULT', ref, output: [`Unknown command: .${command}`] });
+      return;
+    }
+
+    if (!this.cmdPermissions!.checkFlagsByHandle(entry.options.flags, handle, channel)) {
+      this.send({ type: 'CMD_RESULT', ref, output: ['Permission denied.'] });
+      return;
+    }
+
+    const output: string[] = [];
+    const ctx: CommandContext = {
+      source: 'botlink',
+      nick: handle,
+      ident: 'botlink',
+      hostname: 'botlink',
+      channel,
+      reply: (msg: string) => {
+        for (const line of msg.split('\n')) output.push(line);
+      },
+    };
+
+    this.cmdHandler!.execute(`.${command} ${args}`.trim(), ctx)
+      .then(() => {
+        this.send({ type: 'CMD_RESULT', ref, output });
+      })
+      /* v8 ignore next 5 -- .catch only fires if command handler throws */
+      .catch((err) => {
+        this.send({
+          type: 'CMD_RESULT',
+          ref,
+          output: [`Error: ${err instanceof Error ? err.message : String(err)}`],
+        });
+      });
   }
 
   // -----------------------------------------------------------------------

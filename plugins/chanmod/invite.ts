@@ -11,7 +11,7 @@ export function setupInvite(
   api.bind('invite', '-', '*', (ctx: HandlerContext) => {
     const channel = ctx.channel!;
 
-    const enabled = api.channelSettings.get(channel, 'invite') as boolean;
+    const enabled = api.channelSettings.getFlag(channel, 'invite');
     if (!enabled) return;
 
     // Use the hostmask from the INVITE message directly — the IRC protocol
