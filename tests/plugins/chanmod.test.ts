@@ -6,8 +6,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 // ---------------------------------------------------------------------------
 
 import { PARAM_MODES, getParamModes, parseChannelModes } from '../../plugins/chanmod/helpers';
-import type { BotConfig, PluginAPI } from '../../src/types';
 import { type MockBot, createMockBot } from '../helpers/mock-bot';
+import { createMockPluginAPI } from '../helpers/mock-plugin-api';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -2467,9 +2467,7 @@ describe('chanmod plugin — NickServ auto-op verification failure', () => {
   it('skips auto-op and sends notice when NickServ verification fails', async () => {
     const freshBot = createMockBot({ botNick: 'hexbot' });
     try {
-      (
-        freshBot.pluginLoader as unknown as { botConfig: BotConfig }
-      ).botConfig.identity.require_acc_for = ['+o'];
+      freshBot.pluginLoader.getBotConfig().identity.require_acc_for = ['+o'];
       await freshBot.pluginLoader.load(PLUGIN_PATH, {
         chanmod: { enabled: true, config: { notify_on_fail: true } },
       });
@@ -2498,9 +2496,7 @@ describe('chanmod plugin — NickServ auto-op verification failure', () => {
   it('applies auto-op when NickServ verification succeeds', async () => {
     const freshBot = createMockBot({ botNick: 'hexbot' });
     try {
-      (
-        freshBot.pluginLoader as unknown as { botConfig: BotConfig }
-      ).botConfig.identity.require_acc_for = ['+o'];
+      freshBot.pluginLoader.getBotConfig().identity.require_acc_for = ['+o'];
       await freshBot.pluginLoader.load(PLUGIN_PATH, {
         chanmod: { enabled: true, config: { notify_on_fail: true } },
       });
@@ -2526,9 +2522,7 @@ describe('chanmod plugin — NickServ auto-op verification failure', () => {
   it('skips notice when NickServ verification fails with notify_on_fail=false', async () => {
     const freshBot = createMockBot({ botNick: 'hexbot' });
     try {
-      (
-        freshBot.pluginLoader as unknown as { botConfig: BotConfig }
-      ).botConfig.identity.require_acc_for = ['+o'];
+      freshBot.pluginLoader.getBotConfig().identity.require_acc_for = ['+o'];
       await freshBot.pluginLoader.load(PLUGIN_PATH, {
         chanmod: { enabled: true, config: { notify_on_fail: false } },
       });
@@ -4761,9 +4755,9 @@ describe('parseChannelModes()', () => {
 
 describe('getParamModes()', () => {
   it('parses CHANMODES ISUPPORT into param mode set', () => {
-    const mockApi = {
+    const mockApi = createMockPluginAPI({
       getServerSupports: () => ({ CHANMODES: 'beI,k,l,imnpst' }),
-    } as unknown as PluginAPI;
+    });
     const result = getParamModes(mockApi);
     expect(result.has('b')).toBe(true);
     expect(result.has('e')).toBe(true);
@@ -4776,9 +4770,9 @@ describe('getParamModes()', () => {
   });
 
   it('handles short CHANMODES with missing categories', () => {
-    const mockApi = {
+    const mockApi = createMockPluginAPI({
       getServerSupports: () => ({ CHANMODES: 'beI,k' }),
-    } as unknown as PluginAPI;
+    });
     const result = getParamModes(mockApi);
     expect(result.has('b')).toBe(true);
     expect(result.has('e')).toBe(true);
@@ -4789,9 +4783,9 @@ describe('getParamModes()', () => {
   });
 
   it('falls back to PARAM_MODES when CHANMODES is unavailable', () => {
-    const mockApi = {
+    const mockApi = createMockPluginAPI({
       getServerSupports: () => ({}),
-    } as unknown as PluginAPI;
+    });
     const result = getParamModes(mockApi);
     expect(result).toBe(PARAM_MODES);
     expect(result.has('k')).toBe(true);

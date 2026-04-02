@@ -10,7 +10,7 @@ import {
   isPassiveDcc,
   parseDccChatPayload,
 } from '../../src/core/dcc';
-import type { DCCIRCClient, DCCSessionManager } from '../../src/core/dcc';
+import type { DCCIRCClient, DCCSessionEntry, DCCSessionManager } from '../../src/core/dcc';
 import type { BindRegistrar } from '../../src/dispatcher';
 import type {
   DccConfig,
@@ -181,14 +181,28 @@ function makeCommandHandler(): CommandExecutor {
   };
 }
 
+function mockSession(
+  overrides: Partial<DCCSessionEntry> & { handle: string; nick: string },
+): DCCSessionEntry {
+  return {
+    connectedAt: Date.now(),
+    isRelaying: false,
+    writeLine: vi.fn(),
+    close: vi.fn(),
+    enterRelay: vi.fn(),
+    exitRelay: vi.fn(),
+    ...overrides,
+  };
+}
+
 describe('DCCManager', () => {
   let client: MockIRCClient;
   let manager: DCCManager;
-  let sessions: Map<string, DCCSession>;
+  let sessions: Map<string, DCCSessionEntry>;
 
   beforeEach(() => {
     client = new MockIRCClient();
-    sessions = new Map<string, DCCSession>();
+    sessions = new Map<string, DCCSessionEntry>();
     manager = new DCCManager({
       client,
       dispatcher: makeDispatcher(),
@@ -355,8 +369,8 @@ describe('DCCManager', () => {
   it('broadcast sends to all sessions except sender', () => {
     const writeA = vi.fn();
     const writeB = vi.fn();
-    const sessionA = { handle: 'alice', nick: 'alice', writeLine: writeA } as unknown as DCCSession;
-    const sessionB = { handle: 'bob', nick: 'bob', writeLine: writeB } as unknown as DCCSession;
+    const sessionA = mockSession({ handle: 'alice', nick: 'alice', writeLine: writeA });
+    const sessionB = mockSession({ handle: 'bob', nick: 'bob', writeLine: writeB });
 
     // Inject sessions for testing broadcast
     sessions.set('alice', sessionA);
@@ -371,8 +385,8 @@ describe('DCCManager', () => {
   it('announce sends to all sessions', () => {
     const writeA = vi.fn();
     const writeB = vi.fn();
-    const sessionA = { handle: 'alice', nick: 'alice', writeLine: writeA } as unknown as DCCSession;
-    const sessionB = { handle: 'bob', nick: 'bob', writeLine: writeB } as unknown as DCCSession;
+    const sessionA = mockSession({ handle: 'alice', nick: 'alice', writeLine: writeA });
+    const sessionB = mockSession({ handle: 'bob', nick: 'bob', writeLine: writeB });
 
     sessions.set('alice', sessionA);
     sessions.set('bob', sessionB);
@@ -405,7 +419,7 @@ describe('DCCManager', () => {
         handler = fn;
       },
     );
-    const localSessions = new Map<string, DCCSession>();
+    const localSessions = new Map<string, DCCSessionEntry>();
     const m = new DCCManager({
       client,
       dispatcher,
@@ -420,11 +434,7 @@ describe('DCCManager', () => {
     m.attach();
 
     // Fill the session map
-    const fakeSession = {
-      handle: 'other',
-      nick: 'other',
-      writeLine: vi.fn(),
-    } as unknown as DCCSession;
+    const fakeSession = mockSession({ handle: 'other', nick: 'other' });
     localSessions.set('other', fakeSession);
 
     await handler(makeCtx('testnick'));
@@ -439,7 +449,7 @@ describe('DCCManager', () => {
         handler = fn;
       },
     );
-    const localSessions = new Map<string, DCCSession>();
+    const localSessions = new Map<string, DCCSessionEntry>();
     const m = new DCCManager({
       client,
       dispatcher,
@@ -453,12 +463,7 @@ describe('DCCManager', () => {
     });
     m.attach();
 
-    const fakeSession = {
-      handle: 'testuser',
-      nick: 'testnick',
-      writeLine: vi.fn(),
-      close: vi.fn(),
-    } as unknown as DCCSession;
+    const fakeSession = mockSession({ handle: 'testuser', nick: 'testnick' });
     localSessions.set('testnick', fakeSession);
 
     await handler(makeCtx('testnick'));
@@ -548,12 +553,7 @@ describe('DCCManager', () => {
 
   it('detach closes all active sessions', () => {
     const closeSpy = vi.fn();
-    const fakeSession = {
-      handle: 'alice',
-      nick: 'alice',
-      writeLine: vi.fn(),
-      close: closeSpy,
-    } as unknown as DCCSession;
+    const fakeSession = mockSession({ handle: 'alice', nick: 'alice', close: closeSpy });
     sessions.set('alice', fakeSession);
 
     manager.detach('test shutdown');
@@ -561,12 +561,7 @@ describe('DCCManager', () => {
   });
 
   it('removeSession deletes by nick', () => {
-    const fakeSession = {
-      handle: 'alice',
-      nick: 'alice',
-      writeLine: vi.fn(),
-      connectedAt: Date.now(),
-    } as unknown as DCCSession;
+    const fakeSession = mockSession({ handle: 'alice', nick: 'alice' });
     sessions.set('alice', fakeSession);
     expect(manager.getSessionList().length).toBe(1);
     manager.removeSession('alice');
@@ -575,12 +570,7 @@ describe('DCCManager', () => {
 
   it('setCasemapping changes session key lookup', () => {
     manager.setCasemapping('ascii');
-    const fakeSession = {
-      handle: 'bob',
-      nick: 'bob',
-      writeLine: vi.fn(),
-      connectedAt: Date.now(),
-    } as unknown as DCCSession;
+    const fakeSession = mockSession({ handle: 'bob', nick: 'bob' });
     sessions.set('bob', fakeSession);
     manager.removeSession('bob');
     expect(manager.getSessionList().length).toBe(0);

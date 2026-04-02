@@ -144,6 +144,11 @@ export class PluginLoader {
     this.getServerSupports = deps.getServerSupports ?? (() => ({}));
   }
 
+  /** Read-only access to the bot config (for integration tests that need to adjust settings). */
+  getBotConfig(): BotConfig {
+    return this.botConfig;
+  }
+
   /** Delete any orphaned .reload-*.ts temp files left by a previous crashed process. */
   cleanupOrphanedTempFiles(): void {
     try {

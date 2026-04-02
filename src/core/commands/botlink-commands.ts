@@ -4,7 +4,7 @@ import type { CommandHandler } from '../../command-handler';
 import type { BotlinkConfig } from '../../types';
 import { sanitize } from '../../utils/sanitize';
 import type { BotLinkHub, BotLinkLeaf, PartyLineUser } from '../botlink';
-import type { DCCManager } from '../dcc';
+import type { BotlinkDCCView } from '../dcc';
 
 /**
  * Register bot-link admin commands.
@@ -16,7 +16,7 @@ export function registerBotlinkCommands(
   hub: BotLinkHub | null,
   leaf: BotLinkLeaf | null,
   config: BotlinkConfig | null,
-  dccManager?: DCCManager | null,
+  dccManager?: BotlinkDCCView | null,
   ircSay?: ((target: string, message: string) => void) | null,
 ): void {
   handler.registerCommand(
@@ -444,7 +444,7 @@ export function registerBotlinkCommands(
       }
 
       // Announce to local DCC sessions
-      dccManager?.announce(`*** ${message}`);
+      dccManager?.announce?.(`*** ${message}`);
 
       // Send ANNOUNCE frame to all linked bots
       const frame = { type: 'ANNOUNCE', message: `*** ${message}`, fromBot: config.botname };

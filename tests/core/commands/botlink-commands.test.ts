@@ -7,7 +7,7 @@ import type { CommandContext } from '../../../src/command-handler';
 import { BotLinkHub, BotLinkLeaf, hashPassword } from '../../../src/core/botlink';
 import type { LinkFrame } from '../../../src/core/botlink';
 import { registerBotlinkCommands } from '../../../src/core/commands/botlink-commands';
-import type { DCCManager } from '../../../src/core/dcc';
+import type { BotlinkDCCView } from '../../../src/core/dcc';
 import type { BotlinkConfig } from '../../../src/types';
 import { createMockSocket, parseWritten, pushFrame } from '../../helpers/mock-socket';
 
@@ -427,7 +427,7 @@ describe('botlink commands', () => {
       const mockDcc = {
         getSessionList: () => [],
         getSession: () => undefined,
-      } as unknown as DCCManager;
+      } satisfies BotlinkDCCView;
       registerBotlinkCommands(handler, hub, null, hubConfig(), mockDcc);
 
       const replies: string[] = [];
@@ -444,7 +444,7 @@ describe('botlink commands', () => {
       const mockDcc = {
         getSessionList: () => [],
         getSession: () => mockSession,
-      } as unknown as DCCManager;
+      } satisfies BotlinkDCCView;
       registerBotlinkCommands(handler, hub, null, hubConfig(), mockDcc);
 
       const replies: string[] = [];
@@ -461,7 +461,7 @@ describe('botlink commands', () => {
       const mockDcc = {
         getSessionList: () => [],
         getSession: () => mockSession,
-      } as unknown as DCCManager;
+      } satisfies BotlinkDCCView;
       registerBotlinkCommands(handler, hub, null, hubConfig(), mockDcc);
 
       const replies: string[] = [];
@@ -491,7 +491,7 @@ describe('botlink commands', () => {
       const mockDcc = {
         getSessionList: () => [],
         getSession: () => mockSession,
-      } as unknown as DCCManager;
+      } satisfies BotlinkDCCView;
       registerBotlinkCommands(handler, hub, null, hubConfig(), mockDcc);
 
       const replies: string[] = [];
@@ -513,7 +513,7 @@ describe('botlink commands', () => {
       const mockDcc = {
         getSessionList: () => [],
         getSession: () => mockSession,
-      } as unknown as DCCManager;
+      } satisfies BotlinkDCCView;
       registerBotlinkCommands(handler, null, leaf, leafConfig(), mockDcc);
 
       const replies: string[] = [];
@@ -531,7 +531,7 @@ describe('botlink commands', () => {
       const mockDcc = {
         getSessionList: () => [],
         getSession: () => mockSession,
-      } as unknown as DCCManager;
+      } satisfies BotlinkDCCView;
       registerBotlinkCommands(handler, null, null, hubConfig(), mockDcc);
 
       const replies: string[] = [];
@@ -577,7 +577,7 @@ describe('botlink commands', () => {
         getSession: () => undefined,
       };
       // config=null simulates DCC enabled without botlink configured
-      registerBotlinkCommands(handler, null, null, null, mockDcc as unknown as DCCManager);
+      registerBotlinkCommands(handler, null, null, null, mockDcc);
 
       const replies: string[] = [];
       await handler.execute('.whom', makeCtx(replies));
@@ -630,7 +630,7 @@ describe('botlink commands', () => {
         ],
         getSession: () => undefined,
       };
-      registerBotlinkCommands(handler, hub, null, hubConfig(), mockDcc as unknown as DCCManager);
+      registerBotlinkCommands(handler, hub, null, hubConfig(), mockDcc);
 
       const replies: string[] = [];
       await handler.execute('.whom', makeCtx(replies));
@@ -649,7 +649,7 @@ describe('botlink commands', () => {
         getSessionList: () => [{ handle: 'solo', nick: 'Solo', connectedAt: Date.now() - 5_000 }],
         getSession: () => undefined,
       };
-      registerBotlinkCommands(handler, null, null, hubConfig(), mockDcc as unknown as DCCManager);
+      registerBotlinkCommands(handler, null, null, hubConfig(), mockDcc);
 
       const replies: string[] = [];
       await handler.execute('.whom', makeCtx(replies));
@@ -668,7 +668,7 @@ describe('botlink commands', () => {
         ],
         getSession: () => undefined,
       };
-      registerBotlinkCommands(handler, null, null, hubConfig(), mockDcc as unknown as DCCManager);
+      registerBotlinkCommands(handler, null, null, hubConfig(), mockDcc);
 
       const replies: string[] = [];
       await handler.execute('.whom', makeCtx(replies));
@@ -1121,7 +1121,7 @@ describe('.bannounce command', () => {
 
     const mockDcc = { announce: vi.fn(), getSessionList: () => [], getSession: () => undefined };
     const handler = new CommandHandler();
-    registerBotlinkCommands(handler, hub, null, hubConfig(), mockDcc as unknown as DCCManager);
+    registerBotlinkCommands(handler, hub, null, hubConfig(), mockDcc);
     const replies: string[] = [];
     await handler.execute('.bannounce hello everyone', makeCtx(replies));
 

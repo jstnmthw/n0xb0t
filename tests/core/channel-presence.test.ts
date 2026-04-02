@@ -16,7 +16,7 @@ import { createMockLogger } from '../helpers/mock-logger';
 // Mock IRC client
 // ---------------------------------------------------------------------------
 
-class MockClient extends EventEmitter {
+class MockClient extends EventEmitter implements LifecycleIRCClient {
   public joins: Array<{ channel: string; key?: string }> = [];
   public network = {
     supports: vi.fn<(feature: string) => string | boolean>().mockReturnValue('rfc1459'),
@@ -90,7 +90,7 @@ function setup(
   const logger = makeLogger();
 
   const deps: ConnectionLifecycleDeps = {
-    client: client as unknown as LifecycleIRCClient,
+    client,
     config: makeConfig(configOverrides),
     configuredChannels,
     eventBus: new BotEventBus(),
@@ -278,7 +278,7 @@ describe('channel presence check', () => {
     const logger = makeLogger();
 
     const deps: ConnectionLifecycleDeps = {
-      client: client as unknown as LifecycleIRCClient,
+      client,
       config: makeConfig({ channel_rejoin_interval_ms: 10_000 }),
       configuredChannels: [{ name: '#test' }],
       eventBus: new BotEventBus(),

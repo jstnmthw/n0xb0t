@@ -15,11 +15,13 @@ import { createMockLogger } from '../helpers/mock-logger';
 // Mock IRC client
 // ---------------------------------------------------------------------------
 
-class MockClient extends EventEmitter {
+class MockClient extends EventEmitter implements LifecycleIRCClient {
   public joins: Array<{ channel: string; key?: string }> = [];
   public network = {
     supports: vi.fn<(feature: string) => string | boolean>().mockReturnValue('rfc1459'),
   };
+  /** Simulates irc-framework's internal connection/transport chain for TLS tests. */
+  public connection?: { transport?: { socket?: unknown } };
 
   join(channel: string, key?: string): void {
     this.joins.push({ channel, key });
@@ -69,7 +71,7 @@ function makeContext(overrides?: Partial<ConnectionLifecycleDeps>): TestContext 
   const dispatcher = { bind: vi.fn() };
 
   const deps: ConnectionLifecycleDeps = {
-    client: client as unknown as LifecycleIRCClient,
+    client,
     config: MINIMAL_BOT_CONFIG,
     configuredChannels: [],
     eventBus,
@@ -191,7 +193,7 @@ describe('registerConnectionEvents', () => {
         irc: { ...MINIMAL_BOT_CONFIG.irc, tls: true },
       };
       const { client, deps, logger } = makeContext({ config: tlsConfig });
-      (client as unknown as Record<string, unknown>).connection = {
+      client.connection = {
         transport: {
           socket: {
             getCipher: () => ({ name: 'ECDHE-RSA-AES256-GCM-SHA384', version: 'TLSv1.2' }),

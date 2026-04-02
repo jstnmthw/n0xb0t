@@ -83,6 +83,33 @@ export interface DCCSessionManager {
   onRelayEnd?: ((handle: string, targetBot: string) => void) | null;
 }
 
+/** The subset of DCCSession that DCCManager and consumers depend on. */
+export interface DCCSessionEntry {
+  readonly handle: string;
+  readonly nick: string;
+  readonly connectedAt: number;
+  readonly isRelaying: boolean;
+  writeLine(line: string): void;
+  close(reason?: string): void;
+  enterRelay(targetBot: string, callback: (line: string) => void): void;
+  exitRelay(): void;
+}
+
+/** The subset of DCCManager that botlink-commands depends on. */
+export interface BotlinkDCCView {
+  getSessionList(): Array<{ handle: string; nick: string; connectedAt: number }>;
+  getSession(
+    nick: string,
+  ):
+    | {
+        handle: string;
+        isRelaying: boolean;
+        enterRelay(targetBot: string, callback: (line: string) => void): void;
+      }
+    | undefined;
+  announce?(message: string): void;
+}
+
 export interface DCCManagerDeps {
   client: DCCIRCClient;
   dispatcher: BindRegistrar;
@@ -94,7 +121,7 @@ export interface DCCManagerDeps {
   botNick: string;
   logger?: Logger | null;
   /** Injectable session store. Default: new Map(). */
-  sessions?: Map<string, DCCSession>;
+  sessions?: Map<string, DCCSessionEntry>;
   /** Injectable port allocator. Default: RangePortAllocator from config.port_range. */
   portAllocator?: PortAllocator;
 }
@@ -183,7 +210,7 @@ const BANNER_LOGO = [
   '|___|___||_____|__.__||______/|_____||____|',
 ];
 
-export class DCCSession {
+export class DCCSession implements DCCSessionEntry {
   readonly handle: string;
   readonly flags: string;
   readonly nick: string;
@@ -428,7 +455,7 @@ export class DCCSession {
 const PENDING_TIMEOUT_MS = 30_000;
 const PLUGIN_ID = 'core:dcc';
 
-export class DCCManager implements DCCSessionManager {
+export class DCCManager implements DCCSessionManager, BotlinkDCCView {
   private client: DCCIRCClient;
   private dispatcher: BindRegistrar;
   private permissions: PluginPermissions;
@@ -438,7 +465,7 @@ export class DCCManager implements DCCSessionManager {
   private version: string;
   private logger: Logger | null;
 
-  private readonly sessions: Map<string, DCCSession>;
+  private readonly sessions: Map<string, DCCSessionEntry>;
   private readonly portAllocator: PortAllocator;
   private pending: Map<number, PendingDCC> = new Map(); // key = port
   private casemapping: Casemapping = 'rfc1459';
@@ -565,7 +592,7 @@ export class DCCManager implements DCCSessionManager {
   }
 
   /** Get a session by IRC nick. */
-  getSession(nick: string): DCCSession | undefined {
+  getSession(nick: string): DCCSessionEntry | undefined {
     return this.sessions.get(ircLower(nick, this.casemapping));
   }
 

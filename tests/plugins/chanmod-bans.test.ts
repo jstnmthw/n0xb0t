@@ -20,6 +20,7 @@ import { createState } from '../../plugins/chanmod/state';
 import { BotDatabase } from '../../src/database';
 import { createLogger } from '../../src/logger';
 import type { PluginAPI, PluginDB } from '../../src/types';
+import { createMockPluginAPI } from '../helpers/mock-plugin-api';
 
 /** Wrap a BotDatabase with a namespace to create a PluginDB (as plugin-loader does). */
 function makePluginDb(db: BotDatabase, ns: string): PluginDB {
@@ -42,16 +43,29 @@ function makeApi(botHasOps = true): { api: PluginAPI; modeSpy: ReturnType<typeof
 
   const modeSpy = vi.fn();
 
-  const api = {
+  const api = createMockPluginAPI({
     db: pluginDb,
-    casemapping: 'rfc1459' as const,
-    botConfig: { irc: { nick: botNick } },
+    botConfig: {
+      irc: {
+        nick: botNick,
+        host: 'irc.test',
+        port: 6667,
+        tls: false,
+        username: 'hexbot',
+        realname: 'HexBot',
+        channels: [],
+      },
+      owner: { handle: 'owner', hostmask: '*!*@owner.host' },
+      identity: { method: 'hostmask', require_acc_for: [] },
+      services: { type: 'none', nickserv: 'NickServ', sasl: false },
+      logging: { level: 'info', mod_actions: false },
+    },
     getChannel: vi.fn().mockReturnValue({ users }),
     mode: modeSpy,
     log: vi.fn(),
     ircLower: (s: string) => s.toLowerCase(),
     bind: vi.fn(),
-  } as unknown as PluginAPI;
+  });
 
   return { api, modeSpy };
 }
@@ -290,11 +304,11 @@ describe('chanmod helpers — formatExpiry', () => {
 
 describe('chanmod helpers — getUserFlags', () => {
   it('returns null when getUserHostmask returns null', () => {
-    const api = {
+    const api = createMockPluginAPI({
       getUserHostmask: vi.fn().mockReturnValue(null),
-      permissions: { findByHostmask: vi.fn() },
+      permissions: { findByHostmask: vi.fn(), checkFlags: vi.fn().mockReturnValue(false) },
       ircLower: (s: string) => s.toLowerCase(),
-    } as unknown as PluginAPI;
+    });
 
     const result = getUserFlags(api, '#test', 'GhostUser');
     expect(result).toBeNull();
@@ -306,11 +320,10 @@ describe('chanmod helpers — botCanHalfop', () => {
   it("returns false when bot is not in the channel users map (covers modes ?? '' branch)", () => {
     // Channel exists but the bot nick is absent from its users map
     const users = new Map<string, { modes: string[] }>();
-    const api = {
-      botConfig: { irc: { nick: 'hexbot' } },
+    const api = createMockPluginAPI({
       getChannel: vi.fn().mockReturnValue({ users }),
       ircLower: (s: string) => s.toLowerCase(),
-    } as unknown as PluginAPI;
+    });
 
     expect(botCanHalfop(api, '#test')).toBe(false);
   });

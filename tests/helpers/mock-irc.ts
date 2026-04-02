@@ -2,6 +2,8 @@
 // Captures outgoing messages and can simulate incoming events.
 import { EventEmitter } from 'node:events';
 
+import type { LifecycleIRCClient } from '../../src/core/connection-lifecycle';
+
 /** A captured outgoing message. */
 export interface OutgoingMessage {
   type: 'say' | 'notice' | 'action' | 'join' | 'part' | 'mode' | 'raw' | 'quit' | 'ctcpResponse';
@@ -14,9 +16,10 @@ export interface OutgoingMessage {
  * Mock irc-framework Client that captures outgoing messages
  * and can simulate incoming IRC events.
  */
-export class MockIRCClient extends EventEmitter {
+export class MockIRCClient extends EventEmitter implements LifecycleIRCClient {
   public messages: OutgoingMessage[] = [];
   public connected = true;
+  public network = { supports: (_feature: string): string | boolean => false };
   public user = {
     nick: 'testbot',
     username: 'testbot',
