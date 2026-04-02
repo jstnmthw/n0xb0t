@@ -536,3 +536,71 @@ describe('chanmod — backup rejoin retry path', () => {
     expect(retryJoin).toBeDefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Revenge timer race guard — channel parted before timer fires
+// ---------------------------------------------------------------------------
+
+describe('chanmod — revenge timer race: channel parted before firing', () => {
+  let bot: MockBot;
+
+  beforeAll(async () => {
+    bot = createMockBot({ botNick: 'hexbot' });
+    giveBotOps(bot, '#test');
+    const result = await bot.pluginLoader.load(PLUGIN_PATH, {
+      chanmod: {
+        enabled: true,
+        config: {
+          rejoin_on_kick: true,
+          rejoin_delay_ms: 50,
+          revenge_action: 'deop',
+          revenge_delay_ms: 500,
+          enforce_delay_ms: 5,
+        },
+      },
+    });
+    expect(result.status).toBe('ok');
+  });
+
+  afterAll(() => {
+    bot.cleanup();
+  });
+
+  beforeEach(() => {
+    for (const user of bot.permissions.listUsers()) bot.permissions.removeUser(user.handle);
+    bot.client.clearMessages();
+  });
+
+  it('skips revenge when channel is parted before revenge timer fires', async () => {
+    bot.channelSettings.set('#revenge', 'revenge', true);
+
+    giveBotOps(bot, '#revenge');
+    bot.client.simulateEvent('join', {
+      nick: 'EvilOp',
+      ident: 'evil',
+      hostname: 'evil.host',
+      channel: '#revenge',
+    });
+    bot.client.clearMessages();
+
+    // Bot gets kicked — triggers rejoin + revenge timer
+    simulateKick(bot, '#revenge', 'hexbot', 'EvilOp');
+    await tick(10);
+
+    // Bot rejoins after rejoin_delay_ms
+    await tick(100);
+
+    // Remove the channel from state before the revenge timer fires (500ms)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (bot.channelState as any).channels.delete('#revenge');
+    bot.client.clearMessages();
+
+    // Advance past revenge_delay_ms (500ms)
+    await tick(600);
+
+    // No revenge action (deop) should have been sent — early return from null channel
+    expect(
+      bot.client.messages.find((m) => m.type === 'mode' && m.message === '-o'),
+    ).toBeUndefined();
+  });
+});

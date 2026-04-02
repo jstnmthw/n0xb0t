@@ -105,13 +105,12 @@ describe('seen plugin', () => {
     expect(record.time).toBeGreaterThan(0);
   });
 
-  it('should report last seen info for a known user', async () => {
-    // Track a message from alice
+  it('should report full detail when queried from the same channel', async () => {
     const msgCtx = makePubCtx('alice', 'hello there', '#dev');
     await dispatcher.dispatch('pubm', msgCtx);
 
-    // Query !seen alice
-    const queryCtx = makePubCtx('bob', '!seen alice');
+    // Query from the same channel the message was recorded in
+    const queryCtx = makePubCtx('bob', '!seen alice', '#dev');
     await dispatcher.dispatch('pub', queryCtx);
 
     expect(queryCtx.reply).toHaveBeenCalledOnce();
@@ -119,6 +118,22 @@ describe('seen plugin', () => {
     expect(response).toContain('alice');
     expect(response).toContain('#dev');
     expect(response).toContain('hello there');
+    expect(response).toMatch(/\d+s ago/);
+  });
+
+  it('should omit channel and message when queried from a different channel', async () => {
+    const msgCtx = makePubCtx('alice', 'hello there', '#dev');
+    await dispatcher.dispatch('pubm', msgCtx);
+
+    // Query from a different channel
+    const queryCtx = makePubCtx('bob', '!seen alice', '#other');
+    await dispatcher.dispatch('pub', queryCtx);
+
+    expect(queryCtx.reply).toHaveBeenCalledOnce();
+    const response = queryCtx.reply.mock.calls[0][0];
+    expect(response).toContain('alice');
+    expect(response).not.toContain('#dev');
+    expect(response).not.toContain('hello there');
     expect(response).toMatch(/\d+s ago/);
   });
 

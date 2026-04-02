@@ -181,7 +181,6 @@ export function setupProtection(
       const revengeTimer = setTimeout(() => {
         // Verify kicker is still in the channel
         const rch = api.getChannel(channel);
-        /* v8 ignore next -- guard for race: channel parted between rejoin and revenge timer */
         if (!rch) return;
         const kickerLower = api.ircLower(kickerNick);
         if (!rch.users.has(kickerLower)) return;

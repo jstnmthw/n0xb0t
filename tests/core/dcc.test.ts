@@ -470,6 +470,34 @@ describe('DCCManager', () => {
     expect(client.notices.some((n) => n.message.includes('active session'))).toBe(true);
   });
 
+  it('rejects nick with a pending connection', async () => {
+    const dispatcher = makeDispatcher();
+    let handler!: (ctx: HandlerContext) => Promise<void>;
+    (dispatcher.bind as ReturnType<typeof vi.fn>).mockImplementation(
+      (_t: string, _f: string, _m: string, fn: (ctx: HandlerContext) => Promise<void>) => {
+        handler = fn;
+      },
+    );
+    const m = new DCCManager({
+      client,
+      dispatcher,
+      permissions: makePermissions(makeUser()),
+      services: makeServices(),
+      commandHandler: makeCommandHandler(),
+      config: makeConfig(),
+      version: '1.0.0',
+      botNick: 'hexbot',
+    });
+    m.attach();
+
+    // Inject a fake pending entry for this nick
+    const pendingMap = (m as unknown as { pending: Map<number, { nick: string }> }).pending;
+    pendingMap.set(50001, { nick: 'testnick' } as never);
+
+    await handler(makeCtx('testnick'));
+    expect(client.notices.some((n) => n.message.includes('already pending'))).toBe(true);
+  });
+
   it('proceeds past NickServ verify when verification succeeds', async () => {
     const dispatcher = makeDispatcher();
     let handler!: (ctx: HandlerContext) => Promise<void>;

@@ -594,4 +594,45 @@ describe('Permissions', () => {
       expect(record.channels['#{test}']).toBeUndefined();
     });
   });
+
+  // -------------------------------------------------------------------------
+  // syncUser — default source fallback
+  // -------------------------------------------------------------------------
+
+  describe('syncUser', () => {
+    it('uses "botlink" as default source when source is omitted', () => {
+      const infoMsgs: string[] = [];
+      const mockLogger = {
+        info: (msg: string) => infoMsgs.push(msg),
+        warn: () => {},
+        debug: () => {},
+        error: () => {},
+        child: () => mockLogger,
+      } as unknown as import('../../src/logger').Logger;
+
+      const p = new Permissions(undefined, mockLogger);
+      p.syncUser('synced-user', ['*!test@host'], 'o', {});
+
+      const user = p.getUser('synced-user');
+      expect(user).not.toBeNull();
+      expect(user!.global).toBe('o');
+      expect(infoMsgs.some((m) => m.includes('from botlink'))).toBe(true);
+    });
+
+    it('uses provided source when given', () => {
+      const infoMsgs: string[] = [];
+      const mockLogger = {
+        info: (msg: string) => infoMsgs.push(msg),
+        warn: () => {},
+        debug: () => {},
+        error: () => {},
+        child: () => mockLogger,
+      } as unknown as import('../../src/logger').Logger;
+
+      const p = new Permissions(undefined, mockLogger);
+      p.syncUser('synced-user2', ['*!test@host'], 'o', {}, 'manual');
+
+      expect(infoMsgs.some((m) => m.includes('from manual'))).toBe(true);
+    });
+  });
 });

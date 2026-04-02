@@ -352,7 +352,6 @@ export class PluginLoader {
 
     const result = await this.load(filePath);
 
-    /* v8 ignore next -- FALSE branch: Vitest module caching prevents testing reload failure */
     if (result.status === 'ok') {
       this.eventBus.emit('plugin:reloaded', pluginName);
     }
@@ -590,7 +589,6 @@ export class PluginLoader {
     try {
       source = readFileSync(absPath, 'utf-8');
     } catch {
-      /* v8 ignore next -- readFileSync catch: file may be unreadable or deleted between readdirSync and read */
       return;
     }
 
@@ -716,7 +714,6 @@ function createPluginIrcActionsApi(
   | 'changeNick'
 > {
   function send(fn: () => void): void {
-    /* v8 ignore next -- TRUE branch: messageQueue is never passed in tests (always null/undefined) */
     if (messageQueue) messageQueue.enqueue(fn);
     else fn();
   }

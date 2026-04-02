@@ -61,7 +61,6 @@ export function restoreTopicIfNeeded(
   if (!snapshot) return false;
 
   const ch = api.getChannel(channel);
-  /* v8 ignore next -- guard for race: channel parted between recovery trigger and execution */
   if (!ch) return false;
 
   const currentTopic = ch.topic ?? '';

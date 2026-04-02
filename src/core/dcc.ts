@@ -98,9 +98,7 @@ export interface DCCSessionEntry {
 /** The subset of DCCManager that botlink-commands depends on. */
 export interface BotlinkDCCView {
   getSessionList(): Array<{ handle: string; nick: string; connectedAt: number }>;
-  getSession(
-    nick: string,
-  ):
+  getSession(nick: string):
     | {
         handle: string;
         isRelaying: boolean;
@@ -673,10 +671,16 @@ export class DCCManager implements DCCSessionManager, BotlinkDCCView {
       return null;
     }
 
-    // 4. Already connected?
+    // 4. Already connected or pending?
     if (this.sessions.has(ircLower(nick, this.casemapping))) {
       this.client.notice(nick, 'DCC CHAT: you already have an active session.');
       return null;
+    }
+    for (const p of this.pending.values()) {
+      if (ircLower(p.nick, this.casemapping) === ircLower(nick, this.casemapping)) {
+        this.client.notice(nick, 'DCC CHAT: a connection is already pending.');
+        return null;
+      }
     }
 
     // 5. NickServ verify (optional) — must complete before port allocation

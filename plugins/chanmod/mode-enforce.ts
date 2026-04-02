@@ -80,7 +80,6 @@ export function syncChannelModes(
 
     // Read current channel modes from channel-state
     const ch = api.getChannel(channel);
-    /* v8 ignore next -- guard for race: channel parted between setTimeout and execution; untestable without real async IRC */
     if (!ch) return;
     const currentModes = ch.modes;
 
@@ -684,42 +683,26 @@ function performHostileResponse(
         chain.requestDeop(channel, actor);
         api.log(`Hostile response: requested DEOP for ${actor} in ${channel} via backend`);
       }
-    } else if (punishMode === 'kickban') {
+    } else if (punishMode === 'kickban' || punishMode === 'akick') {
       const hostmask = api.getUserHostmask(channel, actor);
-      if (hostmask) {
-        const mask = buildBanMask(hostmask, config.default_ban_type);
+      const mask = hostmask ? buildBanMask(hostmask, config.default_ban_type) : null;
+
+      if (punishMode === 'akick' && chain?.canAkick(channel)) {
+        // AKICK via backend (persistent — survives rejoin)
+        if (mask) {
+          chain.requestAkick(channel, mask, 'Takeover response');
+          api.log(`Hostile response: AKICK ${mask} in ${channel} via backend`);
+        }
+      } else {
+        // kickban (or akick fallback when backend unavailable)
         if (mask) {
           api.ban(channel, mask);
           storeBan(api, channel, mask, getBotNick(api), config.default_ban_duration);
         }
-      }
-      markIntentional(state, api, channel, actor);
-      api.kick(channel, actor, 'Takeover response');
-      api.log(`Hostile response: kickbanned ${actor} from ${channel}`);
-    } else if (punishMode === 'akick') {
-      // AKICK via backend (persistent — survives rejoin)
-      if (chain?.canAkick(channel)) {
-        const hostmask = api.getUserHostmask(channel, actor);
-        if (hostmask) {
-          const mask = buildBanMask(hostmask, config.default_ban_type);
-          if (mask) {
-            chain.requestAkick(channel, mask, 'Takeover response');
-            api.log(`Hostile response: AKICK ${mask} in ${channel} via backend`);
-          }
-        }
-      } else {
-        // Fallback to kickban when AKICK is not available
-        const hostmask = api.getUserHostmask(channel, actor);
-        if (hostmask) {
-          const mask = buildBanMask(hostmask, config.default_ban_type);
-          if (mask) {
-            api.ban(channel, mask);
-            storeBan(api, channel, mask, getBotNick(api), config.default_ban_duration);
-          }
-        }
         markIntentional(state, api, channel, actor);
         api.kick(channel, actor, 'Takeover response');
-        api.log(`Hostile response: kickbanned ${actor} from ${channel} (AKICK unavailable)`);
+        const suffix = punishMode === 'akick' ? ' (AKICK unavailable)' : '';
+        api.log(`Hostile response: kickbanned ${actor} from ${channel}${suffix}`);
       }
     }
   }

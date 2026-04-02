@@ -5081,6 +5081,34 @@ describe('chanmod plugin — additive/subtractive reactive enforcement', () => {
 // Bot join — chanserv_access sync (auto-op.ts lines 25-28)
 // ---------------------------------------------------------------------------
 describe('chanmod plugin — bot join chanserv_access sync', () => {
+  it('skips mode enforcement when channel is parted before timer fires (race guard)', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#race');
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: { enforce_channel_modes: '+nt', enforce_modes: true, enforce_delay_ms: 5 },
+        },
+      });
+      freshBot.channelSettings.set('#race', 'channel_modes', '+nti');
+
+      // Remove the channel from state before the enforcement timer fires
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (freshBot.channelState as any).channels.delete('#race');
+
+      freshBot.client.clearMessages();
+      await tick(20);
+
+      // No mode changes should have been sent — early return from null channel
+      expect(
+        freshBot.client.messages.find((m) => m.type === 'raw' && m.message?.startsWith('MODE')),
+      ).toBeUndefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+
   it('sets backend access and verifies when bot joins a channel with chanserv_access configured', async () => {
     const freshBot = createMockBot({ botNick: 'hexbot' });
     try {

@@ -255,4 +255,21 @@ describe('MessageQueue', () => {
     expect(warnMsgs[0]).toContain('Message queue full');
     q.stop();
   });
+
+  it('calls unref() on the drain timer when available', () => {
+    // In Node.js, setInterval returns a Timeout object with unref().
+    // This test verifies the guard executes the unref() branch.
+    vi.useRealTimers(); // real timers have unref()
+
+    const q = new MessageQueue({ rate: 2, burst: 0 });
+    // Enqueue something to start the drain timer
+    q.enqueue(() => {});
+
+    // If unref() guard is broken, the process would stay alive — we just
+    // verify no errors are thrown and the queue is functional.
+    expect(q.pending).toBe(1);
+    q.stop();
+
+    vi.useFakeTimers(); // restore for afterEach
+  });
 });

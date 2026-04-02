@@ -370,4 +370,40 @@ describe('chanmod — topic recovery', () => {
     );
     expect(topicMsgs).toHaveLength(0);
   });
+
+  it('skips topic restore when channel is parted before recovery runs (race guard)', async () => {
+    bot.channelSettings.set('#topic6', 'takeover_detection', true);
+    bot.channelSettings.set('#topic6', 'protect_topic', true);
+
+    giveBotOps(bot, '#topic6');
+    addToChannel(bot, 'Attacker', 'attacker', 'attacker.host', '#topic6');
+
+    // Set good topic at normal threat
+    simulateTopic(bot, 'Admin', '#topic6', 'Original topic');
+    await tick(10);
+
+    // Raise threat + vandalize topic
+    raiseThreatToAlert(bot, '#topic6');
+    await tick(10);
+
+    const ch = bot.channelState.getChannel('#topic6');
+    if (ch) ch.topic = 'VANDALIZED';
+    simulateTopic(bot, 'Attacker', '#topic6', 'VANDALIZED');
+    await tick(10);
+
+    // Remove the channel from state before recovery (simulates bot being parted)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (bot.channelState as any).channels.delete('#topic6');
+    bot.client.clearMessages();
+
+    // Bot re-opped — would normally trigger restoreTopicIfNeeded, but channel is gone
+    simulateMode(bot, 'ChanServ', '#topic6', '+o', 'hexbot');
+    await tick(50);
+
+    // No TOPIC command — restoreTopicIfNeeded returned false due to null channel
+    const topicMsgs = bot.client.messages.filter(
+      (m) => m.type === 'raw' && m.message?.includes('TOPIC'),
+    );
+    expect(topicMsgs).toHaveLength(0);
+  });
 });

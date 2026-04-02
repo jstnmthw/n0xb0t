@@ -506,6 +506,37 @@ describe('PluginLoader', () => {
       const { loader } = createLoader(tempDir);
       await expect(loader.reload('nonexistent')).rejects.toThrow('not loaded');
     });
+
+    it('should not emit plugin:reloaded when reload fails', async () => {
+      // Use globalThis to track load count across cache-busted imports
+      (globalThis as Record<string, unknown>).__reloadFailCount = 0;
+      const pluginPath = writePlugin(
+        tempDir,
+        'reload-fail',
+        `
+        export const name = 'reload-fail';
+        export const version = '1.0.0';
+        export const description = '';
+        export function init(api) {
+          globalThis.__reloadFailCount++;
+          if (globalThis.__reloadFailCount > 1) throw new Error('reload boom');
+        }
+        `,
+      );
+
+      const { loader, eventBus } = createLoader(tempDir);
+      const first = await loader.load(pluginPath);
+      expect(first.status).toBe('ok');
+
+      const reloadedListener = vi.fn();
+      eventBus.on('plugin:reloaded', reloadedListener);
+
+      const result = await loader.reload('reload-fail');
+
+      expect(result.status).toBe('error');
+      expect(reloadedListener).not.toHaveBeenCalled();
+      delete (globalThis as Record<string, unknown>).__reloadFailCount;
+    });
   });
 
   describe('loadAll', () => {
@@ -1505,6 +1536,33 @@ describe('PluginLoader', () => {
       const result = await loader.load(pluginPath);
       expect(result.status).toBe('ok');
     });
+
+    it('should handle readFileSync failure for existing but unreadable files', async () => {
+      const { chmodSync } = await import('node:fs');
+      const pluginPath = writePlugin(
+        tempDir,
+        'unreadable-import',
+        `
+        import { helper } from './secret.js';
+        export const name = 'unreadable-import';
+        export const version = '1.0.0';
+        export function init() {}
+        `,
+      );
+      // Create the imported file, then make it unreadable
+      const secretPath = join(join(tempDir, 'unreadable-import'), 'secret.ts');
+      writeFileSync(secretPath, 'export const helper = 1;', 'utf-8');
+      chmodSync(secretPath, 0o000);
+
+      const { loader } = createLoader(tempDir);
+      // collectLocalModules finds the file (existsSync → true) but readFileSync
+      // throws EACCES. The catch block returns silently — plugin still loads.
+      const result = await loader.load(pluginPath);
+      expect(result.status).toBe('ok');
+
+      // Restore permissions for cleanup
+      chmodSync(secretPath, 0o644);
+    });
   });
 
   describe('channel object form in botConfig', () => {
@@ -1577,6 +1635,40 @@ describe('PluginLoader', () => {
 
       const binds = dispatcher.listBinds({ pluginId: 'unbind-test' });
       expect(binds).toHaveLength(0);
+    });
+  });
+
+  describe('messageQueue routing', () => {
+    it('should route plugin say() through messageQueue when provided', async () => {
+      const pluginPath = writePlugin(
+        tempDir,
+        'mq-test',
+        `
+        export const name = 'mq-test';
+        export const version = '1.0.0';
+        export const description = '';
+        export function init(api) {
+          globalThis.__testPluginApi = api;
+        }
+        `,
+      );
+
+      const { MessageQueue } = await import('../src/core/message-queue');
+      const mq = new MessageQueue({ rate: 10, burst: 0 });
+      const enqueueSpy = vi.spyOn(mq, 'enqueue');
+
+      const { mockIrcClient } = createLoaderFull(tempDir, { messageQueue: mq });
+      const { loader } = createLoaderFull(tempDir, { messageQueue: mq });
+      await loader.load(pluginPath);
+
+      const api = getTestPluginApi();
+      api.say('#test', 'hello');
+
+      // Message should go through the queue, not directly to IRC client
+      expect(enqueueSpy).toHaveBeenCalledTimes(1);
+      expect(mockIrcClient.say).not.toHaveBeenCalled();
+
+      mq.stop();
     });
   });
 });

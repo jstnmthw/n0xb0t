@@ -68,10 +68,15 @@ export function init(api: PluginAPI): void {
     }
 
     const ago = formatRelativeTime(age);
-    ctx.reply(
-      `${api.stripFormatting(record.nick)} was last seen ${ago} in ` +
-        `${api.stripFormatting(record.channel)} saying: ${api.stripFormatting(record.text)}`,
-    );
+    const sameChannel = api.ircLower(record.channel) === api.ircLower(ctx.channel!);
+    if (sameChannel) {
+      ctx.reply(
+        `${api.stripFormatting(record.nick)} was last seen ${ago} in ` +
+          `${api.stripFormatting(record.channel)} saying: ${api.stripFormatting(record.text)}`,
+      );
+    } else {
+      ctx.reply(`${api.stripFormatting(record.nick)} was last seen ${ago}.`);
+    }
   });
 
   // Hourly cleanup of stale entries
