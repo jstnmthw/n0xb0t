@@ -68,7 +68,9 @@ export function syncChannelModes(
 
     // Read current channel modes from channel-state
     const ch = api.getChannel(channel);
-    const currentModes = ch!.modes;
+    /* v8 ignore next -- guard for race: channel parted between setTimeout and execution; untestable without real async IRC */
+    if (!ch) return;
+    const currentModes = ch.modes;
 
     // Add missing modes (only when enforcement is on)
     if (enforceModes && parsed.add.size > 0) {

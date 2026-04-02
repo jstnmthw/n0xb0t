@@ -99,7 +99,7 @@ export class ChannelSettings {
     this.db.del(NAMESPACE, `${channel}:${key}`);
     // Notify with the new effective value (the default)
     const def = this.defs.get(key);
-    this.notifyChange(channel, key, def!.default);
+    if (def) this.notifyChange(channel, key, def.default);
   }
 
   /**

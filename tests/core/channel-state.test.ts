@@ -369,6 +369,15 @@ describe('ChannelState', () => {
       expect(user!.hostmask).toBe('Alice!newident@old.host');
     });
 
+    it('handles userlist with missing channel field', () => {
+      // Defensive: irc-framework should always provide channel, but the coercion handles it
+      client.simulateEvent('userlist', {
+        users: [{ nick: 'Ghost', ident: 'g', hostname: 'h', modes: '' }],
+      });
+      // Creates channel '' which is harmless; key assertion is no crash
+      expect(state.isUserInChannel('', 'Ghost')).toBe(true);
+    });
+
     it('skips hostmask update when both ident and hostname are empty in userlist update', () => {
       client.simulateEvent('join', {
         nick: 'Alice',

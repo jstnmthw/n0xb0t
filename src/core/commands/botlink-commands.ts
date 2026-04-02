@@ -44,7 +44,9 @@ export function registerBotlinkCommands(
               const leafInfo = leaves
                 .map((name) => {
                   const info = hub.getLeafInfo(name);
-                  const ago = Math.floor((Date.now() - info!.connectedAt) / 1000);
+                  /* v8 ignore next -- guard for race: leaf disconnects between getLeaves() and getLeafInfo() */
+                  if (!info) return `  ${name} (disconnecting)`;
+                  const ago = Math.floor((Date.now() - info.connectedAt) / 1000);
                   return `  ${name} (connected ${ago}s ago)`;
                 })
                 .join('\n');

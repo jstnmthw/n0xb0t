@@ -337,7 +337,7 @@ export class ChannelState {
   }
 
   private onUserlist(event: Record<string, unknown>): void {
-    const channel = event.channel as string;
+    const channel = String(event.channel ?? '');
     if (!isObjectArray(event.users)) return;
     const users = event.users;
 

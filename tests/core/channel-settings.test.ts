@@ -151,6 +151,11 @@ describe('ChannelSettings', () => {
       cs.unset('#test', 'bitch');
       expect(cs.isSet('#test', 'bitch')).toBe(false);
     });
+
+    it('does not throw when unsetting an unregistered key', () => {
+      // Key was never registered — unset should be a no-op (no crash)
+      expect(() => cs.unset('#test', 'nonexistent')).not.toThrow();
+    });
   });
 
   describe('isSet', () => {
