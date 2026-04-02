@@ -16,12 +16,24 @@ import {
   parseChannelModes,
   wasIntentional,
 } from './helpers';
+import type { ProtectionChain } from './protection-backend';
 import {
   COOLDOWN_WINDOW_MS,
   type ChanmodConfig,
   MAX_ENFORCEMENTS,
   type SharedState,
 } from './state';
+import { THREAT_ACTIVE, THREAT_ALERT, getThreatLevel, getThreatState } from './takeover-detect';
+import { restoreTopicIfNeeded } from './topic-recovery';
+
+/** Callback for reporting threat events to the takeover detection engine. */
+export type ThreatCallback = (
+  channel: string,
+  eventType: string,
+  points: number,
+  actor: string,
+  target?: string,
+) => void;
 
 const PUNISH_MAX = 2;
 const PUNISH_COOLDOWN_MS = 30_000;
@@ -139,6 +151,8 @@ export function setupModeEnforce(
   api: PluginAPI,
   config: ChanmodConfig,
   state: SharedState,
+  chain?: ProtectionChain,
+  onThreat?: ThreatCallback,
 ): () => void {
   api.bind('mode', '-', '*', (ctx: HandlerContext) => {
     const { nick: setter, command: modeStr, args: target } = ctx;
@@ -156,6 +170,15 @@ export function setupModeEnforce(
     );
     const canEnforce =
       enforceModes && !isNodesynch && !isBotNick(api, setter) && botHasOps(api, channel);
+
+    // --- Threat detection: mode lockdown (+i, +k, +s) by non-nodesynch ---
+    if (onThreat && !isNodesynch && !isBotNick(api, setter)) {
+      if (modeStr === '+i' || modeStr === '+s') {
+        onThreat(channel, 'mode_locked', 1, setter);
+      } else if (modeStr === '+k' && target) {
+        onThreat(channel, 'mode_locked', 1, setter);
+      }
+    }
 
     // --- Re-apply removed modes that are in the add set ---
     if (parsed.add.size > 0 && modeStr.startsWith('-') && modeStr.length === 2 && canEnforce) {
@@ -246,19 +269,39 @@ export function setupModeEnforce(
 
     // --- Bot self-deop → ChanServ OP recovery + cycle ---
     if (modeStr === '-o' && isBotNick(api, target)) {
-      // Ask ChanServ to re-op the bot
+      // Report to threat detection if not from a nodesynch nick
+      if (onThreat && !isNodesynch) {
+        onThreat(channel, 'bot_deopped', 3, setter, target);
+      }
+
+      // Ask ChanServ to re-op the bot — prefer ProtectionChain if available and capable
       const chanservOp = api.channelSettings.getFlag(channel, 'chanserv_op');
       if (chanservOp) {
-        const ch = api.getChannel(channel);
-        const csNickLower = api.ircLower(config.chanserv_nick);
-        const present = ch?.users.has(csNickLower);
-        api.log(
-          `Requesting ops from ${config.chanserv_nick} in ${channel}${present ? '' : ` (${config.chanserv_nick} not present in channel, sending anyway)`}`,
-        );
-        const csTimer = setTimeout(() => {
-          api.say(config.chanserv_nick, `OP ${channel}`);
-        }, config.chanserv_op_delay_ms);
-        state.cycleTimers.push(csTimer);
+        // Zero delay during elevated threat — speed matters during a takeover
+        const botDeopThreat = getThreatLevel(api, config, state, channel);
+        const csDelay = botDeopThreat >= THREAT_ALERT ? 0 : config.chanserv_op_delay_ms;
+
+        if (chain && chain.canOp(channel)) {
+          api.log(
+            `Requesting ops via ProtectionChain in ${channel}${csDelay === 0 ? ' (zero delay — elevated threat)' : ''}`,
+          );
+          const csTimer = setTimeout(() => {
+            chain.requestOp(channel);
+          }, csDelay);
+          state.cycleTimers.push(csTimer);
+        } else {
+          // Fallback: direct ChanServ message (backward compat when chanserv_access='none')
+          const ch = api.getChannel(channel);
+          const csNickLower = api.ircLower(config.chanserv_nick);
+          const present = ch?.users.has(csNickLower);
+          api.log(
+            `Requesting ops from ${config.chanserv_nick} in ${channel}${present ? '' : ` (${config.chanserv_nick} not present in channel, sending anyway)`}`,
+          );
+          const csTimer = setTimeout(() => {
+            api.say(config.chanserv_nick, `OP ${channel}`);
+          }, csDelay);
+          state.cycleTimers.push(csTimer);
+        }
       }
 
       if (config.cycle_on_deop && !state.cycleScheduled.has(api.ircLower(channel))) {
@@ -295,6 +338,55 @@ export function setupModeEnforce(
       return; // Don't apply user-flag enforcement for bot self-deop
     }
 
+    // --- Post-RECOVER cleanup + mass re-op on bot opped ---
+    if (modeStr === '+o' && isBotNick(api, target)) {
+      const chanKey = api.ircLower(channel);
+
+      // Atheme RECOVER cleanup: remove +i +m
+      if (state.pendingRecoverCleanup.has(chanKey)) {
+        state.pendingRecoverCleanup.delete(chanKey);
+        api.log(`Post-RECOVER cleanup: removing +i +m on ${channel}`);
+        const cleanupTimer = setTimeout(() => {
+          api.mode(channel, '-im');
+        }, config.enforce_delay_ms);
+        state.enforcementTimers.push(cleanupTimer);
+      }
+
+      // Clear last-known modes after recovery
+      state.lastKnownModes.delete(chanKey);
+
+      // Mass re-op + hostile response + topic recovery during elevated threat level
+      const threatLevel = getThreatLevel(api, config, state, channel);
+      if (threatLevel >= THREAT_ALERT) {
+        // Use takeover_response_delay_ms (default 0) for recovery actions — speed matters
+        const recoveryDelay = config.takeover_response_delay_ms;
+
+        const massReop = api.channelSettings.getFlag(channel, 'mass_reop_on_recovery');
+        if (massReop) {
+          const reapplyTimer = setTimeout(() => {
+            performMassReop(api, config, channel);
+          }, recoveryDelay);
+          state.enforcementTimers.push(reapplyTimer);
+        }
+
+        // Hostile op response at Active+ threat level
+        if (threatLevel >= THREAT_ACTIVE) {
+          const hostileTimer = setTimeout(() => {
+            performHostileResponse(api, config, state, channel, chain);
+          }, recoveryDelay);
+          state.enforcementTimers.push(hostileTimer);
+        }
+
+        // Topic recovery — restore pre-attack topic if it was vandalized
+        const topicTimer = setTimeout(() => {
+          restoreTopicIfNeeded(api, config, state, channel);
+        }, recoveryDelay);
+        state.enforcementTimers.push(topicTimer);
+      }
+
+      return; // Don't apply bitch mode or other checks to bot being opped
+    }
+
     // --- Bitch mode: strip unauthorized +o / +h ---
     const bitch = api.channelSettings.getFlag(channel, 'bitch');
     if (bitch && (modeStr === '+o' || modeStr === '+h') && target) {
@@ -314,9 +406,22 @@ export function setupModeEnforce(
             else api.dehalfop(channel, target);
           }, config.enforce_delay_ms);
           state.enforcementTimers.push(timer);
+          // Report unauthorized op to threat detection
+          if (onThreat && modeStr === '+o') {
+            onThreat(channel, 'unauthorized_op', 2, setter, target);
+          }
         }
       }
       return;
+    }
+
+    // --- Threat detection: bot banned (+b matching bot's hostmask) ---
+    if (onThreat && modeStr === '+b' && target && !isNodesynch && !isBotNick(api, setter)) {
+      const botNick = getBotNick(api);
+      const botHostmask = api.getUserHostmask(channel, botNick);
+      if (botHostmask && wildcardMatch(target, botHostmask, true)) {
+        onThreat(channel, 'bot_banned', 5, setter, target);
+      }
     }
 
     // --- Enforcebans: kick channel members matching a new ban mask ---
@@ -355,6 +460,10 @@ export function setupModeEnforce(
     if (cooldown && now < cooldown.expiresAt) {
       if (cooldown.count >= MAX_ENFORCEMENTS) {
         api.warn(`Suppressing mode enforcement for ${target} in ${channel} — possible mode war`);
+        // Report to threat detection — direct enforcement failed, escalate
+        if (onThreat) {
+          onThreat(channel, 'enforcement_suppressed', 2, setter, target);
+        }
         return;
       }
       cooldown.count++;
@@ -371,6 +480,10 @@ export function setupModeEnforce(
           api.op(channel, target);
         }, config.enforce_delay_ms);
         state.enforcementTimers.push(timer);
+      }
+      // Report friendly op deopped to threat detection
+      if (onThreat && shouldBeOpped && !isNodesynch) {
+        onThreat(channel, 'friendly_deopped', 2, setter, target);
       }
       // Punish whoever stripped ops from a recognized op
       if (protectOps && shouldBeOpped) {
@@ -437,6 +550,188 @@ export function setupModeEnforce(
   };
 }
 
+/**
+ * After the bot regains ops during an elevated threat, scan all channel
+ * users and batch re-op/halfop/voice flagged users, deop unauthorized ops.
+ */
+function performMassReop(api: PluginAPI, config: ChanmodConfig, channel: string): void {
+  const ch = api.getChannel(channel);
+  if (!ch) return;
+
+  const bitch = api.channelSettings.getFlag(channel, 'bitch');
+
+  const toOp: string[] = [];
+  const toDeop: string[] = [];
+  const toHalfop: string[] = [];
+  const toVoice: string[] = [];
+
+  for (const [, user] of ch.users) {
+    if (isBotNick(api, user.nick)) continue;
+
+    const hostmask = `${user.nick}!${user.ident}@${user.hostname}`;
+    const rec = api.permissions.findByHostmask(hostmask);
+    const globalFlags = rec?.global ?? '';
+    const channelFlags = rec?.channels[api.ircLower(channel)] ?? '';
+    const allFlags = globalFlags + channelFlags;
+
+    const hasOps = user.modes.includes('o');
+    const hasHalfop = user.modes.includes('h');
+    const hasVoice = user.modes.includes('v');
+
+    const shouldOp = hasAnyFlag(allFlags, config.op_flags);
+    const shouldHalfop =
+      !shouldOp && config.halfop_flags.length > 0 && hasAnyFlag(allFlags, config.halfop_flags);
+    const shouldVoice = !shouldOp && !shouldHalfop && hasAnyFlag(allFlags, config.voice_flags);
+
+    // Re-op flagged users who lost ops
+    if (shouldOp && !hasOps) {
+      toOp.push(user.nick);
+    }
+    // Deop unauthorized ops (bitch mode logic applied en masse)
+    if (bitch && hasOps && !shouldOp) {
+      toDeop.push(user.nick);
+    }
+    // Re-halfop
+    if (shouldHalfop && !hasHalfop) {
+      toHalfop.push(user.nick);
+    }
+    // Re-voice
+    if (shouldVoice && !hasVoice) {
+      toVoice.push(user.nick);
+    }
+  }
+
+  // Send batched mode changes — api.mode() handles ISUPPORT MODES batching
+  if (toOp.length > 0) {
+    api.mode(channel, '+' + 'o'.repeat(toOp.length), ...toOp);
+    api.log(`Mass re-op: opping ${toOp.length} users in ${channel}: ${toOp.join(', ')}`);
+  }
+  if (toDeop.length > 0) {
+    api.mode(channel, '-' + 'o'.repeat(toDeop.length), ...toDeop);
+    api.log(
+      `Mass re-op: deopping ${toDeop.length} unauthorized ops in ${channel}: ${toDeop.join(', ')}`,
+    );
+  }
+  if (toHalfop.length > 0) {
+    api.mode(channel, '+' + 'h'.repeat(toHalfop.length), ...toHalfop);
+    api.log(
+      `Mass re-op: halfopping ${toHalfop.length} users in ${channel}: ${toHalfop.join(', ')}`,
+    );
+  }
+  if (toVoice.length > 0) {
+    api.mode(channel, '+' + 'v'.repeat(toVoice.length), ...toVoice);
+    api.log(`Mass re-op: voicing ${toVoice.length} users in ${channel}: ${toVoice.join(', ')}`);
+  }
+}
+
+/**
+ * Counter-attack hostile actors identified in the threat event log.
+ * Called when bot regains ops at threat level >= Active (2).
+ *
+ * Punishment level is configured via `takeover_punish`:
+ * - 'none': no counter-attack
+ * - 'deop': strip hostile ops
+ * - 'kickban': kick+ban hostiles
+ * - 'akick': ChanServ AKICK (persistent, requires superop+)
+ */
+function performHostileResponse(
+  api: PluginAPI,
+  config: ChanmodConfig,
+  state: SharedState,
+  channel: string,
+  chain?: ProtectionChain,
+): void {
+  const punishMode = api.channelSettings.getString(channel, 'takeover_punish');
+  if (punishMode === 'none') return;
+
+  const threat = getThreatState(api, state, channel);
+  if (!threat) return;
+
+  // Collect unique hostile actors from the threat event log
+  const hostileActors = new Set<string>();
+  for (const event of threat.events) {
+    if (event.actor) hostileActors.add(event.actor);
+  }
+
+  const ch = api.getChannel(channel);
+  if (!ch) return;
+
+  for (const actor of hostileActors) {
+    // Skip the bot itself
+    if (isBotNick(api, actor)) continue;
+
+    // Skip nodesynch nicks
+    /* v8 ignore next -- nodesynch actors are filtered out in assessThreat's input path */
+    if (config.nodesynch_nicks.some((n) => api.ircLower(n) === api.ircLower(actor))) continue;
+
+    // Respect revenge_exempt_flags — n/m users are never counter-attacked
+    const flags = getUserFlags(api, channel, actor);
+    if (flags && hasAnyFlag(flags, config.revenge_exempt_flags)) {
+      api.log(`Hostile response: skipping ${actor} in ${channel} — exempt flag`);
+      continue;
+    }
+
+    // Check if the actor is still in the channel
+    const actorLower = api.ircLower(actor);
+    if (!ch.users.has(actorLower)) continue;
+
+    if (punishMode === 'deop') {
+      // Direct deop if bot has ops, or via chain
+      if (botHasOps(api, channel)) {
+        markIntentional(state, api, channel, actor);
+        api.deop(channel, actor);
+        api.log(`Hostile response: deopped ${actor} in ${channel}`);
+      } else if (chain?.canDeop(channel)) {
+        chain.requestDeop(channel, actor);
+        api.log(`Hostile response: requested DEOP for ${actor} in ${channel} via backend`);
+      }
+    } else if (punishMode === 'kickban') {
+      const hostmask = api.getUserHostmask(channel, actor);
+      /* v8 ignore next -- defensive: actor confirmed present via ch.users.has() above */
+      if (hostmask) {
+        const mask = buildBanMask(hostmask, config.default_ban_type);
+        /* v8 ignore next -- defensive: buildBanMask only returns null for empty host */
+        if (mask) {
+          api.ban(channel, mask);
+          storeBan(api, channel, mask, getBotNick(api), config.default_ban_duration);
+        }
+      }
+      markIntentional(state, api, channel, actor);
+      api.kick(channel, actor, 'Takeover response');
+      api.log(`Hostile response: kickbanned ${actor} from ${channel}`);
+    } else if (punishMode === 'akick') {
+      // AKICK via backend (persistent — survives rejoin)
+      if (chain?.canAkick(channel)) {
+        const hostmask = api.getUserHostmask(channel, actor);
+        /* v8 ignore next -- defensive: actor confirmed present via ch.users.has() above */
+        if (hostmask) {
+          const mask = buildBanMask(hostmask, config.default_ban_type);
+          /* v8 ignore next -- defensive: buildBanMask only returns null for empty host */
+          if (mask) {
+            chain.requestAkick(channel, mask, 'Takeover response');
+            api.log(`Hostile response: AKICK ${mask} in ${channel} via backend`);
+          }
+        }
+      } else {
+        // Fallback to kickban when AKICK is not available
+        const hostmask = api.getUserHostmask(channel, actor);
+        /* v8 ignore next -- defensive: actor confirmed present via ch.users.has() above */
+        if (hostmask) {
+          const mask = buildBanMask(hostmask, config.default_ban_type);
+          /* v8 ignore next -- defensive: buildBanMask only returns null for empty host */
+          if (mask) {
+            api.ban(channel, mask);
+            storeBan(api, channel, mask, getBotNick(api), config.default_ban_duration);
+          }
+        }
+        markIntentional(state, api, channel, actor);
+        api.kick(channel, actor, 'Takeover response');
+        api.log(`Hostile response: kickbanned ${actor} from ${channel} (AKICK unavailable)`);
+      }
+    }
+  }
+}
+
 function punishDeop(
   api: PluginAPI,
   config: ChanmodConfig,
@@ -461,8 +756,10 @@ function punishDeop(
 
   if (config.punish_action === 'kickban') {
     const hostmask = api.getUserHostmask(channel, setter);
+    /* v8 ignore next -- defensive: setter always in channel state when punishDeop is called */
     if (hostmask) {
       const mask = buildBanMask(hostmask, 1);
+      /* v8 ignore next -- defensive: buildBanMask only returns null for empty host */
       if (mask) {
         api.ban(channel, mask);
         storeBan(api, channel, mask, getBotNick(api), config.default_ban_duration);

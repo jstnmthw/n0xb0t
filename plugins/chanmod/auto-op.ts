@@ -1,12 +1,15 @@
 // chanmod — auto-op/halfop/voice on join, with optional NickServ verification
 import type { HandlerContext, PluginAPI } from '../../src/types';
 import { botCanHalfop, botHasOps, hasAnyFlag, isBotNick } from './helpers';
+import type { BackendAccess } from './protection-backend';
+import type { ProtectionChain } from './protection-backend';
 import type { ChanmodConfig, SharedState } from './state';
 
 export function setupAutoOp(
   api: PluginAPI,
   config: ChanmodConfig,
   _state: SharedState,
+  chain?: ProtectionChain,
 ): () => void {
   api.bind('join', '-', '*', async (ctx: HandlerContext) => {
     const { nick } = ctx;
@@ -17,6 +20,22 @@ export function setupAutoOp(
     // (set up in setupModeEnforce). This guarantees channel state is populated before sync.
     if (isBotNick(api, nick)) {
       api.requestChannelModes(channel);
+
+      // Set and verify ChanServ access level for the protection chain
+      /* v8 ignore next -- chain is always passed from index.ts init */
+      if (chain) {
+        const accessStr = api.channelSettings.getString(channel, 'chanserv_access');
+        const validLevels = new Set(['none', 'op', 'superop', 'founder']);
+        const access: BackendAccess = validLevels.has(accessStr)
+          ? (accessStr as BackendAccess)
+          : 'none';
+        if (access !== 'none') {
+          for (const b of chain.getBackends()) {
+            b.setAccess(channel, access);
+          }
+          chain.verifyAccess(channel);
+        }
+      }
       return;
     }
 

@@ -5,6 +5,21 @@ import type { PluginAPI } from '../../src/types';
 // Shared mutable state (created fresh on each init, passed to all modules)
 // ---------------------------------------------------------------------------
 
+/** A single threat event recorded during a potential takeover. */
+export interface ThreatEvent {
+  type: string;
+  actor: string;
+  target?: string;
+  timestamp: number;
+}
+
+/** Per-channel threat scoring state. */
+export interface ThreatState {
+  score: number;
+  events: ThreatEvent[];
+  windowStart: number;
+}
+
 export interface SharedState {
   intentionalModeChanges: Map<string, number>;
   enforcementCooldown: Map<string, { count: number; expiresAt: number }>;
@@ -18,6 +33,18 @@ export interface SharedState {
   splitOpsSnapshot: Map<string, Set<string>>; // ircLower(channel) → set of ircLower nicks with ops
   splitQuitCount: number;
   splitQuitWindowStart: number;
+  // Takeover threat detection
+  threatScores: Map<string, ThreatState>;
+  // Kick+ban recovery
+  /** Channels where RECOVER was used and post-recovery +i +m cleanup is needed. */
+  pendingRecoverCleanup: Set<string>;
+  /** Last-known channel modes before the bot was kicked (for +i/+k detection). */
+  lastKnownModes: Map<string, { modes: string; key?: string }>;
+  /** Channels where we already sent requestUnban (prevent double-sends). */
+  unbanRequested: Set<string>;
+  // Topic recovery
+  /** Known-good topic per channel — updated at threat level 0, frozen during elevated threat. */
+  knownGoodTopics: Map<string, { topic: string; setAt: number }>;
 }
 
 export const INTENTIONAL_TTL_MS = 5000;
@@ -37,6 +64,11 @@ export function createState(): SharedState {
     splitOpsSnapshot: new Map(),
     splitQuitCount: 0,
     splitQuitWindowStart: 0,
+    threatScores: new Map(),
+    pendingRecoverCleanup: new Set(),
+    lastKnownModes: new Map(),
+    unbanRequested: new Set(),
+    knownGoodTopics: new Map(),
   };
 }
 
@@ -88,6 +120,17 @@ export interface ChanmodConfig {
   chanserv_op: boolean;
   chanserv_nick: string;
   chanserv_op_delay_ms: number;
+  chanserv_services_type: 'atheme' | 'anope';
+  chanserv_unban_retry_ms: number;
+  chanserv_unban_max_retries: number;
+  chanserv_recover_cooldown_ms: number;
+  anope_recover_step_delay_ms: number;
+  // Takeover detection
+  takeover_window_ms: number;
+  takeover_level_1_threshold: number;
+  takeover_level_2_threshold: number;
+  takeover_level_3_threshold: number;
+  takeover_response_delay_ms: number;
   invite: boolean;
 }
 
@@ -139,6 +182,21 @@ export function readConfig(api: PluginAPI): ChanmodConfig {
     chanserv_op: cfg(c, 'chanserv_op', false),
     chanserv_nick: cfg(c, 'chanserv_nick', 'ChanServ'),
     chanserv_op_delay_ms: cfg(c, 'chanserv_op_delay_ms', 1000),
+    chanserv_services_type: cfg<'atheme' | 'anope'>(
+      c,
+      'chanserv_services_type',
+      /* v8 ignore next -- fallback when services.type is empty/unset */
+      (api.botConfig.services.type as 'atheme' | 'anope') || 'atheme',
+    ),
+    chanserv_unban_retry_ms: cfg(c, 'chanserv_unban_retry_ms', 2000),
+    chanserv_unban_max_retries: cfg(c, 'chanserv_unban_max_retries', 3),
+    chanserv_recover_cooldown_ms: cfg(c, 'chanserv_recover_cooldown_ms', 60_000),
+    anope_recover_step_delay_ms: cfg(c, 'anope_recover_step_delay_ms', 200),
+    takeover_window_ms: cfg(c, 'takeover_window_ms', 30_000),
+    takeover_level_1_threshold: cfg(c, 'takeover_level_1_threshold', 3),
+    takeover_level_2_threshold: cfg(c, 'takeover_level_2_threshold', 6),
+    takeover_level_3_threshold: cfg(c, 'takeover_level_3_threshold', 10),
+    takeover_response_delay_ms: cfg(c, 'takeover_response_delay_ms', 0),
     invite: cfg(c, 'invite', false),
   };
 }

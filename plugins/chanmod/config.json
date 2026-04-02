@@ -35,5 +35,15 @@
   "split_timeout_ms": 300000,
   "chanserv_op": false,
   "chanserv_nick": "ChanServ",
-  "chanserv_op_delay_ms": 1000
+  "chanserv_op_delay_ms": 1000,
+  "chanserv_services_type": "",
+  "chanserv_unban_retry_ms": 2000,
+  "chanserv_unban_max_retries": 3,
+  "chanserv_recover_cooldown_ms": 60000,
+  "anope_recover_step_delay_ms": 200,
+  "takeover_window_ms": 30000,
+  "takeover_level_1_threshold": 3,
+  "takeover_level_2_threshold": 6,
+  "takeover_level_3_threshold": 10,
+  "takeover_response_delay_ms": 0
 }

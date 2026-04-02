@@ -71,12 +71,14 @@ export class ChannelSettings {
   /** Read a string setting. Returns '' for unknown keys. */
   getString(channel: string, key: string): string {
     const val = this.get(channel, key);
+    /* v8 ignore next -- defensive: get() always returns string for string-typed keys */
     return typeof val === 'string' ? val : '';
   }
 
   /** Read an int setting. Returns 0 for unknown keys. */
   getInt(channel: string, key: string): number {
     const val = this.get(channel, key);
+    /* v8 ignore next -- defensive: get() always returns number for int-typed keys */
     return typeof val === 'number' ? val : 0;
   }
 

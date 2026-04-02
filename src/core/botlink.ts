@@ -1321,7 +1321,7 @@ export class BotLinkLeaf {
       .then(() => {
         this.send({ type: 'CMD_RESULT', ref, output });
       })
-      /* v8 ignore next 5 -- .catch only fires if command handler throws */
+      /* v8 ignore start -- .catch only fires if command handler throws */
       .catch((err) => {
         this.send({
           type: 'CMD_RESULT',
@@ -1329,6 +1329,7 @@ export class BotLinkLeaf {
           output: [`Error: ${err instanceof Error ? err.message : String(err)}`],
         });
       });
+    /* v8 ignore stop */
   }
 
   // -----------------------------------------------------------------------

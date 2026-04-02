@@ -1,23 +1,49 @@
 // chanmod — Channel operator tools: auto-op/halfop/voice, mode enforcement, timed bans, kick/ban commands, and channel protection.
 import type { PluginAPI } from '../../src/types';
+import { AnopeBackend } from './anope-backend';
+import { AthemeBackend } from './atheme-backend';
 import { setupAutoOp } from './auto-op';
 import { setupBans } from './bans';
 import { setupCommands } from './commands';
 import { setupInvite } from './invite';
+import type { ThreatCallback } from './mode-enforce';
 import { setupModeEnforce } from './mode-enforce';
 import { setupProtection } from './protection';
+import { ProtectionChain } from './protection-backend';
 import { createState, readConfig } from './state';
+import { assessThreat } from './takeover-detect';
+import { setupTopicRecovery } from './topic-recovery';
 
 export const name = 'chanmod';
-export const version = '2.1.0';
+export const version = '3.0.0';
 export const description =
-  'Channel operator tools: auto-op/halfop/voice, mode enforcement, timed bans, kick/ban, cycle';
+  'Channel operator tools: auto-op/halfop/voice, mode enforcement, timed bans, kick/ban, cycle, ChanServ protection';
 
 let teardowns: Array<() => void> = [];
 
 export function init(api: PluginAPI): void {
   const config = readConfig(api);
   const state = createState();
+
+  // --- Protection backend setup ---
+  const chain = new ProtectionChain(api);
+
+  // Create the ChanServ backend based on services type
+  const servicesType = config.chanserv_services_type;
+  if (servicesType === 'anope') {
+    const backend = new AnopeBackend(api, config.chanserv_nick, config.anope_recover_step_delay_ms);
+    chain.addBackend(backend);
+    // Teardown: clear Anope recover timers
+    teardowns.push(() => backend.clearTimers());
+  } else {
+    // Default to Atheme (most common, also used as fallback)
+    const backend = new AthemeBackend(api, config.chanserv_nick);
+    // Wire post-RECOVER callback: mark channel for +i +m cleanup
+    backend.onRecoverCallback = (channel: string) => {
+      state.pendingRecoverCleanup.add(api.ircLower(channel));
+    };
+    chain.addBackend(backend);
+  }
 
   // Register per-channel settings (defaults come from api.config so global config still works)
   api.channelSettings.register([
@@ -85,6 +111,38 @@ export function init(api: PluginAPI): void {
       description: 'Request ops from ChanServ when the bot is deopped',
     },
     {
+      key: 'chanserv_access',
+      type: 'string',
+      default: 'none',
+      description: "Bot's ChanServ access tier: 'none' | 'op' | 'superop' | 'founder'",
+    },
+    {
+      key: 'chanserv_unban_on_kick',
+      type: 'flag',
+      default: true,
+      description:
+        'Request UNBAN from services when bot is kicked (requires chanserv_access >= op)',
+    },
+    {
+      key: 'mass_reop_on_recovery',
+      type: 'flag',
+      default: true,
+      description: 'Mass re-op flagged users after regaining ops during elevated threat',
+    },
+    {
+      key: 'takeover_punish',
+      type: 'string',
+      default: 'deop',
+      description:
+        "Response to hostile actors during takeover: 'none' | 'deop' | 'kickban' | 'akick'",
+    },
+    {
+      key: 'takeover_detection',
+      type: 'flag',
+      default: true,
+      description: 'Enable threat scoring and automatic escalation for channel takeover attempts',
+    },
+    {
       key: 'invite',
       type: 'flag',
       default: config.invite,
@@ -92,14 +150,38 @@ export function init(api: PluginAPI): void {
     },
   ]);
 
-  teardowns = [
+  // --- Sync chanserv_access setting to backend access levels ---
+  const validAccessLevels = new Set(['none', 'op', 'superop', 'founder']);
+  api.channelSettings.onChange((channel: string, key: string) => {
+    if (key === 'chanserv_access') {
+      const accessStr = api.channelSettings.getString(channel, 'chanserv_access');
+      const access = validAccessLevels.has(accessStr)
+        ? (accessStr as 'none' | 'op' | 'superop' | 'founder')
+        : 'none';
+      for (const b of chain.getBackends()) {
+        b.setAccess(channel, access);
+      }
+    }
+  });
+
+  // --- Threat detection callback ---
+  // When takeover_detection is enabled for a channel, route threat events through
+  // assessThreat() which scores them and triggers ProtectionChain escalation.
+  const onThreat: ThreatCallback = (channel, eventType, points, actor, target) => {
+    const enabled = api.channelSettings.getFlag(channel, 'takeover_detection');
+    if (!enabled) return;
+    assessThreat(api, config, state, chain, channel, eventType, points, actor, target);
+  };
+
+  teardowns.push(
     setupBans(api, config, state),
-    setupAutoOp(api, config, state),
-    setupModeEnforce(api, config, state),
-    setupProtection(api, config, state),
+    setupAutoOp(api, config, state, chain),
+    setupModeEnforce(api, config, state, chain, onThreat),
+    setupProtection(api, config, state, chain, onThreat),
     setupCommands(api, config, state),
     setupInvite(api, config, state),
-  ];
+    setupTopicRecovery(api, config, state),
+  );
 }
 
 export function teardown(): void {

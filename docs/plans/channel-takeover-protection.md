@@ -201,7 +201,7 @@ These decisions were resolved before implementation:
 
 **Goal:** Create an abstract protection backend interface and implement it for both Atheme and Anope, gating commands on the bot's declared access level with auto-verification on join.
 
-- [ ] Define `ProtectionBackend` interface in `plugins/chanmod/protection-backend.ts`:
+- [x] Define `ProtectionBackend` interface in `plugins/chanmod/protection-backend.ts`:
 
   ```typescript
   type BackendAccess = 'none' | 'op' | 'superop' | 'founder';
@@ -234,7 +234,7 @@ These decisions were resolved before implementation:
   }
   ```
 
-- [ ] Define `ProtectionChain` in `plugins/chanmod/protection-backend.ts` — wraps multiple backends in priority order:
+- [x] Define `ProtectionChain` in `plugins/chanmod/protection-backend.ts` — wraps multiple backends in priority order:
 
   ```typescript
   class ProtectionChain {
@@ -266,8 +266,8 @@ These decisions were resolved before implementation:
 
   The takeover detection and recovery code calls `ProtectionChain` methods exclusively — it never references a specific backend. This ensures the escalation chain is always respected and adding a new backend is zero-touch for the takeover logic.
 
-- [ ] Add `ChanServAccess` type and per-channel setting in `plugins/chanmod/state.ts`
-- [ ] Create `plugins/chanmod/atheme-backend.ts` implementing `ProtectionBackend`:
+- [x] Add `ChanServAccess` type and per-channel setting in `plugins/chanmod/state.ts`
+- [x] Create `plugins/chanmod/atheme-backend.ts` implementing `ProtectionBackend`:
   - Commands sent as `PRIVMSG ChanServ :<command> #channel [args]`
   - `requestRecover()`: sends `RECOVER #channel` (requires `+R` / founder)
   - `verifyAccess()`: sends `FLAGS #channel <bot_nick>`, parses response to check for `+o`, `+r`, `+R`, `+F` flags. Downgrades if configured level exceeds actual.
@@ -275,7 +275,7 @@ These decisions were resolved before implementation:
     - `canOp/canUnban/canInvite/canAkick`: access >= 'op'
     - `canDeop/canClearBans`: access >= 'superop' (Atheme `+o` can deop, but we gate on superop for "deop others" semantics in takeover context)
     - `canRecover`: access >= 'founder' (unless verify detects `+R` at lower level)
-- [ ] Create `plugins/chanmod/anope-backend.ts` implementing `ProtectionBackend`:
+- [x] Create `plugins/chanmod/anope-backend.ts` implementing `ProtectionBackend`:
   - Commands sent as `PRIVMSG ChanServ :<command> #channel [args]`
   - `requestRecover()`: **synthetic multi-step sequence**:
     1. `MODE #channel CLEAR ops` (Anope 2.x) or `CLEAR #channel OPS` (1.x)
@@ -287,11 +287,11 @@ These decisions were resolved before implementation:
        Requires founder/QOP for MODE CLEAR step.
   - `requestAkick()`: includes Anope-specific `AKICK #chan ENFORCE` after ADD to immediately apply
   - `verifyAccess()`: sends `ACCESS #channel LIST`, parses response to find bot's level. Maps level to tier (5=op, 10=superop, 9999+=founder).
-- [ ] Register `chanserv_access` as a per-channel setting (default: 'none')
-- [ ] Add `chanserv_services_type` config option (default: inherit from `bot.json` `services.type`). Values: 'atheme' | 'anope'
-- [ ] Wire `verifyAccess()` into the bot-join handler (existing auto-op.ts `isBotNick` path)
-- [ ] Migrate existing `chanserv_op` logic in mode-enforce.ts to use `ProtectionChain.requestOp()` instead of direct ChanServ message
-- [ ] **Verification**: Unit test each backend independently, plus chain behavior:
+- [x] Register `chanserv_access` as a per-channel setting (default: 'none')
+- [x] Add `chanserv_services_type` config option (default: inherit from `bot.json` `services.type`). Values: 'atheme' | 'anope'
+- [x] Wire `verifyAccess()` into the bot-join handler (existing auto-op.ts `isBotNick` path)
+- [x] Migrate existing `chanserv_op` logic in mode-enforce.ts to use `ProtectionChain.requestOp()` instead of direct ChanServ message
+- [x] **Verification**: Unit test each backend independently, plus chain behavior:
   - Each command produces correct PRIVMSG format
   - Commands gated on access level — 'op' can't RECOVER, 'none' can't OP
   - Atheme verify parses `FLAGS` response correctly
@@ -308,7 +308,7 @@ These decisions were resolved before implementation:
 
 A single deop might be a prank. A simultaneous deop + mass deop of friendlies + mode lockdown is a takeover. We need to distinguish these.
 
-- [ ] Create `plugins/chanmod/takeover-detect.ts` — threat assessment engine:
+- [x] Create `plugins/chanmod/takeover-detect.ts` — threat assessment engine:
   - Per-channel rolling threat score with a configurable decay window (default 30s)
   - Events that contribute points to the threat score:
     | Event | Points | Description |
@@ -331,9 +331,9 @@ A single deop might be a prank. A simultaneous deop + mass deop of friendlies + 
   - `getThreatLevel(channel)` — current threat level
   - `resetThreat(channel)` — decay/reset after threat window expires
   - Only score events from non-nodesynch, non-bot sources
-- [ ] Wire threat detection into existing mode/kick/ban handlers — each relevant event calls `assessThreat()`
+- [x] Wire threat detection into existing mode/kick/ban handlers — each relevant event calls `assessThreat()`
   - **Critical:** Wire `MAX_ENFORCEMENTS` suppression in `mode-enforce.ts` as a threat input. When enforcement is suppressed (line 359–361), call `assessThreat(channel, 'enforcement_suppressed', 2)` instead of just logging a warning and returning. This is the escalation trigger — direct IRC enforcement has failed, so the threat system should escalate to higher-authority backends (botnet peers, then ChanServ).
-- [ ] Add threat state to `SharedState`:
+- [x] Add threat state to `SharedState`:
   ```typescript
   interface ThreatEvent {
     type: string;
@@ -343,7 +343,7 @@ A single deop might be a prank. A simultaneous deop + mass deop of friendlies + 
   }
   threatScores: Map<string, { score: number; events: ThreatEvent[]; windowStart: number }>;
   ```
-- [ ] **Verification**: Unit test threat scoring with simulated event sequences — verify single events stay at level 0, coordinated attacks escalate properly, scores decay after the window.
+- [x] **Verification**: Unit test threat scoring with simulated event sequences — verify single events stay at level 0, coordinated attacks escalate properly, scores decay after the window.
 
 ### Phase 3: Kick+Ban Recovery (the missing piece)
 
@@ -364,49 +364,49 @@ New flow:
 6. After regaining ops: execute recovery actions based on threat level
 7. **(Atheme only)** If RECOVER was used at level 3: remove the +i +m that RECOVER set
 
-- [ ] Extend the kick handler in `protection.ts` to use the backend:
+- [x] Extend the kick handler in `protection.ts` to use the backend:
   - Immediately `backend.requestUnban()` if `backend.canUnban()` (no delay — speed matters)
   - If we detect +i was set or +k was changed (from channel state before kick): `backend.requestInvite()`
   - Rejoin attempt follows backend commands (brief delay for services processing, ~500ms)
   - Track the channel's last-known mode state so we know if +i/+k were set during the attack
-- [ ] Listen for "banned_from_channel" (irc error) on rejoin failure:
+- [x] Listen for "banned_from_channel" (irc error) on rejoin failure:
   - If `backend.canUnban()` and we haven't already tried: `backend.requestUnban()` + retry
   - Backoff if repeated failures (don't spam services)
-- [ ] Add post-RECOVER cleanup for Atheme: remove +i +m after the bot is opped, since RECOVER makes the channel unusable
-- [ ] Add `chanserv_unban_on_kick` per-channel setting (default: true when chanserv_access != 'none')
-- [ ] **Verification**: Test the full kick → UNBAN → rejoin → OP → recovery flow for both Atheme and Anope backends. Test Atheme post-RECOVER +i +m cleanup. Test that the bot handles ChanServ being unresponsive (timeout → log warning, don't loop).
+- [x] Add post-RECOVER cleanup for Atheme: remove +i +m after the bot is opped, since RECOVER makes the channel unusable
+- [x] Add `chanserv_unban_on_kick` per-channel setting (default: true when chanserv_access != 'none')
+- [x] **Verification**: Test the full kick → UNBAN → rejoin → OP → recovery flow for both Atheme and Anope backends. Test Atheme post-RECOVER +i +m cleanup. Test that the bot handles ChanServ being unresponsive (timeout → log warning, don't loop).
 
 ### Phase 4: Post-Recovery Mass Re-Op
 
 **Goal:** After the bot regains ops (via backend or any means during elevated threat), automatically re-op all friendly ops who were stripped during the attack.
 
-- [ ] Add recovery handler triggered when bot receives +o during elevated threat level:
+- [x] Add recovery handler triggered when bot receives +o during elevated threat level:
   - Scan channel users against permissions DB
   - Re-op all users who should have ops (based on op_flags) but currently don't
   - Re-halfop/re-voice similarly
   - Deop any unauthorized ops (bitch mode logic, but applied en masse)
   - All mode changes batched using ISUPPORT MODES limit for efficiency
-- [ ] Add `mass_reop_on_recovery` per-channel setting (default: true)
-- [ ] Batch mode changes efficiently — collect all needed +o/-o/+v/-v changes and send using `api.mode(channel, '+ooo', nick1, nick2, nick3)` respecting the server's modes-per-line limit
-- [ ] **Verification**: Test that after recovery, all flagged users are re-opped and unauthorized ops are removed. Test that mode batching respects ISUPPORT MODES limit.
+- [x] Add `mass_reop_on_recovery` per-channel setting (default: true)
+- [x] Batch mode changes efficiently — collect all needed +o/-o/+v/-v changes and send using `api.mode(channel, '+ooo', nick1, nick2, nick3)` respecting the server's modes-per-line limit
+- [x] **Verification**: Test that after recovery, all flagged users are re-opped and unauthorized ops are removed. Test that mode batching respects ISUPPORT MODES limit.
 
 ### Phase 5: Hostile Op Response (Active Defense)
 
 **Goal:** At elevated threat levels, actively counter the hostile user who initiated the takeover.
 
-- [ ] At threat level >= 2 (Active), after bot has ops:
+- [x] At threat level >= 2 (Active), after bot has ops:
   - Identify the hostile actor(s) from the threat event log
   - Deop hostile ops (`backend.requestDeop()` if superop+, or direct IRC DEOP if bot has ops)
   - At threat level 3 with superop+: `backend.requestAkick()` the primary attacker
   - Anope bonus: `AKICK #chan ENFORCE` to immediately apply the AKICK list
-- [ ] Add `takeover_punish` per-channel setting: 'none' | 'deop' | 'kickban' | 'akick' (default: 'deop')
+- [x] Add `takeover_punish` per-channel setting: 'none' | 'deop' | 'kickban' | 'akick' (default: 'deop')
   - 'none': only recover, don't counter-attack
   - 'deop': strip attacker's ops
   - 'kickban': kick+ban the attacker
   - 'akick': backend.requestAkick (persistent, survives rejoin) — requires superop+
-- [ ] Respect `revenge_exempt_flags` — users with n/m flags are never counter-attacked (prevents friendly fire from misconfigured bots)
-- [ ] Log all takeover events and responses to mod_log for audit
-- [ ] **Verification**: Test escalation matrix — verify each threat level triggers the correct response and exempt flags are respected. Test Anope AKICK ENFORCE.
+- [x] Respect `revenge_exempt_flags` — users with n/m flags are never counter-attacked (prevents friendly fire from misconfigured bots)
+- [x] Log all takeover events and responses to mod_log for audit
+- [x] **Verification**: Test escalation matrix — verify each threat level triggers the correct response and exempt flags are respected. Test Anope AKICK ENFORCE.
 
 ### Phase 6: Topic Recovery
 
@@ -414,8 +414,8 @@ New flow:
 
 **Note:** This extends the existing `protect_topic` setting in the topic plugin rather than adding a new setting. The topic plugin's lock/unlock behavior is preserved; takeover recovery is an additional behavior when protect_topic is enabled.
 
-- [ ] Extend existing `protect_topic` in the topic plugin (no new setting needed)
-- [ ] Track "known-good" topic per channel in `SharedState`:
+- [x] Extend existing `protect_topic` in the topic plugin (no new setting needed)
+- [x] Track "known-good" topic per channel in `SharedState`:
 
   ```typescript
   knownGoodTopics: Map<string, { topic: string; setAt: number }>;
@@ -424,25 +424,25 @@ New flow:
   - Update the known-good snapshot whenever the topic is changed by a nodesynch nick, a user with op_flags, or when threat level is 0 (normal)
   - Freeze the snapshot when threat level > 0 — topic changes during elevated threat are considered vandalism
 
-- [ ] After recovery (bot re-opped, threat level returning to 0):
+- [x] After recovery (bot re-opped, threat level returning to 0):
   - If `topic_protect` is enabled and the current topic differs from the known-good snapshot, restore it via `api.topic(channel, savedTopic)`
   - Log the restoration
-- [ ] **Verification**: Test that topic changes during normal operation update the snapshot. Test that topic changes during elevated threat are ignored. Test that post-recovery restores the pre-attack topic.
+- [x] **Verification**: Test that topic changes during normal operation update the snapshot. Test that topic changes during elevated threat are ignored. Test that post-recovery restores the pre-attack topic.
 
 ### Phase 7: Speed Optimization
 
 **Goal:** Minimize response latency for all protective actions. During a takeover, every millisecond counts.
 
-- [ ] Remove or reduce delays for backend commands during elevated threat:
+- [x] Remove or reduce delays for backend commands during elevated threat:
   - `chanserv_op_delay_ms` should be 0 during threat level >= 1 (currently default 1000ms)
   - `enforce_delay_ms` should be 0 during threat level >= 1 (currently default 500ms)
   - Add `takeover_response_delay_ms` setting (default: 0) for recovery actions
-- [ ] Backend commands during takeover bypass the message queue entirely (per design decision #2):
+- [x] Backend commands during takeover bypass the message queue entirely (per design decision #2):
   - Backend methods use direct `api.say()` calls, not the message queue
   - Recovery volume is 2-3 messages (Atheme) or 4-5 (Anope synthetic RECOVER) — no flood risk
   - Normal bot chat remains rate-limited through the queue as usual
-- [ ] Pre-compute the recovery plan: when threat events start arriving, begin building the recovery action list immediately so it's ready to execute the moment the bot regains ops
-- [ ] **Verification**: Measure response time in tests — from deop event to backend requestOp should be < 100ms. From bot re-opped to mass re-op should be < 500ms.
+- [x] Pre-compute the recovery plan: when threat events start arriving, begin building the recovery action list immediately so it's ready to execute the moment the bot regains ops
+- [x] **Verification**: Measure response time in tests — from deop event to backend requestOp should be < 100ms. From bot re-opped to mass re-op should be < 500ms.
 
 ## Config Changes
 

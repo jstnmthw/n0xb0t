@@ -1,0 +1,186 @@
+// chanmod — Atheme ChanServ ProtectionBackend implementation
+import type { PluginAPI } from '../../src/types';
+import { getBotNick } from './helpers';
+import { type BackendAccess, type ProtectionBackend, accessAtLeast } from './protection-backend';
+
+/**
+ * Atheme ChanServ backend.
+ *
+ * Maps the ProtectionBackend interface to Atheme-specific ChanServ commands.
+ * Commands are gated on the per-channel access tier (set via `.chanset chanserv_access`
+ * and optionally downgraded by `verifyAccess()`).
+ *
+ * Access tier → available commands:
+ * - op:       OP, UNBAN, INVITE, GETKEY, AKICK
+ * - superop:  + DEOP others, FLAGS mgmt, SET
+ * - founder:  + RECOVER, CLEAR (requires +R flag)
+ */
+export class AthemeBackend implements ProtectionBackend {
+  readonly name = 'atheme';
+  readonly priority = 2; // ChanServ backends are priority 2 (botnet is 1)
+
+  private accessLevels = new Map<string, BackendAccess>();
+  private api: PluginAPI;
+  private chanservNick: string;
+
+  constructor(api: PluginAPI, chanservNick: string) {
+    this.api = api;
+    this.chanservNick = chanservNick;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Access management
+  // ---------------------------------------------------------------------------
+
+  getAccess(channel: string): BackendAccess {
+    return this.accessLevels.get(this.api.ircLower(channel)) ?? 'none';
+  }
+
+  setAccess(channel: string, level: BackendAccess): void {
+    this.accessLevels.set(this.api.ircLower(channel), level);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Capability queries
+  // ---------------------------------------------------------------------------
+
+  canOp(channel: string): boolean {
+    return accessAtLeast(this.getAccess(channel), 'op');
+  }
+
+  canDeop(channel: string): boolean {
+    // Atheme +o can deop, but for takeover "deop others" we gate on superop
+    return accessAtLeast(this.getAccess(channel), 'superop');
+  }
+
+  canUnban(channel: string): boolean {
+    return accessAtLeast(this.getAccess(channel), 'op');
+  }
+
+  canInvite(channel: string): boolean {
+    return accessAtLeast(this.getAccess(channel), 'op');
+  }
+
+  canRecover(channel: string): boolean {
+    return accessAtLeast(this.getAccess(channel), 'founder');
+  }
+
+  canClearBans(channel: string): boolean {
+    return accessAtLeast(this.getAccess(channel), 'founder');
+  }
+
+  canAkick(channel: string): boolean {
+    return accessAtLeast(this.getAccess(channel), 'op');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Action requests
+  // ---------------------------------------------------------------------------
+
+  requestOp(channel: string, nick?: string): void {
+    const target = nick ?? getBotNick(this.api);
+    this.sendChanServ(`OP ${channel} ${target}`);
+  }
+
+  requestDeop(channel: string, nick: string): void {
+    this.sendChanServ(`DEOP ${channel} ${nick}`);
+  }
+
+  requestUnban(channel: string): void {
+    this.sendChanServ(`UNBAN ${channel}`);
+  }
+
+  requestInvite(channel: string): void {
+    this.sendChanServ(`INVITE ${channel}`);
+  }
+
+  requestRecover(channel: string): void {
+    this.sendChanServ(`RECOVER ${channel}`);
+    // Mark for post-RECOVER cleanup (+i +m removal) via the callback
+    this.onRecoverCallback?.(channel);
+  }
+
+  /** Callback invoked when RECOVER is sent — used to schedule +i +m cleanup. */
+  onRecoverCallback?: (channel: string) => void;
+
+  requestClearBans(channel: string): void {
+    this.sendChanServ(`CLEAR ${channel} BANS`);
+  }
+
+  requestAkick(channel: string, mask: string, reason?: string): void {
+    const cmd = reason ? `AKICK ${channel} ADD ${mask} ${reason}` : `AKICK ${channel} ADD ${mask}`;
+    this.sendChanServ(cmd);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Verify access
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Send a FLAGS probe to verify the bot's actual access level.
+   *
+   * Sends: `FLAGS #channel <bot_nick>`
+   * Atheme responds with a NOTICE containing the flag string (e.g. "+AOehiortv").
+   * We parse the response and downgrade the configured tier if it exceeds actual flags.
+   *
+   * The response listener is one-shot — it removes itself after the first match.
+   */
+  verifyAccess(channel: string): void {
+    const botNick = getBotNick(this.api);
+    this.sendChanServ(`FLAGS ${channel} ${botNick}`);
+    this.api.log(`Atheme: verifying access for ${channel} via FLAGS probe`);
+  }
+
+  /**
+   * Parse a ChanServ FLAGS response and update the access level.
+   *
+   * Expected format (Atheme NOTICE):
+   *   "2 <nick> <flags>" (e.g. "2 hexbot +AOehiortv")
+   * or error format for no access:
+   *   "<nick> was not found..." or "No such entry"
+   *
+   * Called externally by the notice handler wired in the plugin init.
+   */
+  handleFlagsResponse(channel: string, flagString: string): void {
+    const actual = this.flagsToTier(flagString);
+    const configured = this.getAccess(channel);
+
+    if (configured === 'none') return; // Not configured for this channel
+
+    if (!accessAtLeast(actual, configured)) {
+      this.api.warn(
+        `Atheme: configured access '${configured}' for ${channel} exceeds actual flags '${flagString}' (effective: '${actual}') — downgrading`,
+      );
+      this.setAccess(channel, actual);
+    } else {
+      this.api.log(
+        `Atheme: access verified for ${channel} — flags '${flagString}' (tier: '${actual}')`,
+      );
+    }
+  }
+
+  /**
+   * Map an Atheme flag string to an access tier.
+   *
+   * +R +F → founder
+   * +a +f +s (SOP-level flags without +R) → superop
+   * +o → op
+   * anything else → none
+   */
+  flagsToTier(flagString: string): BackendAccess {
+    if (!flagString || flagString === '(none)') return 'none';
+    const flags = flagString.replace(/[^a-zA-Z]/g, '');
+    if (flags.includes('R') || flags.includes('F')) return 'founder';
+    if (flags.includes('f') || flags.includes('s') || flags.includes('a')) return 'superop';
+    if (flags.includes('o')) return 'op';
+    return 'none';
+  }
+
+  // ---------------------------------------------------------------------------
+  // Internal
+  // ---------------------------------------------------------------------------
+
+  private sendChanServ(command: string): void {
+    this.api.say(this.chanservNick, command);
+  }
+}

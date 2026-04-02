@@ -10,6 +10,8 @@ import {
   isBotNick,
   markIntentional,
 } from './helpers';
+import type { ThreatCallback } from './mode-enforce';
+import type { ProtectionChain } from './protection-backend';
 import type { ChanmodConfig, SharedState } from './state';
 
 // ---------------------------------------------------------------------------
@@ -55,9 +57,14 @@ export function setupProtection(
   api: PluginAPI,
   config: ChanmodConfig,
   state: SharedState,
+  chain?: ProtectionChain,
+  onThreat?: ThreatCallback,
 ): () => void {
+  /** Delay for services to process UNBAN/INVITE before we rejoin. */
+  const SERVICES_PROCESSING_MS = 500;
+
   // ---------------------------------------------------------------------------
-  // Rejoin on kick + revenge
+  // Rejoin on kick + revenge + backend-assisted recovery
   // ---------------------------------------------------------------------------
 
   api.bind('kick', '-', '*', (ctx: HandlerContext) => {
@@ -66,12 +73,47 @@ export function setupProtection(
 
     // Only act when the bot itself is kicked
     if (!isBotNick(api, kicked)) return;
-    if (!config.rejoin_on_kick) return;
 
     const kickerNick = parseKicker(args);
 
+    // Report to threat detection
+    if (onThreat && kickerNick) {
+      onThreat(channel, 'bot_kicked', 4, kickerNick, kicked);
+    }
+
+    // Snapshot last-known channel modes before we lose channel state
+    const ch = api.getChannel(channel);
+    if (ch) {
+      state.lastKnownModes.set(api.ircLower(channel), {
+        modes: ch.modes,
+        key: ch.key,
+      });
+    }
+
+    // --- Backend-assisted recovery (runs regardless of rejoin_on_kick) ---
+    const chanKey = api.ircLower(channel);
+    const unbanOnKick = api.channelSettings.getFlag(channel, 'chanserv_unban_on_kick');
+    if (chain && unbanOnKick && chain.canUnban(channel)) {
+      // Immediately request UNBAN — speed matters during a takeover
+      chain.requestUnban(channel);
+      state.unbanRequested.add(chanKey);
+      api.log(`Backend recovery: sent UNBAN for ${channel} after kick`);
+
+      // If channel had +i or +k, also request invite
+      const lastModes = state.lastKnownModes.get(chanKey);
+      if (lastModes && (lastModes.modes.includes('i') || lastModes.key)) {
+        /* v8 ignore next -- canInvite mirrors canUnban (same access level); if canUnban passed, canInvite will too */
+        if (chain.canInvite(channel)) {
+          chain.requestInvite(channel);
+          api.log(`Backend recovery: sent INVITE for ${channel} (+i or +k detected)`);
+        }
+      }
+    }
+
+    if (!config.rejoin_on_kick) return;
+
     // Rate-limiting: track rejoin attempts per channel in the DB
-    const dbKey = `rejoin_attempts:${api.ircLower(channel)}`;
+    const dbKey = `rejoin_attempts:${chanKey}`;
     const now = Date.now();
     let record: RejoinRecord = { count: 0, windowStart: now };
     try {
@@ -96,10 +138,43 @@ export function setupProtection(
     record.count++;
     api.db.set(dbKey, JSON.stringify(record));
 
+    // Use shorter delay when backend handled UNBAN (services need processing time)
+    const useBackendDelay = state.unbanRequested.has(chanKey);
+    const rejoinDelay = useBackendDelay ? SERVICES_PROCESSING_MS : config.rejoin_delay_ms;
+
     // Schedule rejoin
     const rejoinTimer = setTimeout(() => {
       api.join(channel);
-      api.log(`Rejoined ${channel} after being kicked`);
+      api.log(`Rejoining ${channel} after being kicked`);
+
+      // Schedule a backup retry in case the first rejoin fails (still banned).
+      // If the bot is back in the channel by then, the join is harmless (server ignores it).
+      if (useBackendDelay && record.count < config.max_rejoin_attempts) {
+        const retryTimer = setTimeout(() => {
+          // Only retry if we're not in the channel yet
+          if (!api.getChannel(channel)) {
+            api.log(`Retry rejoin for ${channel} (first attempt may have failed due to ban)`);
+            /* v8 ignore next -- canUnban was true when we entered this path */
+            if (chain!.canUnban(channel)) {
+              chain!.requestUnban(channel);
+            }
+            const innerTimer = setTimeout(() => {
+              api.join(channel);
+            }, SERVICES_PROCESSING_MS);
+            state.cycleTimers.push(innerTimer);
+          }
+        }, config.chanserv_unban_retry_ms);
+        state.cycleTimers.push(retryTimer);
+      }
+
+      // Clear the unban-requested flag after rejoin
+      state.unbanRequested.delete(chanKey);
+
+      // Request ops via backend after rejoin
+      if (chain && chain.canOp(channel)) {
+        chain.requestOp(channel);
+        api.log(`Backend recovery: requested OP for ${channel} after rejoin`);
+      }
 
       // Schedule revenge after rejoin (if configured per-channel)
       const revenge = api.channelSettings.getFlag(channel, 'revenge');
@@ -107,9 +182,11 @@ export function setupProtection(
 
       const revengeTimer = setTimeout(() => {
         // Verify kicker is still in the channel
-        const ch = api.getChannel(channel)!;
+        const rch = api.getChannel(channel);
+        /* v8 ignore next -- guard for race: channel parted between rejoin and revenge timer */
+        if (!rch) return;
         const kickerLower = api.ircLower(kickerNick);
-        if (!ch.users.has(kickerLower)) return;
+        if (!rch.users.has(kickerLower)) return;
 
         // Check bot has ops
         if (!botHasOps(api, channel)) {
@@ -146,7 +223,7 @@ export function setupProtection(
       }, config.revenge_delay_ms);
 
       state.cycleTimers.push(revengeTimer);
-    }, config.rejoin_delay_ms);
+    }, rejoinDelay);
 
     state.cycleTimers.push(rejoinTimer);
   });

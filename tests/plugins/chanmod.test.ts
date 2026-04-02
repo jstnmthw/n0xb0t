@@ -5082,3 +5082,121 @@ describe('chanmod plugin — additive/subtractive reactive enforcement', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Bot join — chanserv_access sync (auto-op.ts lines 25-28)
+// ---------------------------------------------------------------------------
+describe('chanmod plugin — bot join chanserv_access sync', () => {
+  it('sets backend access and verifies when bot joins a channel with chanserv_access configured', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: {
+            chanserv_services_type: 'atheme',
+            chanserv_nick: 'ChanServ',
+          },
+        },
+      });
+
+      // Pre-configure chanserv_access for the channel BEFORE bot joins
+      freshBot.channelSettings.set('#opchan', 'chanserv_access', 'op');
+      freshBot.client.clearMessages();
+
+      // Bot joins the channel — this should trigger access sync
+      freshBot.client.simulateEvent('join', {
+        nick: 'hexbot',
+        ident: 'bot',
+        hostname: 'bot.host',
+        channel: '#opchan',
+      });
+      await tick(10);
+
+      // The bot should have sent a FLAGS probe to verify access
+      const flagsMsg = freshBot.client.messages.find(
+        (m) => m.type === 'say' && m.target === 'ChanServ' && m.message?.includes('FLAGS #opchan'),
+      );
+      expect(flagsMsg).toBeDefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+
+  it('does NOT verify access when chanserv_access is none', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: {
+            chanserv_services_type: 'atheme',
+            chanserv_nick: 'ChanServ',
+          },
+        },
+      });
+
+      freshBot.channelSettings.set('#nochan', 'chanserv_access', 'none');
+      freshBot.client.clearMessages();
+
+      freshBot.client.simulateEvent('join', {
+        nick: 'hexbot',
+        ident: 'bot',
+        hostname: 'bot.host',
+        channel: '#nochan',
+      });
+      await tick(10);
+
+      // No FLAGS probe — access is 'none'
+      const flagsMsg = freshBot.client.messages.find(
+        (m) => m.type === 'say' && m.target === 'ChanServ' && m.message?.includes('FLAGS'),
+      );
+      expect(flagsMsg).toBeUndefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Config — chanserv_services_type selects Anope backend (state.ts line 185-188)
+// ---------------------------------------------------------------------------
+describe('chanmod plugin — chanserv_services_type selects Anope backend', () => {
+  it('uses Anope backend (ACCESS LIST) when chanserv_services_type is set to anope', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: {
+            chanserv_services_type: 'anope',
+          },
+        },
+      });
+
+      // Set chanserv_access so verifyAccess fires on join
+      freshBot.channelSettings.set('#anopechan', 'chanserv_access', 'op');
+      freshBot.client.clearMessages();
+
+      // Bot joins the channel — should trigger access sync via Anope backend
+      freshBot.client.simulateEvent('join', {
+        nick: 'hexbot',
+        ident: 'bot',
+        hostname: 'bot.host',
+        channel: '#anopechan',
+      });
+      await tick(10);
+
+      // Anope backend sends ACCESS LIST (not FLAGS like Atheme)
+      const accessMsg = freshBot.client.messages.find(
+        (m) =>
+          m.type === 'say' &&
+          m.target === 'ChanServ' &&
+          m.message?.includes('ACCESS #anopechan LIST'),
+      );
+      expect(accessMsg).toBeDefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+});

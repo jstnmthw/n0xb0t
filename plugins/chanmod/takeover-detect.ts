@@ -1,0 +1,195 @@
+// chanmod — takeover threat detection engine
+//
+// Per-channel rolling threat score that detects coordinated channel takeover
+// attempts by watching for correlated hostile events within a short time window.
+// Produces a threat level (0-3) that triggers escalating responses via the
+// ProtectionChain.
+import type { PluginAPI } from '../../src/types';
+import type { ProtectionChain } from './protection-backend';
+import type { ChanmodConfig, SharedState, ThreatState } from './state';
+
+// ---------------------------------------------------------------------------
+// Threat level constants
+// ---------------------------------------------------------------------------
+
+export const THREAT_NORMAL = 0;
+export const THREAT_ALERT = 1;
+export const THREAT_ACTIVE = 2;
+export const THREAT_CRITICAL = 3;
+
+// ---------------------------------------------------------------------------
+// Threat event point values
+// ---------------------------------------------------------------------------
+
+export const POINTS_BOT_DEOPPED = 3;
+export const POINTS_BOT_KICKED = 4;
+export const POINTS_BOT_BANNED = 5;
+export const POINTS_FRIENDLY_DEOPPED = 2;
+export const POINTS_MODE_LOCKED = 1;
+export const POINTS_UNAUTHORIZED_OP = 2;
+export const POINTS_ENFORCEMENT_SUPPRESSED = 2;
+
+// ---------------------------------------------------------------------------
+// Core functions
+// ---------------------------------------------------------------------------
+
+/**
+ * Get or create the threat state for a channel.
+ * If the existing state's window has expired, it is reset.
+ */
+function getOrCreateThreat(
+  state: SharedState,
+  api: PluginAPI,
+  config: ChanmodConfig,
+  channel: string,
+): ThreatState {
+  const key = api.ircLower(channel);
+  const now = Date.now();
+  let threat = state.threatScores.get(key);
+
+  if (!threat) {
+    threat = { score: 0, events: [], windowStart: now };
+    state.threatScores.set(key, threat);
+    return threat;
+  }
+
+  // Decay: if the window has expired, reset
+  if (now - threat.windowStart > config.takeover_window_ms) {
+    threat.score = 0;
+    threat.events = [];
+    threat.windowStart = now;
+  }
+
+  return threat;
+}
+
+/**
+ * Compute the threat level from a score using configured thresholds.
+ */
+export function scoreToLevel(config: ChanmodConfig, score: number): number {
+  if (score >= config.takeover_level_3_threshold) return THREAT_CRITICAL;
+  if (score >= config.takeover_level_2_threshold) return THREAT_ACTIVE;
+  if (score >= config.takeover_level_1_threshold) return THREAT_ALERT;
+  return THREAT_NORMAL;
+}
+
+/**
+ * Add points to a channel's threat score and return the new threat level.
+ *
+ * Each call records a ThreatEvent and may trigger escalation via the
+ * ProtectionChain based on the new threat level.
+ */
+export function assessThreat(
+  api: PluginAPI,
+  config: ChanmodConfig,
+  state: SharedState,
+  chain: ProtectionChain,
+  channel: string,
+  eventType: string,
+  points: number,
+  actor: string,
+  target?: string,
+): number {
+  const threat = getOrCreateThreat(state, api, config, channel);
+  const prevLevel = scoreToLevel(config, threat.score);
+
+  threat.score += points;
+  threat.events.push({
+    type: eventType,
+    actor,
+    target,
+    timestamp: Date.now(),
+  });
+
+  const newLevel = scoreToLevel(config, threat.score);
+
+  // Log level transitions
+  if (newLevel > prevLevel) {
+    const levelNames = ['Normal', 'Alert', 'Active', 'Critical'];
+    api.warn(
+      `Takeover threat in ${channel}: level ${prevLevel} → ${newLevel} (${levelNames[newLevel]}) — score ${threat.score} [${eventType} by ${actor}]`,
+    );
+    onLevelEscalation(api, config, chain, channel, newLevel);
+  }
+
+  return newLevel;
+}
+
+/**
+ * Get the current threat level for a channel.
+ * Returns 0 (Normal) if no threat state exists or the window has expired.
+ */
+export function getThreatLevel(
+  api: PluginAPI,
+  config: ChanmodConfig,
+  state: SharedState,
+  channel: string,
+): number {
+  const key = api.ircLower(channel);
+  const threat = state.threatScores.get(key);
+  if (!threat) return THREAT_NORMAL;
+
+  // Check window expiry
+  if (Date.now() - threat.windowStart > config.takeover_window_ms) {
+    return THREAT_NORMAL;
+  }
+
+  return scoreToLevel(config, threat.score);
+}
+
+/**
+ * Reset threat state for a channel (e.g., after successful recovery).
+ */
+export function resetThreat(api: PluginAPI, state: SharedState, channel: string): void {
+  const key = api.ircLower(channel);
+  state.threatScores.delete(key);
+}
+
+/**
+ * Get the raw threat state for a channel (for testing/debug).
+ */
+export function getThreatState(
+  api: PluginAPI,
+  state: SharedState,
+  channel: string,
+): ThreatState | undefined {
+  return state.threatScores.get(api.ircLower(channel));
+}
+
+// ---------------------------------------------------------------------------
+// Escalation actions — called on level transitions
+// ---------------------------------------------------------------------------
+
+function onLevelEscalation(
+  api: PluginAPI,
+  _config: ChanmodConfig,
+  chain: ProtectionChain,
+  channel: string,
+  level: number,
+): void {
+  /* v8 ignore next -- onLevelEscalation is only called when newLevel > prevLevel, so level is always >= THREAT_ALERT */
+  if (level >= THREAT_ALERT) {
+    // Level 1+: request ops via first available backend
+    if (chain.canOp(channel)) {
+      chain.requestOp(channel);
+    }
+  }
+
+  if (level >= THREAT_ACTIVE) {
+    // Level 2+: request unban (we may be banned)
+    if (chain.canUnban(channel)) {
+      chain.requestUnban(channel);
+    }
+  }
+
+  if (level >= THREAT_CRITICAL) {
+    // Level 3: nuclear — request full channel recovery
+    if (chain.canRecover(channel)) {
+      chain.requestRecover(channel);
+    } else {
+      api.warn(
+        `Takeover critical in ${channel} but no backend can RECOVER — manual intervention required`,
+      );
+    }
+  }
+}
