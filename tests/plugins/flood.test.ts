@@ -147,6 +147,29 @@ describe('flood plugin — message flood', () => {
     bot2.cleanup();
   });
 
+  it('does not crash when bot user is missing from channel state', async () => {
+    const bot2 = createMockBot({ botNick: 'hexbot' });
+    // Join a different user so the channel exists, but the bot itself is NOT in channel state
+    simulateJoin(bot2, 'SomeUser', 'some', 'some.host', '#nochan');
+    await bot2.pluginLoader.load(PLUGIN_PATH, {
+      flood: {
+        enabled: true,
+        channels: ['#nochan'],
+        config: { msg_threshold: 3, msg_window_secs: 10, actions: ['kick'] },
+      },
+    });
+
+    // Flood from a user — botHasOps should return false without throwing
+    for (let i = 0; i < 5; i++) {
+      simulatePrivmsg(bot2, 'BadUser', 'bad', 'bad.host', '#nochan', `msg ${i}`);
+    }
+    await flush();
+    expect(
+      bot2.client.messages.find((m) => m.type === 'raw' && m.message?.includes('KICK')),
+    ).toBeUndefined();
+    bot2.cleanup();
+  });
+
   it("ignores the bot's own messages", async () => {
     for (let i = 0; i < 10; i++) {
       simulatePrivmsg(bot, 'hexbot', 'bot', 'bot.host', '#test', `msg ${i}`);

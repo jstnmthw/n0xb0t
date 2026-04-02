@@ -81,7 +81,7 @@ function botHasOps(channel: string): boolean {
   if (!ch) return false;
   const botNick = api.ircLower(getBotNick());
   const botUser = ch.users.get(botNick);
-  return botUser!.modes.includes('o');
+  return botUser?.modes.includes('o') ?? false;
 }
 
 /** Return true if the nick has any privileged flag (n/m/o) in the channel. */

@@ -90,11 +90,12 @@ export function init(api: PluginAPI): void {
 
     // List view: !help with no args — enforce per-user cooldown
     const now = Date.now();
-    const last = cooldowns.get(ctx.nick);
+    const cooldownKey = api.ircLower(ctx.nick);
+    const last = cooldowns.get(cooldownKey);
     if (last !== undefined && now - last < cooldownMs) {
       return; // silently drop — still in cooldown
     }
-    cooldowns.set(ctx.nick, now);
+    cooldowns.set(cooldownKey, now);
 
     // Filter entries by permission
     const allEntries = api.getHelpEntries();

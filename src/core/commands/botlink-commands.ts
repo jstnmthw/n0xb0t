@@ -2,6 +2,7 @@
 // Registers .botlink, .bots, .bottree, .whom, .bot, .bsay, .bannounce with the command handler.
 import type { CommandHandler } from '../../command-handler';
 import type { BotlinkConfig } from '../../types';
+import { sanitize } from '../../utils/sanitize';
 import type { BotLinkHub, BotLinkLeaf, PartyLineUser } from '../botlink';
 import type { DCCManager } from '../dcc';
 
@@ -380,7 +381,7 @@ export function registerBotlinkCommands(
       const [, botname, target, message] = match;
 
       const sendLocal = () => {
-        if (ircSay) ircSay(target, message);
+        if (ircSay) ircSay(sanitize(target), sanitize(message));
         else ctx.reply('IRC client not available on this bot.');
       };
 

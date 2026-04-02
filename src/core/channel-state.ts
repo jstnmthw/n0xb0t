@@ -205,9 +205,10 @@ export class ChannelState {
     const nick = String(event.nick ?? '');
     const channel = String(event.channel ?? '');
 
-    this.channels
-      .get(ircLower(channel, this.casemapping))!
-      .users.delete(ircLower(nick, this.casemapping));
+    const ch = this.channels.get(ircLower(channel, this.casemapping));
+    if (ch) {
+      ch.users.delete(ircLower(nick, this.casemapping));
+    }
 
     this.eventBus.emit('channel:userLeft', channel, nick);
   }

@@ -96,6 +96,18 @@ export function registerPermissionCommands(
       const flagsArg = parts[1];
       const source = ctx.source === 'repl' ? 'REPL' : ctx.nick;
 
+      // Guard: only owners can grant the owner flag
+      if (ctx.source !== 'repl' && ctx.source !== 'botlink') {
+        const callerHostmask = `${ctx.nick}!${ctx.ident ?? ''}@${ctx.hostname ?? ''}`;
+        const caller = permissions.findByHostmask(callerHostmask);
+        if (!caller || !caller.global.includes('n')) {
+          if (flagsArg.includes('n')) {
+            ctx.reply('Only owners (+n) can grant the owner flag.');
+            return;
+          }
+        }
+      }
+
       if (parts.length >= 3 && parts[2].startsWith('#')) {
         // Channel-specific flags
         const channel = parts[2];

@@ -66,6 +66,13 @@ describe('ChannelState', () => {
       client.simulateEvent('part', { nick: 'Alice', channel: '#test' });
       expect(state.isUserInChannel('#test', 'Alice')).toBe(false);
     });
+
+    it('does not throw when parting an unknown channel', () => {
+      // PART for a channel the bot never joined — should be a no-op
+      expect(() => {
+        client.simulateEvent('part', { nick: 'Alice', channel: '#unknown' });
+      }).not.toThrow();
+    });
   });
 
   describe('quit', () => {

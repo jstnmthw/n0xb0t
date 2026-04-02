@@ -598,10 +598,7 @@ export class BotLinkHub {
     conn.protocol.close();
     this.leaves.delete(botname);
 
-    // Clean up remote party users from this leaf
-    for (const key of this.remotePartyUsers.keys()) {
-      if (key.endsWith(`@${botname}`)) this.remotePartyUsers.delete(key);
-    }
+    this.cleanupLeafState(botname);
 
     this.broadcast({ type: 'BOTPART', botname, reason });
     this.logger?.info(`Leaf "${botname}" disconnected: ${reason}`);
@@ -842,6 +839,30 @@ export class BotLinkHub {
     this.onLeafFrame?.(botname, frame);
   }
 
+  /** Clean up all hub-side state associated with a leaf (relays, routes, etc.). */
+  private cleanupLeafState(botname: string): void {
+    // Clean up remote party users from this leaf
+    for (const key of this.remotePartyUsers.keys()) {
+      if (key.endsWith(`@${botname}`)) this.remotePartyUsers.delete(key);
+    }
+    // Clean up active relays involving this leaf
+    for (const [handle, relay] of this.activeRelays) {
+      if (relay.originBot === botname || relay.targetBot === botname) {
+        const otherBot = relay.originBot === botname ? relay.targetBot : relay.originBot;
+        this.send(otherBot, { type: 'RELAY_END', handle, reason: `${botname} disconnected` });
+        this.activeRelays.delete(handle);
+      }
+    }
+    // Clean up pending CMD routes from this leaf
+    for (const [ref, origin] of this.cmdRoutes) {
+      if (origin === botname) this.cmdRoutes.delete(ref);
+    }
+    // Clean up pending protect requests from this leaf
+    for (const [ref, requester] of this.protectRequests) {
+      if (requester === botname) this.protectRequests.delete(ref);
+    }
+  }
+
   private onLeafClose(botname: string): void {
     const conn = this.leaves.get(botname);
     if (!conn) return;
@@ -850,10 +871,7 @@ export class BotLinkHub {
     conn.pingTimer = null;
     this.leaves.delete(botname);
 
-    // Clean up remote party users from this leaf
-    for (const key of this.remotePartyUsers.keys()) {
-      if (key.endsWith(`@${botname}`)) this.remotePartyUsers.delete(key);
-    }
+    this.cleanupLeafState(botname);
 
     this.broadcast({ type: 'BOTPART', botname, reason: 'Connection lost' });
     this.logger?.info(`Leaf "${botname}" disconnected`);
@@ -872,6 +890,7 @@ export class BotLinkHub {
         clearInterval(conn.pingTimer!);
         conn.pingTimer = null;
         this.leaves.delete(conn.botname);
+        this.cleanupLeafState(conn.botname);
         conn.protocol.send({ type: 'ERROR', code: 'TIMEOUT', message: 'Link timeout' });
         conn.protocol.close();
         this.broadcast({ type: 'BOTPART', botname: conn.botname, reason: 'Link timeout' });

@@ -59,6 +59,22 @@ describe('stripFormatting', () => {
     expect(stripFormatting('')).toBe('');
   });
 
+  it('preserves digits after bold (non-color control char)', () => {
+    expect(stripFormatting('\x0212 users')).toBe('12 users');
+  });
+
+  it('strips digit parameters after color code', () => {
+    expect(stripFormatting('\x033,4text')).toBe('text');
+  });
+
+  it('preserves digits after reset (non-color control char)', () => {
+    expect(stripFormatting('\x0F42')).toBe('42');
+  });
+
+  it('preserves digits after italic (non-color control char)', () => {
+    expect(stripFormatting('\x1D5 items')).toBe('5 items');
+  });
+
   it('handles nick with embedded color code', () => {
     // Typical attack: attacker nicks contain control codes to disguise messages
     const maliciousNick = 'admin\x0304\x03';

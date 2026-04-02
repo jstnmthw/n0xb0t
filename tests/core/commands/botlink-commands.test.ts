@@ -962,6 +962,20 @@ describe('.bsay command', () => {
     expect(replies[0]).toContain('local');
   });
 
+  it('sanitizes target and message in local send path', async () => {
+    const handler = new CommandHandler();
+    const ircSay = vi.fn();
+    registerBotlinkCommands(handler, null, null, hubConfig(), null, ircSay);
+    const replies: string[] = [];
+    // Inject \0 into target and message (these survive regex and trim)
+    await handler.execute('.bsay myhub #test\0bad hello\0world', makeCtx(replies));
+    // sanitize should strip \0
+    expect(ircSay).toHaveBeenCalledTimes(1);
+    const [calledTarget, calledMessage] = ircSay.mock.calls[0];
+    expect(calledTarget).toBe('#testbad');
+    expect(calledMessage).toBe('helloworld');
+  });
+
   it('sends locally and reports no IRC client when ircSay is null', async () => {
     const handler = new CommandHandler();
     registerBotlinkCommands(handler, null, null, hubConfig(), null, null);

@@ -4,12 +4,14 @@
 
 /**
  * Regex matching IRC control characters:
- * \x02 bold, \x03 color (with optional color code), \x04 hex color,
- * \x0F reset, \x11 monospace, \x16 reverse, \x1D italic,
- * \x1E strikethrough, \x1F underline.
+ * - \x03 color: optional decimal fg (1-2 digits) and bg (,1-2 digits)
+ * - \x04 hex color: optional 6-digit hex fg and bg (,6-digit hex)
+ * - \x02 bold, \x0F reset, \x11 monospace, \x16 reverse, \x1D italic,
+ *   \x1E strikethrough, \x1F underline: no trailing parameters consumed
  */
 // eslint-disable-next-line no-control-regex
-const IRC_FORMAT_RE = /[\x02\x03\x04\x0F\x11\x16\x1D\x1E\x1F](\d{1,2}(,\d{1,2})?)?/g;
+const IRC_FORMAT_RE =
+  /\x03(\d{1,2}(,\d{1,2})?)?|\x04([0-9a-fA-F]{6}(,[0-9a-fA-F]{6})?)?|[\x02\x0F\x11\x16\x1D\x1E\x1F]/g;
 
 /**
  * Strip IRC formatting and control characters from a string.

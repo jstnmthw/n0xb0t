@@ -297,3 +297,70 @@ describe('permission-commands (IRC source)', () => {
     expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('Global flags'));
   });
 });
+
+// ---------------------------------------------------------------------------
+// .flags — owner flag escalation guard (W-1)
+// ---------------------------------------------------------------------------
+
+describe('.flags owner escalation guard', () => {
+  let db: BotDatabase;
+  let perms: Permissions;
+  let handler: CommandHandler;
+
+  beforeEach(() => {
+    db = new BotDatabase(':memory:');
+    db.open();
+    perms = new Permissions(db);
+    // Owner user
+    perms.addUser('owner', '*!owner@host', 'n', 'setup');
+    // Master user (no owner flag)
+    perms.addUser('master', '*!master@host', 'm', 'setup');
+    // Target user to modify
+    perms.addUser('target', '*!t@h', 'o', 'setup');
+    handler = new CommandHandler(perms);
+    registerPermissionCommands(handler, perms);
+  });
+
+  it('a +m user trying to set +n flags gets rejected', async () => {
+    const ctx = makeCtx({ source: 'irc', nick: 'master', ident: 'master', hostname: 'host' });
+    await handler.execute('.flags target +n', ctx);
+
+    expect(ctx.reply).toHaveBeenCalledWith('Only owners (+n) can grant the owner flag.');
+    // Flags should remain unchanged
+    expect(perms.getUser('target')!.global).toBe('o');
+  });
+
+  it('a +n user can still set +n flags', async () => {
+    const ctx = makeCtx({ source: 'irc', nick: 'owner', ident: 'owner', hostname: 'host' });
+    await handler.execute('.flags target +n', ctx);
+
+    expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('Global flags'));
+    expect(perms.getUser('target')!.global).toBe('n');
+  });
+
+  it('REPL source bypasses the owner guard', async () => {
+    const ctx = makeCtx({ source: 'repl' });
+    await handler.execute('.flags target +n', ctx);
+
+    expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('Global flags'));
+    expect(perms.getUser('target')!.global).toBe('n');
+  });
+
+  it('rejects +n escalation even when ident/hostname are missing', async () => {
+    // DCC context may lack ident/hostname — exercises the ?? '' fallbacks
+    perms.addUser('dccmaster', '*!*@*', 'm', 'setup');
+    const ctx = makeCtx({ source: 'dcc', nick: 'dccmaster' });
+    await handler.execute('.flags target +n', ctx);
+
+    expect(ctx.reply).toHaveBeenCalledWith('Only owners (+n) can grant the owner flag.');
+    expect(perms.getUser('target')!.global).toBe('o');
+  });
+
+  it('a +m user can still set +o or +v flags', async () => {
+    const ctx = makeCtx({ source: 'irc', nick: 'master', ident: 'master', hostname: 'host' });
+    await handler.execute('.flags target +ov', ctx);
+
+    expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('Global flags'));
+    expect(perms.getUser('target')!.global).toBe('ov');
+  });
+});

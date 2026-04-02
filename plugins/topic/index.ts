@@ -164,7 +164,7 @@ export function init(api: PluginAPI): void {
     const subcommand = parts[0]?.toLowerCase();
 
     if (subcommand === 'preview') {
-      const cooldownKey = ctx.nick.toLowerCase();
+      const cooldownKey = api.ircLower(ctx.nick);
       const cooldownExpires = previewCooldown.get(cooldownKey) ?? 0;
       if (Date.now() < cooldownExpires) {
         const secsLeft = Math.ceil((cooldownExpires - Date.now()) / 1000);

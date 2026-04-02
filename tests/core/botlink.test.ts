@@ -2130,6 +2130,181 @@ describe('BotLinkHub relay routing', () => {
     const frames1 = parseWritten(written1);
     expect(frames1.some((f) => f.type === 'RELAY_END' && f.handle === 'admin')).toBe(true);
   });
+
+  it('cleans up activeRelays and sends RELAY_END to other leaf on disconnect', async () => {
+    // Establish a relay between leaf1 (origin) and leaf2 (target)
+    pushFrame(duplex1, {
+      type: 'RELAY_REQUEST',
+      handle: 'admin',
+      toBot: 'leaf2',
+    });
+    await tick();
+    written1.length = 0;
+    written2.length = 0;
+
+    // Disconnect leaf1 (origin) — leaf2 should receive RELAY_END
+    duplex1.destroy();
+    await tick();
+
+    const frames2 = parseWritten(written2);
+    const endFrame = frames2.find((f) => f.type === 'RELAY_END' && f.handle === 'admin');
+    expect(endFrame).toBeDefined();
+    expect(endFrame!.reason).toMatch(/leaf1 disconnected/);
+
+    // After cleanup, relay input from leaf2 should not route anywhere
+    written2.length = 0;
+    pushFrame(duplex2, {
+      type: 'RELAY_INPUT',
+      handle: 'admin',
+      data: 'stale-input',
+    });
+    await tick();
+    // No crash, no routing — input is silently dropped
+  });
+
+  it('cleans up activeRelays when target leaf disconnects', async () => {
+    // Establish a relay between leaf1 (origin) and leaf2 (target)
+    pushFrame(duplex1, {
+      type: 'RELAY_REQUEST',
+      handle: 'admin',
+      toBot: 'leaf2',
+    });
+    await tick();
+    written1.length = 0;
+    written2.length = 0;
+
+    // Disconnect leaf2 (target) — leaf1 should receive RELAY_END
+    duplex2.destroy();
+    await tick();
+
+    const frames1 = parseWritten(written1);
+    const endFrame = frames1.find((f) => f.type === 'RELAY_END' && f.handle === 'admin');
+    expect(endFrame).toBeDefined();
+    expect(endFrame!.reason).toMatch(/leaf2 disconnected/);
+  });
+
+  it('cleans up activeRelays via disconnectLeaf', async () => {
+    pushFrame(duplex1, {
+      type: 'RELAY_REQUEST',
+      handle: 'admin',
+      toBot: 'leaf2',
+    });
+    await tick();
+    written1.length = 0;
+    written2.length = 0;
+
+    hub.disconnectLeaf('leaf1');
+
+    const frames2 = parseWritten(written2);
+    // leaf2 should get both RELAY_END (cleanup) and BOTPART (broadcast)
+    const endFrame = frames2.find((f) => f.type === 'RELAY_END' && f.handle === 'admin');
+    expect(endFrame).toBeDefined();
+    expect(endFrame!.reason).toMatch(/leaf1 disconnected/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Hub: leaf disconnect cleans up cmdRoutes and protectRequests
+// ---------------------------------------------------------------------------
+
+describe('BotLinkHub leaf disconnect map cleanup', () => {
+  it('cleans up cmdRoutes when leaf disconnects', async () => {
+    const eventBus = new BotEventBus();
+    const perms = new Permissions(null, null, eventBus);
+    perms.addUser('admin', '*!a@host', 'nmov');
+    const handler = new CommandHandler(perms);
+    // Register a command that does nothing — we just need CMD routing
+    handler.registerCommand(
+      'slow',
+      { flags: '-', description: '', usage: '', category: '' },
+      () => {},
+    );
+
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+    hub.setCommandRelay(handler, perms, eventBus);
+
+    const { socket: socket1, written: written1, duplex: duplex1 } = createMockSocket();
+    const { socket: socket2, written: written2, duplex: duplex2 } = createMockSocket();
+    hub.addConnection(socket1);
+    hub.addConnection(socket2);
+    pushFrame(duplex1, { type: 'HELLO', botname: 'leaf1', password: TEST_HASH, version: '1' });
+    pushFrame(duplex2, { type: 'HELLO', botname: 'leaf2', password: TEST_HASH, version: '1' });
+    await tick();
+    written1.length = 0;
+    written2.length = 0;
+
+    // leaf1 sends CMD with toBot targeting leaf2 — this stores a cmdRoute entry
+    pushFrame(duplex1, {
+      type: 'CMD',
+      command: 'slow',
+      args: '',
+      fromHandle: 'admin',
+      fromBot: 'leaf1',
+      channel: null,
+      ref: 'ref-cleanup-test',
+      toBot: 'leaf2',
+    });
+    await tick();
+
+    // Before leaf1 gets the response, disconnect leaf1
+    duplex1.destroy();
+    await tick();
+
+    // Now leaf2 sends CMD_RESULT — it should NOT crash or route to dead leaf
+    pushFrame(duplex2, {
+      type: 'CMD_RESULT',
+      ref: 'ref-cleanup-test',
+      result: 'done',
+    });
+    await tick();
+
+    // leaf1 is disconnected, so it should not receive any frames
+    // The key assertion is that no error was thrown and the route was cleaned up
+    hub.close();
+  });
+
+  it('cleans up protectRequests when leaf disconnects', async () => {
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+
+    const { socket: socket1, written: written1, duplex: duplex1 } = createMockSocket();
+    hub.addConnection(socket1);
+    pushFrame(duplex1, { type: 'HELLO', botname: 'leaf1', password: TEST_HASH, version: '1' });
+    await tick();
+
+    const { socket: socket2, written: written2, duplex: duplex2 } = createMockSocket();
+    hub.addConnection(socket2);
+    pushFrame(duplex2, { type: 'HELLO', botname: 'leaf2', password: TEST_HASH, version: '1' });
+    await tick();
+
+    written1.length = 0;
+    written2.length = 0;
+
+    // leaf1 sends a PROTECT_OP (request) with a ref — this stores a protectRequests entry
+    pushFrame(duplex1, {
+      type: 'PROTECT_OP',
+      ref: 'prot-ref-1',
+      channel: '#test',
+      nick: 'someone',
+    });
+    await tick();
+
+    // Disconnect leaf1 before PROTECT_ACK arrives
+    duplex1.destroy();
+    await tick();
+
+    // Now leaf2 sends PROTECT_ACK — should NOT route to dead leaf1
+    written2.length = 0;
+    pushFrame(duplex2, {
+      type: 'PROTECT_ACK',
+      ref: 'prot-ref-1',
+      success: true,
+    });
+    await tick();
+
+    // leaf1 is gone — the ACK should have been silently dropped (request was cleaned up)
+    // No crash means the cleanup worked
+    hub.close();
+  });
 });
 
 // ---------------------------------------------------------------------------

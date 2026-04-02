@@ -9,6 +9,7 @@ import { isModeArray, parseHostmask, toEventObject } from './utils/irc-event';
 import { sanitize } from './utils/sanitize';
 import { SlidingWindowCounter } from './utils/sliding-window';
 import { splitMessage } from './utils/split-message';
+import { stripFormatting } from './utils/strip-formatting';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -46,17 +47,6 @@ const STARTUP_GRACE_MS = 5000;
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** Strip IRC formatting/control characters (bold, color, underline, etc.) from text. */
-const IRC_FORMATTING_CHARS = String.fromCharCode(0x02, 0x03, 0x0f, 0x16, 0x1d, 0x1e, 0x1f);
-const IRC_COLOR_CHAR = String.fromCharCode(0x03);
-const IRC_FORMAT_RE = new RegExp(
-  `[${IRC_FORMATTING_CHARS}]|${IRC_COLOR_CHAR}\\d{1,2}(,\\d{1,2})?`,
-  'g',
-);
-function stripFormatting(text: string): string {
-  return text.replace(IRC_FORMAT_RE, '');
-}
 
 /** Validate channel name starts with # or &. */
 function isValidChannel(name: string): boolean {
