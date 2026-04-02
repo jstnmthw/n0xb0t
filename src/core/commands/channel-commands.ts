@@ -150,6 +150,12 @@ export function registerChannelCommands(
         channelSettings.set(channel, key, n);
         ctx.reply(`${channel} ${key} = ${n}`);
       } else {
+        if (def.allowedValues && !def.allowedValues.includes(rawValue)) {
+          ctx.reply(
+            `Invalid value "${rawValue}" for ${key} — allowed: ${def.allowedValues.join(', ')}`,
+          );
+          return;
+        }
         channelSettings.set(channel, key, rawValue);
         ctx.reply(`${channel} ${key} = ${rawValue}`);
       }

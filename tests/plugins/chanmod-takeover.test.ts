@@ -665,11 +665,11 @@ describe('chanmod plugin — takeover threat detection integration', () => {
     // No crash means the key !== 'chanserv_access' branch works
   });
 
-  it('invalid chanserv_access value defaults to none', async () => {
-    // Set an invalid access level string
+  it('invalid chanserv_access value via raw API does not crash', async () => {
+    // .chanset rejects invalid values at command time via allowedValues,
+    // but direct set() calls (e.g. from DB migration) should not crash.
     bot.channelSettings.set('#test', 'chanserv_access', 'invalid_value');
     await tick(10);
-    // No crash — the validAccessLevels.has() false branch maps to 'none'
   });
 });
 

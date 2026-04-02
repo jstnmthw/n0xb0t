@@ -115,6 +115,7 @@ export function init(api: PluginAPI): void {
       type: 'string',
       default: 'none',
       description: "Bot's ChanServ access tier: 'none' | 'op' | 'superop' | 'founder'",
+      allowedValues: ['none', 'op', 'superop', 'founder'],
     },
     {
       key: 'chanserv_unban_on_kick',
@@ -135,6 +136,7 @@ export function init(api: PluginAPI): void {
       default: 'deop',
       description:
         "Response to hostile actors during takeover: 'none' | 'deop' | 'kickban' | 'akick'",
+      allowedValues: ['none', 'deop', 'kickban', 'akick'],
     },
     {
       key: 'takeover_detection',
@@ -151,13 +153,13 @@ export function init(api: PluginAPI): void {
   ]);
 
   // --- Sync chanserv_access setting to backend access levels ---
-  const validAccessLevels = new Set(['none', 'op', 'superop', 'founder']);
   api.channelSettings.onChange((channel: string, key: string) => {
     if (key === 'chanserv_access') {
-      const accessStr = api.channelSettings.getString(channel, 'chanserv_access');
-      const access = validAccessLevels.has(accessStr)
-        ? (accessStr as 'none' | 'op' | 'superop' | 'founder')
-        : 'none';
+      const access = api.channelSettings.getString(channel, 'chanserv_access') as
+        | 'none'
+        | 'op'
+        | 'superop'
+        | 'founder';
       for (const b of chain.getBackends()) {
         b.setAccess(channel, access);
       }

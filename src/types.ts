@@ -466,6 +466,7 @@ export interface ChannelSettingDef {
   type: ChannelSettingType;
   default: ChannelSettingValue;
   description: string; // shown in .chaninfo output
+  allowedValues?: string[]; // for string-type settings: reject values not in this list
 }
 
 /** ChannelSettingDef with its owning plugin attached (internal + PluginAPI). */

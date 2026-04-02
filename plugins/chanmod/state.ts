@@ -140,63 +140,117 @@ function cfg<T>(c: Record<string, unknown>, key: string, fallback: T): T {
   return val !== undefined ? (val as T) : fallback;
 }
 
+/** Read a numeric config value, validating it is a finite non-negative number. */
+function cfgNum(
+  c: Record<string, unknown>,
+  key: string,
+  fallback: number,
+  log: (msg: string) => void,
+): number {
+  const val = c[key];
+  if (val === undefined) return fallback;
+  const n = typeof val === 'number' ? val : Number(val);
+  if (!Number.isFinite(n) || n < 0) {
+    log(`Invalid ${key}: ${JSON.stringify(val)} — using default ${fallback}`);
+    return fallback;
+  }
+  return n;
+}
+
+/** Read a string config value constrained to a set of allowed values. */
+function cfgEnum<T extends string>(
+  c: Record<string, unknown>,
+  key: string,
+  allowed: readonly T[],
+  fallback: T,
+  log: (msg: string) => void,
+): T {
+  const val = c[key];
+  if (val === undefined) return fallback;
+  if (typeof val === 'string' && (allowed as readonly string[]).includes(val)) return val as T;
+  log(`Invalid ${key}: ${JSON.stringify(val)} — using default "${fallback}"`);
+  return fallback;
+}
+
 export function readConfig(api: PluginAPI): ChanmodConfig {
   const c = api.config;
-  return {
+  const log = (msg: string) => api.log(msg);
+
+  const config: ChanmodConfig = {
     auto_op: cfg(c, 'auto_op', true),
     op_flags: cfg<string[]>(c, 'op_flags', ['n', 'm', 'o']),
     halfop_flags: cfg<string[]>(c, 'halfop_flags', []),
     voice_flags: cfg<string[]>(c, 'voice_flags', ['v']),
     notify_on_fail: cfg(c, 'notify_on_fail', false),
     enforce_modes: cfg(c, 'enforce_modes', false),
-    enforce_delay_ms: cfg(c, 'enforce_delay_ms', 500),
+    enforce_delay_ms: cfgNum(c, 'enforce_delay_ms', 500, log),
     nodesynch_nicks: cfg<string[]>(c, 'nodesynch_nicks', ['ChanServ']),
     enforce_channel_modes: cfg(c, 'enforce_channel_modes', ''),
     enforce_channel_key: cfg(c, 'enforce_channel_key', ''),
-    enforce_channel_limit: cfg(c, 'enforce_channel_limit', 0),
+    enforce_channel_limit: cfgNum(c, 'enforce_channel_limit', 0, log),
     cycle_on_deop: cfg(c, 'cycle_on_deop', false),
-    cycle_delay_ms: cfg(c, 'cycle_delay_ms', 5000),
+    cycle_delay_ms: cfgNum(c, 'cycle_delay_ms', 5000, log),
     default_kick_reason: cfg(c, 'default_kick_reason', 'Requested'),
-    default_ban_duration: cfg(c, 'default_ban_duration', 120),
-    default_ban_type: cfg(c, 'default_ban_type', 3),
+    default_ban_duration: cfgNum(c, 'default_ban_duration', 120, log),
+    default_ban_type: cfgNum(c, 'default_ban_type', 3, log),
     rejoin_on_kick: cfg(c, 'rejoin_on_kick', true),
-    rejoin_delay_ms: cfg(c, 'rejoin_delay_ms', 5000),
-    max_rejoin_attempts: cfg(c, 'max_rejoin_attempts', 3),
-    rejoin_attempt_window_ms: cfg(c, 'rejoin_attempt_window_ms', 300_000),
+    rejoin_delay_ms: cfgNum(c, 'rejoin_delay_ms', 5000, log),
+    max_rejoin_attempts: cfgNum(c, 'max_rejoin_attempts', 3, log),
+    rejoin_attempt_window_ms: cfgNum(c, 'rejoin_attempt_window_ms', 300_000, log),
     revenge_on_kick: cfg(c, 'revenge_on_kick', false),
-    revenge_action: cfg<'deop' | 'kick' | 'kickban'>(c, 'revenge_action', 'deop'),
-    revenge_delay_ms: cfg(c, 'revenge_delay_ms', 3000),
+    revenge_action: cfgEnum(c, 'revenge_action', ['deop', 'kick', 'kickban'], 'deop', log),
+    revenge_delay_ms: cfgNum(c, 'revenge_delay_ms', 3000, log),
     revenge_kick_reason: cfg(c, 'revenge_kick_reason', "Don't kick me."),
     revenge_exempt_flags: cfg(c, 'revenge_exempt_flags', 'nm'),
     bitch: cfg(c, 'bitch', false),
     punish_deop: cfg(c, 'punish_deop', false),
-    punish_action: cfg<'kick' | 'kickban'>(c, 'punish_action', 'kick'),
+    punish_action: cfgEnum(c, 'punish_action', ['kick', 'kickban'], 'kick', log),
     punish_kick_reason: cfg(c, 'punish_kick_reason', "Don't deop my friends."),
     enforcebans: cfg(c, 'enforcebans', false),
     nick_recovery: cfg(c, 'nick_recovery', true),
     nick_recovery_ghost: cfg(c, 'nick_recovery_ghost', false),
     // Password read from bot.json (not plugins.json) per SECURITY.md §6
     nick_recovery_password: api.botConfig.chanmod?.nick_recovery_password ?? '',
-    stopnethack_mode: cfg(c, 'stopnethack_mode', 0),
-    split_timeout_ms: cfg(c, 'split_timeout_ms', 300_000),
+    stopnethack_mode: cfgNum(c, 'stopnethack_mode', 0, log),
+    split_timeout_ms: cfgNum(c, 'split_timeout_ms', 300_000, log),
     chanserv_op: cfg(c, 'chanserv_op', false),
     chanserv_nick: cfg(c, 'chanserv_nick', 'ChanServ'),
-    chanserv_op_delay_ms: cfg(c, 'chanserv_op_delay_ms', 1000),
-    chanserv_services_type: cfg<'atheme' | 'anope'>(
+    chanserv_op_delay_ms: cfgNum(c, 'chanserv_op_delay_ms', 1000, log),
+    chanserv_services_type: cfgEnum(
       c,
       'chanserv_services_type',
-      /* v8 ignore next -- fallback when services.type is empty/unset */
-      (api.botConfig.services.type as 'atheme' | 'anope') || 'atheme',
+      ['atheme', 'anope'],
+      api.botConfig.services.type === 'anope' ? 'anope' : 'atheme',
+      log,
     ),
-    chanserv_unban_retry_ms: cfg(c, 'chanserv_unban_retry_ms', 2000),
-    chanserv_unban_max_retries: cfg(c, 'chanserv_unban_max_retries', 3),
-    chanserv_recover_cooldown_ms: cfg(c, 'chanserv_recover_cooldown_ms', 60_000),
-    anope_recover_step_delay_ms: cfg(c, 'anope_recover_step_delay_ms', 200),
-    takeover_window_ms: cfg(c, 'takeover_window_ms', 30_000),
-    takeover_level_1_threshold: cfg(c, 'takeover_level_1_threshold', 3),
-    takeover_level_2_threshold: cfg(c, 'takeover_level_2_threshold', 6),
-    takeover_level_3_threshold: cfg(c, 'takeover_level_3_threshold', 10),
-    takeover_response_delay_ms: cfg(c, 'takeover_response_delay_ms', 0),
+    chanserv_unban_retry_ms: cfgNum(c, 'chanserv_unban_retry_ms', 2000, log),
+    chanserv_unban_max_retries: cfgNum(c, 'chanserv_unban_max_retries', 3, log),
+    chanserv_recover_cooldown_ms: cfgNum(c, 'chanserv_recover_cooldown_ms', 60_000, log),
+    anope_recover_step_delay_ms: cfgNum(c, 'anope_recover_step_delay_ms', 200, log),
+    takeover_window_ms: cfgNum(c, 'takeover_window_ms', 30_000, log),
+    takeover_level_1_threshold: cfgNum(c, 'takeover_level_1_threshold', 3, log),
+    takeover_level_2_threshold: cfgNum(c, 'takeover_level_2_threshold', 6, log),
+    takeover_level_3_threshold: cfgNum(c, 'takeover_level_3_threshold', 10, log),
+    takeover_response_delay_ms: cfgNum(c, 'takeover_response_delay_ms', 0, log),
     invite: cfg(c, 'invite', false),
   };
+
+  // Validate threshold ordering
+  if (config.takeover_level_1_threshold >= config.takeover_level_2_threshold) {
+    log(
+      `takeover_level_1_threshold (${config.takeover_level_1_threshold}) >= level_2 (${config.takeover_level_2_threshold}) — resetting thresholds to defaults`,
+    );
+    config.takeover_level_1_threshold = 3;
+    config.takeover_level_2_threshold = 6;
+    config.takeover_level_3_threshold = 10;
+  } else if (config.takeover_level_2_threshold >= config.takeover_level_3_threshold) {
+    log(
+      `takeover_level_2_threshold (${config.takeover_level_2_threshold}) >= level_3 (${config.takeover_level_3_threshold}) — resetting thresholds to defaults`,
+    );
+    config.takeover_level_1_threshold = 3;
+    config.takeover_level_2_threshold = 6;
+    config.takeover_level_3_threshold = 10;
+  }
+
+  return config;
 }
