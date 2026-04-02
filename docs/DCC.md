@@ -1,6 +1,6 @@
 # DCC CHAT + Botnet
 
-HexBot supports **passive DCC CHAT** for remote administration. Users with sufficient flags connect directly from their IRC client, get a command prompt, and share a live party line ("botnet") with other connected admins.
+HexBot supports **passive DCC CHAT** for remote administration. Users with sufficient flags connect directly from their IRC client, get a command prompt, and share a live console ("botnet") with other connected admins.
 
 ---
 
