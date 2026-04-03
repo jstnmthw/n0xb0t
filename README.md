@@ -135,7 +135,7 @@ docker compose logs -f
 
 Plugins and config live on the host filesystem via bind mounts. Edit a plugin file and run `.reload <name>` in IRC to pick up changes — no rebuild needed.
 
-For non-Docker production use, `pnpm build` compiles to JS and `pnpm start:prod` runs the compiled output.
+For non-Docker production use, `pnpm start` runs the bot directly via `tsx`.
 
 ## Development
 

@@ -1,4 +1,4 @@
-FROM node:24-alpine AS builder
+FROM node:24-alpine
 
 WORKDIR /app
 
@@ -6,34 +6,20 @@ WORKDIR /app
 RUN apk add --no-cache python3 make g++
 RUN corepack enable
 
-# Install all dependencies (including devDependencies for tsc)
+# Install dependencies
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --ignore-scripts && pnpm rebuild better-sqlite3
 
-# Compile TypeScript
+# Copy source and plugin code
 COPY tsconfig.json ./
 COPY src/ ./src/
-RUN pnpm exec tsc
+COPY plugins/ ./plugins/
 
-# ---
-
-FROM node:24-alpine
-
-WORKDIR /app
-
-# Install build tools for native addons (better-sqlite3) and pnpm
-RUN apk add --no-cache python3 make g++
-RUN corepack enable
-
-# Production dependencies only (fresh install = correct native binary for Alpine)
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile --prod --ignore-scripts && pnpm rebuild better-sqlite3
-
-# Copy compiled output from builder
-COPY --from=builder /app/dist ./dist
+# Typecheck at build time (catches errors before deploy)
+RUN pnpm exec tsc --noEmit
 
 # Config examples for first-run reference
 COPY config/bot.example.json ./config/bot.example.json
 COPY config/plugins.example.json ./config/plugins.example.json
 
-CMD ["node", "dist/src/index.js"]
+CMD ["pnpm", "start"]
