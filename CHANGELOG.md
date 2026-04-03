@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.1] - 2026-04-03
+
+### Added
+
+- Getting Started guide (`docs/GETTING_STARTED.md`)
+
+### Changed
+
+- README overhauled: highlights section, full admin/bot-link/DCC command tables, documentation index
+- Comprehensive doc sync: DESIGN.md, PLUGIN_API.md, DCC.md, plugins/README.md updated to match current codebase
+- Healthcheck heartbeat uses `utimesSync` instead of writing unused file content
+
+### Fixed
+
+- Docker build failure: `husky` prepare script ran during `--prod` install and failed because husky is a devDependency
+
 ## [0.2.0] - 2026-04-02
 
 ### Added
