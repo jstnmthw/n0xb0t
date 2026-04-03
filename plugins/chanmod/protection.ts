@@ -142,27 +142,25 @@ export function setupProtection(
     const rejoinDelay = useBackendDelay ? SERVICES_PROCESSING_MS : config.rejoin_delay_ms;
 
     // Schedule rejoin
-    const rejoinTimer = setTimeout(() => {
+    state.scheduleCycle(rejoinDelay, () => {
       api.join(channel);
       api.log(`Rejoining ${channel} after being kicked`);
 
       // Schedule a backup retry in case the first rejoin fails (still banned).
       // If the bot is back in the channel by then, the join is harmless (server ignores it).
       if (useBackendDelay && record.count < config.max_rejoin_attempts) {
-        const retryTimer = setTimeout(() => {
+        state.scheduleCycle(config.chanserv_unban_retry_ms, () => {
           // Only retry if we're not in the channel yet
           if (!api.getChannel(channel)) {
             api.log(`Retry rejoin for ${channel} (first attempt may have failed due to ban)`);
             if (chain!.canUnban(channel)) {
               chain!.requestUnban(channel);
             }
-            const innerTimer = setTimeout(() => {
+            state.scheduleCycle(SERVICES_PROCESSING_MS, () => {
               api.join(channel);
-            }, SERVICES_PROCESSING_MS);
-            state.cycleTimers.push(innerTimer);
+            });
           }
-        }, config.chanserv_unban_retry_ms);
-        state.cycleTimers.push(retryTimer);
+        });
       }
 
       // Clear the unban-requested flag after rejoin
@@ -178,7 +176,7 @@ export function setupProtection(
       const revenge = api.channelSettings.getFlag(channel, 'revenge');
       if (!revenge || !kickerNick) return;
 
-      const revengeTimer = setTimeout(() => {
+      state.scheduleCycle(config.revenge_delay_ms, () => {
         // Verify kicker is still in the channel
         const rch = api.getChannel(channel);
         if (!rch) return;
@@ -217,12 +215,8 @@ export function setupProtection(
           api.kick(channel, kickerNick, config.revenge_kick_reason);
           api.log(`Revenge: kickbanned ${kickerNick} from ${channel} for kicking bot`);
         }
-      }, config.revenge_delay_ms);
-
-      state.cycleTimers.push(revengeTimer);
-    }, rejoinDelay);
-
-    state.cycleTimers.push(rejoinTimer);
+      });
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -243,10 +237,9 @@ export function setupProtection(
       if (config.nick_recovery_ghost && config.nick_recovery_password) {
         // GHOST via NickServ — password is never logged
         api.say('NickServ', `GHOST ${desiredNick} ${config.nick_recovery_password}`);
-        const t = setTimeout(() => {
+        state.scheduleCycle(2000, () => {
           api.changeNick(desiredNick);
-        }, 2000);
-        state.cycleTimers.push(t);
+        });
       } else {
         api.changeNick(desiredNick);
       }
@@ -327,10 +320,9 @@ export function setupProtection(
           `Stopnethack: deoping ${target} in ${channel} (mode ${config.stopnethack_mode}, not legitimate)`,
         );
         markIntentional(state, api, channel, target);
-        const t = setTimeout(() => {
+        state.scheduleEnforcement(config.enforce_delay_ms, () => {
           api.deop(channel, target);
-        }, config.enforce_delay_ms);
-        state.enforcementTimers.push(t);
+        });
       }
     });
   }

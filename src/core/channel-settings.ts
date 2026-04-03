@@ -1,16 +1,16 @@
 // HexBot — Per-channel settings registry
 // Plugins register typed setting definitions; values are stored in the DB under 'chanset' namespace.
 import type { BotDatabase } from '../database';
-import type { ChannelSettingDef, ChannelSettingEntry, ChannelSettingValue } from '../types';
+import type {
+  ChannelSettingChangeCallback,
+  ChannelSettingDef,
+  ChannelSettingEntry,
+  ChannelSettingValue,
+} from '../types';
+
+export type { ChannelSettingChangeCallback };
 
 const NAMESPACE = 'chanset';
-
-/** Callback signature for channel setting change notifications. */
-export type ChannelSettingChangeCallback = (
-  channel: string,
-  key: string,
-  value: ChannelSettingValue,
-) => void;
 
 export class ChannelSettings {
   private defs: Map<string, ChannelSettingEntry> = new Map();

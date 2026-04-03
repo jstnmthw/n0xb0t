@@ -2,16 +2,16 @@ import { Duplex } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CommandHandler } from '../../src/command-handler';
+import { BotLinkHub } from '../../src/core/botlink-hub';
+import { BotLinkLeaf } from '../../src/core/botlink-leaf';
 import {
-  BotLinkHub,
-  BotLinkLeaf,
   BotLinkProtocol,
   MAX_FRAME_SIZE,
   RateCounter,
   hashPassword,
   sanitizeFrame,
-} from '../../src/core/botlink';
-import type { LinkFrame, SocketFactory } from '../../src/core/botlink';
+} from '../../src/core/botlink-protocol';
+import type { LinkFrame, SocketFactory } from '../../src/core/botlink-protocol';
 import { Permissions } from '../../src/core/permissions';
 import { BotEventBus } from '../../src/event-bus';
 import type { BotlinkConfig } from '../../src/types';

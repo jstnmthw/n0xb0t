@@ -8,8 +8,11 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { CommandHandler } from './command-handler';
-import { BotLinkHub, BotLinkLeaf, type LinkFrame } from './core/botlink';
+import { BotLinkHub } from './core/botlink-hub';
+import { BotLinkLeaf } from './core/botlink-leaf';
 import { handleProtectFrame } from './core/botlink-protect';
+import type { LinkFrame } from './core/botlink-protocol';
+import { type RelaySessionMap, handleRelayFrame } from './core/botlink-relay-handler';
 import { BanListSyncer, SharedBanList } from './core/botlink-sharing';
 import { ChannelStateSyncer, PermissionSyncer } from './core/botlink-sync';
 import { ChannelSettings } from './core/channel-settings';
@@ -571,91 +574,27 @@ export class Bot {
   // Owner bootstrapping
   // -------------------------------------------------------------------------
 
-  /** Handle incoming RELAY_* frames (as the target or origin bot). */
-  private handleRelayFrame(frame: LinkFrame): void {
-    const handle = String(frame.handle ?? '');
-
-    if (frame.type === 'RELAY_REQUEST' && this._dccManager) {
-      // This bot is the target — create a virtual relay session
-      const user = this.permissions.getUser(handle);
-      if (!user) {
-        const rejectFrame = { type: 'RELAY_END', handle, reason: 'User not found' };
-        if (this._botLinkHub) this._botLinkHub.broadcast(rejectFrame);
-        else this._botLinkLeaf?.send(rejectFrame);
-        return;
-      }
-      // Send RELAY_ACCEPT
-      const acceptFrame = { type: 'RELAY_ACCEPT', handle, toBot: this.config.botlink!.botname };
-      if (this._botLinkHub) this._botLinkHub.send(String(frame.fromBot ?? ''), acceptFrame);
-      else this._botLinkLeaf?.send(acceptFrame);
-
-      // Process incoming RELAY_INPUT via a relay session map (tracked below)
-      this._relayVirtualSessions.set(handle, {
-        fromBot: String(frame.fromBot ?? ''),
-        sendOutput: (line: string) => {
-          const outputFrame = { type: 'RELAY_OUTPUT', handle, line };
-          if (this._botLinkHub) this._botLinkHub.send(String(frame.fromBot ?? ''), outputFrame);
-          else this._botLinkLeaf?.send(outputFrame);
+  /** Build the relay sender and deps, then delegate to the extracted handler. */
+  private _relayDeps(): import('./core/botlink-relay-handler').RelayHandlerDeps {
+    const hub = this._botLinkHub;
+    const leaf = this._botLinkLeaf;
+    return {
+      permissions: this.permissions,
+      commandHandler: this.commandHandler,
+      dccManager: this._dccManager,
+      botname: this.config.botlink!.botname,
+      sender: {
+        sendTo: (botname, frame) => {
+          if (hub) return hub.send(botname, frame);
+          return leaf?.send(frame) ?? false;
         },
-      });
-    }
-
-    if (frame.type === 'RELAY_INPUT') {
-      const vs = this._relayVirtualSessions.get(handle);
-      if (vs) {
-        const line = String(frame.line ?? '');
-        if (line.startsWith('.')) {
-          const user = this.permissions.getUser(handle);
-          this.commandHandler
-            .execute(line, {
-              source: 'botlink',
-              nick: user?.hostmasks[0]?.split('!')[0] || handle,
-              ident: 'relay',
-              hostname: 'relay',
-              channel: null,
-              reply: (msg: string) => {
-                for (const part of msg.split('\n')) vs.sendOutput(part);
-              },
-            })
-            .catch(() => {});
-        } else {
-          // Party line chat from relayed user — strip formatting to prevent injection
-          const safeHandle = stripFormatting(handle);
-          const safeLine = stripFormatting(line);
-          if (this._dccManager) {
-            this._dccManager.announce(`<${safeHandle}@relay> ${safeLine}`);
-          }
-          vs.sendOutput(`<${safeHandle}> ${safeLine}`);
-        }
-      }
-    }
-
-    if (frame.type === 'RELAY_OUTPUT' && this._dccManager) {
-      // This bot is the origin — display output to the DCC session
-      for (const session of this._dccManager.getSessionList()) {
-        if (session.handle === handle) {
-          const dccSession = this._dccManager.getSession(session.nick);
-          dccSession?.writeLine(String(frame.line ?? ''));
-        }
-      }
-    }
-
-    if (frame.type === 'RELAY_END') {
-      // Clean up virtual session if we're the target
-      this._relayVirtualSessions.delete(handle);
-      // Exit relay mode if we're the origin
-      if (this._dccManager) {
-        for (const s of this._dccManager.getSessionList()) {
-          if (s.handle === handle) {
-            const session = this._dccManager.getSession(s.nick);
-            if (session?.isRelaying) {
-              session.exitRelay();
-              session.writeLine(`*** Relay to ${frame.reason ?? 'remote bot'} lost.`);
-            }
-          }
-        }
-      }
-    }
+        send: (frame) => {
+          if (hub) hub.broadcast(frame);
+          else leaf?.send(frame);
+        },
+      },
+      stripFormatting,
+    };
   }
 
   /** Handle incoming PROTECT_* frames — delegates to extracted handler with permission guards. */
@@ -703,15 +642,12 @@ export class Bot {
         BanListSyncer.applyFrame(frame, this._sharedBanList, isShared);
       }
     }
-    this.handleRelayFrame(frame);
+    handleRelayFrame(frame, this._relayDeps(), this._relayVirtualSessions);
     this.handleProtectFrame(frame);
   }
 
   /** Virtual relay sessions on this bot (as target). */
-  private _relayVirtualSessions: Map<
-    string,
-    { fromBot: string; sendOutput: (line: string) => void }
-  > = new Map();
+  private _relayVirtualSessions: RelaySessionMap = new Map();
 
   /** Wire local DCC party line events to a botlink hub or leaf. */
   private wirePartyLine(link: BotLinkHub | BotLinkLeaf): void {

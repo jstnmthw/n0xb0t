@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import type { LinkFrame } from '../../src/core/botlink';
+import type { LinkFrame } from '../../src/core/botlink-protocol';
 import { ChannelStateSyncer, PermissionSyncer } from '../../src/core/botlink-sync';
 import { ChannelState } from '../../src/core/channel-state';
 import { Permissions } from '../../src/core/permissions';

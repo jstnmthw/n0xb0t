@@ -3,7 +3,9 @@
 import type { CommandHandler } from '../../command-handler';
 import type { BotlinkConfig } from '../../types';
 import { sanitize } from '../../utils/sanitize';
-import type { BotLinkHub, BotLinkLeaf, PartyLineUser } from '../botlink';
+import type { BotLinkHub } from '../botlink-hub';
+import type { BotLinkLeaf } from '../botlink-leaf';
+import type { PartyLineUser } from '../botlink-protocol';
 import type { BotlinkDCCView } from '../dcc';
 
 /**
@@ -211,7 +213,7 @@ export function registerBotlinkCommands(
         return;
       }
 
-      const sendFrame = (frame: import('../botlink').LinkFrame) => {
+      const sendFrame = (frame: import('../botlink-protocol').LinkFrame) => {
         if (hub) hub.send(targetBot, frame);
         else if (leaf) leaf.send(frame);
       };

@@ -1,14 +1,9 @@
 // HexBot — Wildcard pattern matching + IRC case mapping utilities
 // Shared by the dispatcher (mask matching) and permissions (hostmask matching).
 // Supports `*` (match any string, including empty) and `?` (match exactly one character).
+import type { Casemapping } from '../types';
 
-/**
- * IRC CASEMAPPING values from ISUPPORT 005.
- * - rfc1459:        a-z=A-Z, [={, ]=}, \=|, ~=^
- * - strict-rfc1459: same as rfc1459 but ~ ≠ ^
- * - ascii:          only a-z=A-Z
- */
-export type Casemapping = 'rfc1459' | 'strict-rfc1459' | 'ascii';
+export type { Casemapping };
 
 /**
  * IRC-aware lowercase using the specified CASEMAPPING.

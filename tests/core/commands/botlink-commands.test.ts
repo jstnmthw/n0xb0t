@@ -4,8 +4,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CommandHandler } from '../../../src/command-handler';
 import type { CommandContext } from '../../../src/command-handler';
-import { BotLinkHub, BotLinkLeaf, hashPassword } from '../../../src/core/botlink';
-import type { LinkFrame } from '../../../src/core/botlink';
+import { BotLinkHub } from '../../../src/core/botlink-hub';
+import { BotLinkLeaf } from '../../../src/core/botlink-leaf';
+import { hashPassword } from '../../../src/core/botlink-protocol';
+import type { LinkFrame } from '../../../src/core/botlink-protocol';
 import { registerBotlinkCommands } from '../../../src/core/commands/botlink-commands';
 import type { BotlinkDCCView } from '../../../src/core/dcc';
 import type { BotlinkConfig } from '../../../src/types';
@@ -189,7 +191,7 @@ describe('botlink commands', () => {
       pushFrame(leafDuplex, {
         type: 'HELLO',
         botname: 'leaf1',
-        password: (await import('../../../src/core/botlink')).hashPassword('secret'),
+        password: hashPassword('secret'),
         version: '1.0',
       });
       await tick();

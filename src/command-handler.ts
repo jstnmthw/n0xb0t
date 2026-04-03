@@ -1,6 +1,7 @@
 // HexBot — Command router
 // Parses command strings and dispatches to registered handlers.
 // Transport-agnostic — works with REPL, IRC, or any future input source.
+import type { HandlerContext } from './types';
 import { formatTable } from './utils/table';
 
 // ---------------------------------------------------------------------------
@@ -19,20 +20,7 @@ export interface CommandContext {
 
 /** Permission checker interface for flag enforcement. */
 export interface CommandPermissionsProvider {
-  checkFlags(
-    requiredFlags: string,
-    ctx: {
-      nick: string;
-      ident: string;
-      hostname: string;
-      channel: string | null;
-      text: string;
-      command: string;
-      args: string;
-      reply: (msg: string) => void;
-      replyPrivate: (msg: string) => void;
-    },
-  ): boolean;
+  checkFlags(requiredFlags: string, ctx: HandlerContext): boolean;
 }
 
 /** Options for registering a command. */

@@ -1,7 +1,7 @@
 // HexBot — Bot Link State Synchronization
 // Converts ChannelState and Permissions into link frames for sync,
 // and applies incoming sync frames to local state.
-import type { LinkFrame } from './botlink';
+import type { LinkFrame } from './botlink-protocol';
 import type { ChannelState } from './channel-state';
 import type { Permissions } from './permissions';
 

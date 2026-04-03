@@ -48,15 +48,14 @@ export function setupAutoOp(
       const accessExplicit = api.channelSettings.isSet(channel, 'chanserv_access');
       if (takeoverOn && !accessExplicit) {
         // Check after 5s — by then the probe should have completed or timed out
-        const warnTimer = setTimeout(() => {
+        _state.scheduleCycle(5000, () => {
           const access = chain?.getAccess(channel) ?? 'none';
           if (access === 'none') {
             api.warn(
               `Takeover detection enabled for ${channel} but chanserv_access is 'none' — bot cannot self-recover. Set via: .chanset ${channel} chanserv_access op`,
             );
           }
-        }, 5000);
-        if (_state.cycleTimers) _state.cycleTimers.push(warnTimer);
+        });
       }
       return;
     }

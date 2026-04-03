@@ -3,7 +3,7 @@
 // by issuing IRC commands when this bot has ops in the target channel.
 import type { Casemapping } from '../utils/wildcard';
 import { ircLower } from '../utils/wildcard';
-import type { LinkFrame } from './botlink';
+import type { LinkFrame } from './botlink-protocol';
 import type { ChannelState } from './channel-state';
 import type { IRCCommands } from './irc-commands';
 import type { Permissions } from './permissions';

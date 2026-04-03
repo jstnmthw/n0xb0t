@@ -45,6 +45,11 @@ export interface SharedState {
   // Topic recovery
   /** Known-good topic per channel — updated at threat level 0, frozen during elevated threat. */
   knownGoodTopics: Map<string, { topic: string; setAt: number }>;
+
+  /** Schedule a callback on `enforcementTimers` — wraps setTimeout + push. */
+  scheduleEnforcement(delayMs: number, fn: () => void): void;
+  /** Schedule a callback on `cycleTimers` — wraps setTimeout + push. */
+  scheduleCycle(delayMs: number, fn: () => void): void;
 }
 
 export const INTENTIONAL_TTL_MS = 5000;
@@ -52,7 +57,7 @@ export const COOLDOWN_WINDOW_MS = 10_000;
 export const MAX_ENFORCEMENTS = 3;
 
 export function createState(): SharedState {
-  return {
+  const state: SharedState = {
     intentionalModeChanges: new Map(),
     enforcementCooldown: new Map(),
     cycleTimers: [],
@@ -69,7 +74,16 @@ export function createState(): SharedState {
     lastKnownModes: new Map(),
     unbanRequested: new Set(),
     knownGoodTopics: new Map(),
+    scheduleEnforcement(delayMs: number, fn: () => void): void {
+      const timer = setTimeout(fn, delayMs);
+      state.enforcementTimers.push(timer);
+    },
+    scheduleCycle(delayMs: number, fn: () => void): void {
+      const timer = setTimeout(fn, delayMs);
+      state.cycleTimers.push(timer);
+    },
   };
+  return state;
 }
 
 // ---------------------------------------------------------------------------

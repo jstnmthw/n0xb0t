@@ -2,9 +2,11 @@
 // NickServ integration — bot authentication and user identity verification.
 import type { BotEventBus } from '../event-bus';
 import type { Logger } from '../logger';
-import type { ServicesConfig } from '../types';
+import type { ServicesConfig, VerifyResult } from '../types';
 import { toEventObject } from '../utils/irc-event';
 import { type Casemapping, ircLower } from '../utils/wildcard';
+
+export type { VerifyResult };
 
 // ---------------------------------------------------------------------------
 // Types
@@ -15,11 +17,6 @@ export interface ServicesClient {
   on(event: string, listener: (...args: unknown[]) => void): void;
   removeListener(event: string, listener: (...args: unknown[]) => void): void;
   say(target: string, message: string): void;
-}
-
-export interface VerifyResult {
-  verified: boolean;
-  account: string | null;
 }
 
 interface PendingVerify {

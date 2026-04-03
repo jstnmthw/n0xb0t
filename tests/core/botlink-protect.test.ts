@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import type { LinkFrame } from '../../src/core/botlink';
 import { type ProtectHandlerDeps, handleProtectFrame } from '../../src/core/botlink-protect';
+import type { LinkFrame } from '../../src/core/botlink-protocol';
 import { type MockBot, createMockBot } from '../helpers/mock-bot';
 
 // ---------------------------------------------------------------------------

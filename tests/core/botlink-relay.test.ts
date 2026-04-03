@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 
 import { CommandHandler } from '../../src/command-handler';
 import type { CommandContext } from '../../src/command-handler';
-import { BotLinkHub, BotLinkLeaf, hashPassword } from '../../src/core/botlink';
+import { BotLinkHub } from '../../src/core/botlink-hub';
+import { BotLinkLeaf } from '../../src/core/botlink-leaf';
+import { hashPassword } from '../../src/core/botlink-protocol';
 import { Permissions } from '../../src/core/permissions';
 import { BotEventBus } from '../../src/event-bus';
 import type { BotlinkConfig } from '../../src/types';
