@@ -37,6 +37,10 @@ export interface ConnectionLifecycleDeps {
   logger: Logger;
   /** Channel state tracker — required for periodic presence check. */
   channelState?: PresenceCheckChannelState;
+  /** Callback to re-attempt the IRC connection (for startup retry with backoff).
+   *  irc-framework does not auto-reconnect on initial connection failure, so we
+   *  handle retries ourselves. If not provided, initial failure is immediately fatal. */
+  reconnect?: () => void;
 }
 
 /** Handle returned by registerConnectionEvents for cleanup on shutdown. */
@@ -74,10 +78,18 @@ export function registerConnectionEvents(
   // in the 'close' log — irc-framework's 'close' event only passes a boolean.
   let lastCloseReason: string | null = null;
 
+  // Startup retry state — irc-framework does not auto-reconnect on initial
+  // connection failure (only after a successful registration), so we handle
+  // retries ourselves with exponential backoff.
+  const maxStartupRetries = 10;
+  const maxRetryWait = 30_000;
+  let startupAttempt = 0;
+
   client.on('registered', () => {
     registered = true;
     expectingReconnect = false;
     lastCloseReason = null;
+    startupAttempt = 0;
     logger.info(`Connected to ${cfg.host}:${cfg.port} as ${cfg.nick}`);
 
     if (cfg.tls) {
@@ -132,7 +144,22 @@ export function registerConnectionEvents(
       const reason = lastCloseReason ?? 'no error detail from server';
       logger.error(`Connection failed: ${reason}`);
       deps.eventBus.emit('bot:disconnected', `connection failed: ${reason}`);
-      reject(new Error(`Connection failed: ${reason}`));
+
+      // irc-framework does not auto-reconnect on initial connection failure.
+      // Retry with exponential backoff if the caller provided a reconnect callback.
+      if (deps.reconnect && startupAttempt < maxStartupRetries) {
+        startupAttempt++;
+        const jitter = Math.floor(Math.random() * 5000);
+        const delay = Math.min(1000 * 2 ** startupAttempt, maxRetryWait) + jitter;
+        logger.info(
+          `Retrying connection in ${Math.round(delay / 1000)}s ` +
+            `(attempt ${startupAttempt + 1}/${maxStartupRetries + 1})...`,
+        );
+        lastCloseReason = null;
+        setTimeout(() => deps.reconnect!(), delay);
+      } else {
+        reject(new Error(`Connection failed: ${reason}`));
+      }
       return;
     }
     expectingReconnect = false;

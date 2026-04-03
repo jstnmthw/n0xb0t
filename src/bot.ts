@@ -432,6 +432,7 @@ export class Bot {
           dispatcher: this.dispatcher,
           channelState: this.channelState,
           logger: this.botLogger,
+          reconnect: () => this.client.connect(),
         },
         resolve,
         reject,
