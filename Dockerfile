@@ -27,7 +27,7 @@ RUN corepack enable
 
 # Production dependencies only (fresh install = correct native binary for Alpine)
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile --prod
+RUN pnpm install --frozen-lockfile --prod --ignore-scripts && pnpm rebuild better-sqlite3
 
 # Copy compiled output from builder
 COPY --from=builder /app/dist ./dist
