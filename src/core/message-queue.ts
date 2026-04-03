@@ -1,7 +1,10 @@
 // HexBot — Message queue with flood protection
-// Token-bucket rate limiter for outgoing IRC messages. Sits between
-// the bot's say/notice/action methods and the IRC client to prevent
-// excess-flood disconnects.
+// Integer-millisecond token bucket rate limiter for outgoing IRC messages.
+// Sits between the bot's say/notice/action methods and the IRC client to
+// prevent excess-flood disconnects.
+//
+// Uses integer millisecond arithmetic to avoid floating-point drift that
+// caused tokens to leak below threshold over many rapid enqueue() calls.
 import type { Logger } from '../logger';
 
 // ---------------------------------------------------------------------------
@@ -24,23 +27,26 @@ export interface MessageQueueOptions {
 export class MessageQueue {
   private static readonly MAX_DEPTH = 500;
   private readonly queue: Array<() => void> = [];
-  private tokens: number;
+  /** Budget in milliseconds. Each message costs `costMs`. Integer arithmetic only. */
+  private budgetMs: number;
   private lastRefill: number;
   private timer: ReturnType<typeof setInterval> | null = null;
   private readonly rate: number;
   private readonly burst: number;
-  private readonly capacity: number;
-  private readonly intervalMs: number;
+  /** Millisecond cost per message: floor(1000 / rate). */
+  private readonly costMs: number;
+  /** Maximum budget in milliseconds: burst * costMs. */
+  private readonly capacityMs: number;
   private readonly logger: Logger | null;
 
   constructor(options: MessageQueueOptions = {}) {
     this.rate = options.rate ?? 2;
     this.burst = options.burst ?? 4;
-    // Bucket capacity must be at least 1 so drain() can always accumulate a token
-    this.capacity = Math.max(1, this.burst);
-    this.tokens = this.burst;
+    this.costMs = Math.floor(1000 / this.rate);
+    // Capacity must allow at least 1 message so drain() can always accumulate enough budget
+    this.capacityMs = Math.max(this.costMs, this.burst * this.costMs);
+    this.budgetMs = this.burst * this.costMs;
     this.lastRefill = Date.now();
-    this.intervalMs = Math.floor(1000 / this.rate);
     this.logger = options.logger ?? null;
 
     this.start();
@@ -51,12 +57,12 @@ export class MessageQueue {
     return this.queue.length;
   }
 
-  /** Push a send operation onto the queue. Sends immediately if tokens available. */
+  /** Push a send operation onto the queue. Sends immediately if budget allows. */
   enqueue(fn: () => void): void {
-    this.refillTokens();
+    this.refill();
 
-    if (this.tokens >= 1) {
-      this.tokens--;
+    if (this.budgetMs >= this.costMs) {
+      this.budgetMs -= this.costMs;
       fn();
       return;
     }
@@ -83,7 +89,7 @@ export class MessageQueue {
   clear(): void {
     const dropped = this.queue.length;
     this.queue.length = 0;
-    this.tokens = this.burst;
+    this.budgetMs = this.capacityMs;
     this.lastRefill = Date.now();
     if (dropped > 0) {
       this.logger?.debug(`Message queue cleared, ${dropped} messages dropped`);
@@ -101,30 +107,31 @@ export class MessageQueue {
   /** Start (or restart) the drain timer. */
   private start(): void {
     this.stop();
-    this.timer = setInterval(() => this.drain(), this.intervalMs);
+    this.timer = setInterval(() => this.drain(), this.costMs);
     // Don't keep the process alive just for the queue timer
     if (this.timer && typeof this.timer === 'object' && 'unref' in this.timer) {
       this.timer.unref();
     }
   }
 
-  /** Refill tokens based on elapsed time. */
-  private refillTokens(): void {
+  /** Add elapsed milliseconds to the budget. Integer arithmetic, no floats. */
+  private refill(): void {
     const now = Date.now();
     const elapsed = now - this.lastRefill;
-    const newTokens = (elapsed / 1000) * this.rate;
-    this.tokens = Math.min(this.capacity, this.tokens + newTokens);
-    this.lastRefill = now;
+    if (elapsed > 0) {
+      this.budgetMs = Math.min(this.capacityMs, this.budgetMs + elapsed);
+      this.lastRefill = now;
+    }
   }
 
-  /** Drain one message from the queue if tokens are available. */
+  /** Drain one message from the queue if budget allows. */
   private drain(): void {
     if (this.queue.length === 0) return;
 
-    this.refillTokens();
+    this.refill();
 
-    if (this.tokens >= 1) {
-      this.tokens--;
+    if (this.budgetMs >= this.costMs) {
+      this.budgetMs -= this.costMs;
       const fn = this.queue.shift()!;
       fn();
     }

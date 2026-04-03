@@ -20,6 +20,7 @@ export class AthemeBackend implements ProtectionBackend {
   readonly priority = 2; // ChanServ backends are priority 2 (botnet is 1)
 
   private accessLevels = new Map<string, BackendAccess>();
+  private autoDetectedChannels = new Set<string>();
   private api: PluginAPI;
   private chanservNick: string;
 
@@ -37,7 +38,18 @@ export class AthemeBackend implements ProtectionBackend {
   }
 
   setAccess(channel: string, level: BackendAccess): void {
-    this.accessLevels.set(this.api.ircLower(channel), level);
+    const key = this.api.ircLower(channel);
+    const prev = this.accessLevels.get(key);
+    this.accessLevels.set(key, level);
+    // Clear auto-detected flag only when the value actually changes (the onChange
+    // round-trip from syncAccessToSettings writes the same value back — preserve the flag)
+    if (this.autoDetectedChannels.has(key) && level !== prev) {
+      this.autoDetectedChannels.delete(key);
+    }
+  }
+
+  isAutoDetected(channel: string): boolean {
+    return this.autoDetectedChannels.has(this.api.ircLower(channel));
   }
 
   // ---------------------------------------------------------------------------
@@ -145,7 +157,18 @@ export class AthemeBackend implements ProtectionBackend {
     const actual = this.flagsToTier(flagString);
     const configured = this.getAccess(channel);
 
-    if (configured === 'none') return; // Not configured for this channel
+    if (configured === 'none') {
+      // Auto-detect: if we have real flags, set the access level automatically
+      if (actual !== 'none') {
+        const key = this.api.ircLower(channel);
+        this.accessLevels.set(key, actual);
+        this.autoDetectedChannels.add(key);
+        this.api.log(
+          `Atheme: auto-detected access for ${channel} — flags '${flagString}' (tier: '${actual}')`,
+        );
+      }
+      return;
+    }
 
     if (!accessAtLeast(actual, configured)) {
       this.api.warn(

@@ -273,34 +273,19 @@ export function setupModeEnforce(
         onThreat(channel, 'bot_deopped', 3, setter, target);
       }
 
-      // Ask ChanServ to re-op the bot — prefer ProtectionChain if available and capable
-      const chanservOp = api.channelSettings.getFlag(channel, 'chanserv_op');
-      if (chanservOp) {
+      // Ask ChanServ to re-op the bot via ProtectionChain (automatic when chanserv_access >= op)
+      if (chain && chain.canOp(channel)) {
         // Zero delay during elevated threat — speed matters during a takeover
         const botDeopThreat = getThreatLevel(api, config, state, channel);
         const csDelay = botDeopThreat >= THREAT_ALERT ? 0 : config.chanserv_op_delay_ms;
 
-        if (chain && chain.canOp(channel)) {
-          api.log(
-            `Requesting ops via ProtectionChain in ${channel}${csDelay === 0 ? ' (zero delay — elevated threat)' : ''}`,
-          );
-          const csTimer = setTimeout(() => {
-            chain.requestOp(channel);
-          }, csDelay);
-          state.cycleTimers.push(csTimer);
-        } else {
-          // Fallback: direct ChanServ message (backward compat when chanserv_access='none')
-          const ch = api.getChannel(channel);
-          const csNickLower = api.ircLower(config.chanserv_nick);
-          const present = ch?.users.has(csNickLower);
-          api.log(
-            `Requesting ops from ${config.chanserv_nick} in ${channel}${present ? '' : ` (${config.chanserv_nick} not present in channel, sending anyway)`}`,
-          );
-          const csTimer = setTimeout(() => {
-            api.say(config.chanserv_nick, `OP ${channel}`);
-          }, csDelay);
-          state.cycleTimers.push(csTimer);
-        }
+        api.log(
+          `Requesting ops via ProtectionChain in ${channel}${csDelay === 0 ? ' (zero delay — elevated threat)' : ''}`,
+        );
+        const csTimer = setTimeout(() => {
+          chain.requestOp(channel);
+        }, csDelay);
+        state.cycleTimers.push(csTimer);
       }
 
       if (config.cycle_on_deop && !state.cycleScheduled.has(api.ircLower(channel))) {

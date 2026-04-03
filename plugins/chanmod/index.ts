@@ -4,6 +4,7 @@ import { AnopeBackend } from './anope-backend';
 import { AthemeBackend } from './atheme-backend';
 import { setupAutoOp } from './auto-op';
 import { setupBans } from './bans';
+import { createProbeState, setupChanServNotice } from './chanserv-notice';
 import { setupCommands } from './commands';
 import { setupInvite } from './invite';
 import type { ThreatCallback } from './mode-enforce';
@@ -25,14 +26,24 @@ export function init(api: PluginAPI): void {
   const config = readConfig(api);
   const state = createState();
 
+  // Deprecation notice for removed chanserv_op config key
+  if (api.config.chanserv_op !== undefined) {
+    api.warn(
+      'chanserv_op config key is removed — ChanServ re-op is now automatic when chanserv_access >= op. You can delete this key from plugins.json.',
+    );
+  }
+
   // --- Protection backend setup ---
   const chain = new ProtectionChain(api);
+  const probeState = createProbeState();
 
   // Create the ChanServ backend based on services type
+  let concreteBackend: AthemeBackend | AnopeBackend;
   const servicesType = config.chanserv_services_type;
   if (servicesType === 'anope') {
     const backend = new AnopeBackend(api, config.chanserv_nick, config.anope_recover_step_delay_ms);
     chain.addBackend(backend);
+    concreteBackend = backend;
     // Teardown: clear Anope recover timers
     teardowns.push(() => backend.clearTimers());
   } else {
@@ -43,7 +54,11 @@ export function init(api: PluginAPI): void {
       state.pendingRecoverCleanup.add(api.ircLower(channel));
     };
     chain.addBackend(backend);
+    concreteBackend = backend;
   }
+
+  // Wire ChanServ notice handler — routes FLAGS/ACCESS responses to the backend
+  teardowns.push(setupChanServNotice({ api, config, backend: concreteBackend, probeState }));
 
   // Register per-channel settings (defaults come from api.config so global config still works)
   api.channelSettings.register([
@@ -103,12 +118,6 @@ export function init(api: PluginAPI): void {
       type: 'flag',
       default: config.revenge_on_kick,
       description: 'Kick/deop/kickban whoever kicks the bot (see revenge_action in config)',
-    },
-    {
-      key: 'chanserv_op',
-      type: 'flag',
-      default: config.chanserv_op,
-      description: 'Request ops from ChanServ when the bot is deopped',
     },
     {
       key: 'chanserv_access',
@@ -177,7 +186,7 @@ export function init(api: PluginAPI): void {
 
   teardowns.push(
     setupBans(api, config, state),
-    setupAutoOp(api, config, state, chain),
+    setupAutoOp(api, config, state, chain, probeState),
     setupModeEnforce(api, config, state, chain, onThreat),
     setupProtection(api, config, state, chain, onThreat),
     setupCommands(api, config, state),

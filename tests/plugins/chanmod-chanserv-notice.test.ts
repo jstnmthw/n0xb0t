@@ -1,0 +1,334 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { AnopeBackend } from '../../plugins/chanmod/anope-backend';
+import type { AthemeBackend } from '../../plugins/chanmod/atheme-backend';
+import {
+  createProbeState,
+  markProbePending,
+  setupChanServNotice,
+} from '../../plugins/chanmod/chanserv-notice';
+import type { ChanmodConfig } from '../../plugins/chanmod/state';
+
+// ---------------------------------------------------------------------------
+// Minimal stubs
+// ---------------------------------------------------------------------------
+
+function createMockApi() {
+  const binds: Array<{ type: string; handler: (ctx: unknown) => void }> = [];
+  const logs: string[] = [];
+  return {
+    api: {
+      bind: (type: string, _flags: string, _mask: string, handler: (ctx: unknown) => void) => {
+        binds.push({ type, handler });
+      },
+      ircLower: (s: string) => s.toLowerCase(),
+      debug: (...args: unknown[]) => logs.push(String(args[0])),
+      log: (...args: unknown[]) => logs.push(String(args[0])),
+      warn: (...args: unknown[]) => logs.push(String(args[0])),
+      botConfig: { irc: { nick: 'hexbot' } },
+      channelSettings: {
+        getString: () => 'none',
+        set: () => {},
+      },
+    } as never,
+    binds,
+    logs,
+    /** Dispatch a notice event to the bound handler. */
+    notice(nick: string, text: string) {
+      for (const b of binds) {
+        if (b.type === 'notice') {
+          b.handler({ nick, ident: 'services', hostname: 'services.', channel: null, text });
+        }
+      }
+    },
+  };
+}
+
+function createMockConfig(type: 'atheme' | 'anope' = 'atheme'): ChanmodConfig {
+  return {
+    chanserv_nick: 'ChanServ',
+    chanserv_services_type: type,
+  } as ChanmodConfig;
+}
+
+function createMockAthemeBackend() {
+  const calls: Array<{ channel: string; flags: string }> = [];
+  const accessLevels = new Map<string, string>();
+  const autoDetected = new Set<string>();
+  return {
+    backend: {
+      name: 'atheme',
+      handleFlagsResponse(channel: string, flagString: string) {
+        calls.push({ channel, flags: flagString });
+        // Simulate auto-detect behavior
+        if (!accessLevels.has(channel.toLowerCase()) && flagString !== '(none)') {
+          accessLevels.set(channel.toLowerCase(), 'op');
+          autoDetected.add(channel.toLowerCase());
+        }
+      },
+      getAccess(channel: string) {
+        return accessLevels.get(channel.toLowerCase()) ?? 'none';
+      },
+      isAutoDetected(channel: string) {
+        return autoDetected.has(channel.toLowerCase());
+      },
+    } as unknown as AthemeBackend,
+    calls,
+  };
+}
+
+function createMockAnopeBackend() {
+  const calls: Array<{ channel: string; level: number }> = [];
+  const accessLevels = new Map<string, string>();
+  const autoDetected = new Set<string>();
+  return {
+    backend: {
+      name: 'anope',
+      handleAccessResponse(channel: string, level: number) {
+        calls.push({ channel, level });
+        if (!accessLevels.has(channel.toLowerCase()) && level >= 5) {
+          accessLevels.set(channel.toLowerCase(), 'op');
+          autoDetected.add(channel.toLowerCase());
+        }
+      },
+      getAccess(channel: string) {
+        return accessLevels.get(channel.toLowerCase()) ?? 'none';
+      },
+      isAutoDetected(channel: string) {
+        return autoDetected.has(channel.toLowerCase());
+      },
+    } as unknown as AnopeBackend,
+    calls,
+  };
+}
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+// ---------------------------------------------------------------------------
+// Atheme FLAGS notice parsing
+// ---------------------------------------------------------------------------
+
+describe('ChanServ notice handler — Atheme FLAGS', () => {
+  it('parses "2 hexbot +AOehiortv" format and calls handleFlagsResponse', () => {
+    const { api, notice, logs } = createMockApi();
+    const { backend, calls } = createMockAthemeBackend();
+    const probeState = createProbeState();
+
+    setupChanServNotice({ api, config: createMockConfig(), backend, probeState });
+    markProbePending(api, probeState, '#test', 'atheme');
+
+    notice('ChanServ', '2 hexbot +AOehiortv');
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].channel).toBe('#test');
+    expect(calls[0].flags).toBe('+AOehiortv');
+    expect(logs.some((l) => l.includes('FLAGS response for #test'))).toBe(true);
+  });
+
+  it('parses "Flags for hexbot in #test are +o" alternate format', () => {
+    const { api, notice } = createMockApi();
+    const { backend, calls } = createMockAthemeBackend();
+    const probeState = createProbeState();
+
+    setupChanServNotice({ api, config: createMockConfig(), backend, probeState });
+    markProbePending(api, probeState, '#test', 'atheme');
+
+    notice('ChanServ', 'Flags for hexbot in #test are +oiA');
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].channel).toBe('#test');
+    expect(calls[0].flags).toBe('+oiA');
+  });
+
+  it('parses "not found on the access list" error as (none)', () => {
+    const { api, notice } = createMockApi();
+    const { backend, calls } = createMockAthemeBackend();
+    const probeState = createProbeState();
+
+    setupChanServNotice({ api, config: createMockConfig(), backend, probeState });
+    markProbePending(api, probeState, '#test', 'atheme');
+
+    notice('ChanServ', 'hexbot was not found on the access list of #test.');
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].channel).toBe('#test');
+    expect(calls[0].flags).toBe('(none)');
+  });
+
+  it('ignores notices from non-ChanServ nicks', () => {
+    const { api, notice } = createMockApi();
+    const { backend, calls } = createMockAthemeBackend();
+    const probeState = createProbeState();
+
+    setupChanServNotice({ api, config: createMockConfig(), backend, probeState });
+    markProbePending(api, probeState, '#test', 'atheme');
+
+    notice('NickServ', '2 hexbot +AOehiortv');
+
+    expect(calls).toHaveLength(0);
+  });
+
+  it('ignores notices with different bot nick', () => {
+    const { api, notice } = createMockApi();
+    const { backend, calls } = createMockAthemeBackend();
+    const probeState = createProbeState();
+
+    setupChanServNotice({ api, config: createMockConfig(), backend, probeState });
+    markProbePending(api, probeState, '#test', 'atheme');
+
+    notice('ChanServ', '2 otherbot +AOehiortv');
+
+    expect(calls).toHaveLength(0);
+  });
+
+  it('ignores malformed ChanServ notices', () => {
+    const { api, notice } = createMockApi();
+    const { backend, calls } = createMockAthemeBackend();
+    const probeState = createProbeState();
+
+    setupChanServNotice({ api, config: createMockConfig(), backend, probeState });
+    markProbePending(api, probeState, '#test', 'atheme');
+
+    notice('ChanServ', 'You are not authorized to perform this operation.');
+    notice('ChanServ', 'hexbot is now identified for account hexbot');
+
+    expect(calls).toHaveLength(0);
+  });
+
+  it('case-insensitive ChanServ nick matching', () => {
+    const { api, notice } = createMockApi();
+    const { backend, calls } = createMockAthemeBackend();
+    const probeState = createProbeState();
+
+    setupChanServNotice({ api, config: createMockConfig(), backend, probeState });
+    markProbePending(api, probeState, '#test', 'atheme');
+
+    notice('chanserv', '2 hexbot +o');
+
+    expect(calls).toHaveLength(1);
+  });
+
+  it('does not call backend when no pending probe exists', () => {
+    const { api, notice } = createMockApi();
+    const { backend, calls } = createMockAthemeBackend();
+    const probeState = createProbeState();
+
+    setupChanServNotice({ api, config: createMockConfig(), backend, probeState });
+    // No markProbePending call
+
+    notice('ChanServ', '2 hexbot +o');
+
+    expect(calls).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Anope ACCESS LIST notice parsing
+// ---------------------------------------------------------------------------
+
+describe('ChanServ notice handler — Anope ACCESS LIST', () => {
+  it('parses "  1  hexbot  5" format and calls handleAccessResponse', () => {
+    const { api, notice, logs } = createMockApi();
+    const { backend, calls } = createMockAnopeBackend();
+    const probeState = createProbeState();
+
+    setupChanServNotice({
+      api,
+      config: createMockConfig('anope'),
+      backend,
+      probeState,
+    });
+    markProbePending(api, probeState, '#test', 'anope');
+
+    notice('ChanServ', '  1  hexbot  5');
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].channel).toBe('#test');
+    expect(calls[0].level).toBe(5);
+    expect(logs.some((l) => l.includes('ACCESS response for #test'))).toBe(true);
+  });
+
+  it('parses founder-level access (10000)', () => {
+    const { api, notice } = createMockApi();
+    const { backend, calls } = createMockAnopeBackend();
+    const probeState = createProbeState();
+
+    setupChanServNotice({ api, config: createMockConfig('anope'), backend, probeState });
+    markProbePending(api, probeState, '#test', 'anope');
+
+    notice('ChanServ', '  1  hexbot  10000  [last-seen: now]');
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].level).toBe(10000);
+  });
+
+  it('handles "End of access list" when bot is not in the list', () => {
+    const { api, notice } = createMockApi();
+    const { backend, calls } = createMockAnopeBackend();
+    const probeState = createProbeState();
+
+    setupChanServNotice({ api, config: createMockConfig('anope'), backend, probeState });
+    markProbePending(api, probeState, '#test', 'anope');
+
+    notice('ChanServ', 'End of access list.');
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].channel).toBe('#test');
+    expect(calls[0].level).toBe(0);
+  });
+
+  it('ignores notices from non-ChanServ nicks', () => {
+    const { api, notice } = createMockApi();
+    const { backend, calls } = createMockAnopeBackend();
+    const probeState = createProbeState();
+
+    setupChanServNotice({ api, config: createMockConfig('anope'), backend, probeState });
+    markProbePending(api, probeState, '#test', 'anope');
+
+    notice('NickServ', '  1  hexbot  5');
+
+    expect(calls).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Probe timeout
+// ---------------------------------------------------------------------------
+
+describe('ChanServ notice handler — probe timeout', () => {
+  it('cleans up pending probe after 10s timeout', async () => {
+    const { api, logs } = createMockApi();
+    const probeState = createProbeState();
+
+    markProbePending(api, probeState, '#test', 'atheme');
+    expect(probeState.pendingAthemeProbes.size).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(probeState.pendingAthemeProbes.size).toBe(0);
+    expect(logs.some((l) => l.includes('timed out'))).toBe(true);
+  });
+
+  it('does not log timeout if probe was already consumed', async () => {
+    const { api, notice, logs } = createMockApi();
+    const { backend } = createMockAthemeBackend();
+    const probeState = createProbeState();
+
+    setupChanServNotice({ api, config: createMockConfig(), backend, probeState });
+    markProbePending(api, probeState, '#test', 'atheme');
+
+    // Response arrives before timeout
+    notice('ChanServ', '2 hexbot +o');
+    expect(probeState.pendingAthemeProbes.size).toBe(0);
+
+    // Advance past timeout — no duplicate log
+    logs.length = 0;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(logs.filter((l) => l.includes('timed out'))).toHaveLength(0);
+  });
+});

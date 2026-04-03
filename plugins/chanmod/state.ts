@@ -117,7 +117,6 @@ export interface ChanmodConfig {
   nick_recovery_password: string;
   stopnethack_mode: number;
   split_timeout_ms: number;
-  chanserv_op: boolean;
   chanserv_nick: string;
   chanserv_op_delay_ms: number;
   chanserv_services_type: 'atheme' | 'anope';
@@ -213,7 +212,6 @@ export function readConfig(api: PluginAPI): ChanmodConfig {
     nick_recovery_password: api.botConfig.chanmod?.nick_recovery_password ?? '',
     stopnethack_mode: cfgNum(c, 'stopnethack_mode', 0, log),
     split_timeout_ms: cfgNum(c, 'split_timeout_ms', 300_000, log),
-    chanserv_op: cfg(c, 'chanserv_op', false),
     chanserv_nick: cfg(c, 'chanserv_nick', 'ChanServ'),
     chanserv_op_delay_ms: cfgNum(c, 'chanserv_op_delay_ms', 1000, log),
     chanserv_services_type: cfgEnum(

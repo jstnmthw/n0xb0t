@@ -362,7 +362,24 @@ describe('AthemeBackend — handleFlagsResponse', () => {
     expect(b.getAccess('#test')).toBe('op');
   });
 
-  it('skips downgrade when access is none', () => {
+  it('auto-detects access when configured is none and flags show real access', () => {
+    const logs: string[] = [];
+    const shim = {
+      say: () => {},
+      log: (...args: unknown[]) => logs.push(String(args[0])),
+      warn: () => {},
+      ircLower: (s: string) => s.toLowerCase(),
+      botConfig: bot.botConfig,
+    };
+    const b = new AthemeBackend(shim as never, 'ChanServ');
+    // Don't set access — defaults to 'none'
+    b.handleFlagsResponse('#test', '+o');
+    expect(b.getAccess('#test')).toBe('op');
+    expect(b.isAutoDetected('#test')).toBe(true);
+    expect(logs.some((l) => l.includes('auto-detected'))).toBe(true);
+  });
+
+  it('does not auto-detect when flags show no access', () => {
     const shim = {
       say: () => {},
       log: () => {},
@@ -371,8 +388,8 @@ describe('AthemeBackend — handleFlagsResponse', () => {
       botConfig: bot.botConfig,
     };
     const b = new AthemeBackend(shim as never, 'ChanServ');
-    // Don't set access — defaults to 'none'
-    b.handleFlagsResponse('#test', '+o');
+    b.handleFlagsResponse('#test', '(none)');
     expect(b.getAccess('#test')).toBe('none');
+    expect(b.isAutoDetected('#test')).toBe(false);
   });
 });

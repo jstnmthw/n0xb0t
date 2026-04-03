@@ -23,6 +23,7 @@ export class AnopeBackend implements ProtectionBackend {
   readonly priority = 2; // ChanServ backends are priority 2 (botnet is 1)
 
   private accessLevels = new Map<string, BackendAccess>();
+  private autoDetectedChannels = new Set<string>();
   private api: PluginAPI;
   private chanservNick: string;
   private recoverStepDelayMs: number;
@@ -44,7 +45,17 @@ export class AnopeBackend implements ProtectionBackend {
   }
 
   setAccess(channel: string, level: BackendAccess): void {
-    this.accessLevels.set(this.api.ircLower(channel), level);
+    const key = this.api.ircLower(channel);
+    const prev = this.accessLevels.get(key);
+    this.accessLevels.set(key, level);
+    // Clear auto-detected flag only when the value actually changes
+    if (this.autoDetectedChannels.has(key) && level !== prev) {
+      this.autoDetectedChannels.delete(key);
+    }
+  }
+
+  isAutoDetected(channel: string): boolean {
+    return this.autoDetectedChannels.has(this.api.ircLower(channel));
   }
 
   // ---------------------------------------------------------------------------
@@ -173,7 +184,18 @@ export class AnopeBackend implements ProtectionBackend {
     const actual = this.levelToTier(level);
     const configured = this.getAccess(channel);
 
-    if (configured === 'none') return;
+    if (configured === 'none') {
+      // Auto-detect: if we have real access, set the level automatically
+      if (actual !== 'none') {
+        const key = this.api.ircLower(channel);
+        this.accessLevels.set(key, actual);
+        this.autoDetectedChannels.add(key);
+        this.api.log(
+          `Anope: auto-detected access for ${channel} — level ${level} (tier: '${actual}')`,
+        );
+      }
+      return;
+    }
 
     if (!accessAtLeast(actual, configured)) {
       this.api.warn(

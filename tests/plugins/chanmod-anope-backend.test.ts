@@ -441,7 +441,7 @@ describe('AnopeBackend — handleAccessResponse', () => {
     expect(b.getAccess('#test')).toBe('op');
   });
 
-  it('skips when configured access is none (not-downgrading path)', () => {
+  it('auto-detects access when configured is none and level shows real access', () => {
     const logs: string[] = [];
     const warnings: string[] = [];
     const shim = {
@@ -454,9 +454,24 @@ describe('AnopeBackend — handleAccessResponse', () => {
     const b = new AnopeBackend(shim as never, 'ChanServ');
     // Don't set any access — defaults to 'none'
     b.handleAccessResponse('#test', 10000);
-    // Should return early — no downgrade warning and no "verified" log
+    // Should auto-detect as founder
     expect(warnings).toHaveLength(0);
-    expect(logs.filter((l) => l.includes('verified'))).toHaveLength(0);
+    expect(b.getAccess('#test')).toBe('founder');
+    expect(b.isAutoDetected('#test')).toBe(true);
+    expect(logs.some((l) => l.includes('auto-detected'))).toBe(true);
+  });
+
+  it('does not auto-detect when level shows no access', () => {
+    const shim = {
+      say: () => {},
+      log: () => {},
+      warn: () => {},
+      ircLower: (s: string) => s.toLowerCase(),
+      botConfig: bot.botConfig,
+    };
+    const b = new AnopeBackend(shim as never, 'ChanServ');
+    b.handleAccessResponse('#test', 0);
     expect(b.getAccess('#test')).toBe('none');
+    expect(b.isAutoDetected('#test')).toBe(false);
   });
 });

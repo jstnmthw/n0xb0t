@@ -138,7 +138,6 @@ function createTestConfig(overrides?: Partial<ChanmodConfig>): ChanmodConfig {
     nick_recovery_password: '',
     stopnethack_mode: 0,
     split_timeout_ms: 300_000,
-    chanserv_op: false,
     chanserv_nick: 'ChanServ',
     chanserv_op_delay_ms: 1000,
     chanserv_services_type: 'atheme',
@@ -203,6 +202,7 @@ function createMockBackend(
     setAccess: (ch, level) => {
       accessLevels.set(ch.toLowerCase(), level);
     },
+    isAutoDetected: () => false,
   };
 }
 

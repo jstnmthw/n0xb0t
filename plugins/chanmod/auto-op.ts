@@ -1,5 +1,7 @@
 // chanmod — auto-op/halfop/voice on join, with optional NickServ verification
 import type { HandlerContext, PluginAPI } from '../../src/types';
+import type { ProbeState } from './chanserv-notice';
+import { markProbePending } from './chanserv-notice';
 import { botCanHalfop, botHasOps, hasAnyFlag, isBotNick } from './helpers';
 import type { BackendAccess } from './protection-backend';
 import type { ProtectionChain } from './protection-backend';
@@ -10,6 +12,7 @@ export function setupAutoOp(
   config: ChanmodConfig,
   _state: SharedState,
   chain?: ProtectionChain,
+  probeState?: ProbeState,
 ): () => void {
   api.bind('join', '-', '*', async (ctx: HandlerContext) => {
     const { nick } = ctx;
@@ -32,8 +35,28 @@ export function setupAutoOp(
           for (const b of chain.getBackends()) {
             b.setAccess(channel, access);
           }
-          chain.verifyAccess(channel);
         }
+        if (probeState) {
+          markProbePending(api, probeState, channel, config.chanserv_services_type);
+        }
+        chain.verifyAccess(channel);
+      }
+
+      // Warn when takeover detection is on but no ChanServ access after probe completes.
+      // Deferred: wait for the probe to finish (or timeout) before warning.
+      const takeoverOn = api.channelSettings.getFlag(channel, 'takeover_detection');
+      const accessExplicit = api.channelSettings.isSet(channel, 'chanserv_access');
+      if (takeoverOn && !accessExplicit) {
+        // Check after 5s — by then the probe should have completed or timed out
+        const warnTimer = setTimeout(() => {
+          const access = chain?.getAccess(channel) ?? 'none';
+          if (access === 'none') {
+            api.warn(
+              `Takeover detection enabled for ${channel} but chanserv_access is 'none' — bot cannot self-recover. Set via: .chanset ${channel} chanserv_access op`,
+            );
+          }
+        }, 5000);
+        if (_state.cycleTimers) _state.cycleTimers.push(warnTimer);
       }
       return;
     }

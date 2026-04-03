@@ -90,7 +90,6 @@ describe('chanmod — speed optimization: ChanServ OP request delay', () => {
   });
 
   it('ChanServ OP request uses normal delay (1000ms) at threat level 0', async () => {
-    bot.channelSettings.set('#normal', 'chanserv_op', true);
     bot.channelSettings.set('#normal', 'chanserv_access', 'op');
     bot.channelSettings.set('#normal', 'takeover_detection', true);
 
@@ -116,7 +115,6 @@ describe('chanmod — speed optimization: ChanServ OP request delay', () => {
   });
 
   it('ChanServ OP request uses zero delay during elevated threat', async () => {
-    bot.channelSettings.set('#fast', 'chanserv_op', true);
     bot.channelSettings.set('#fast', 'chanserv_access', 'op');
     bot.channelSettings.set('#fast', 'takeover_detection', true);
 

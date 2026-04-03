@@ -89,6 +89,7 @@ function createMockBackend(
     setAccess: (ch, level) => {
       accessLevels.set(ch.toLowerCase(), level);
     },
+    isAutoDetected: () => false,
   };
 }
 
@@ -198,7 +199,7 @@ describe('ProtectionChain', () => {
     expect(chanserv.getAccess('#test')).toBe('founder');
   });
 
-  it('verifyAccess calls all backends with non-none access', () => {
+  it('verifyAccess calls all backends regardless of access level', () => {
     const chain = new ProtectionChain(createChainApi());
     const botnet = createMockBackend('botnet', 1, 'none');
     const chanserv = createMockBackend('chanserv', 2, 'op');
@@ -206,7 +207,7 @@ describe('ProtectionChain', () => {
     chain.addBackend(chanserv);
 
     chain.verifyAccess('#test');
-    expect(botnet.calls).toHaveLength(0); // none — skipped
+    expect(botnet.calls).toContain('verifyAccess:#test'); // probes even when 'none' (auto-detect)
     expect(chanserv.calls).toContain('verifyAccess:#test');
   });
 

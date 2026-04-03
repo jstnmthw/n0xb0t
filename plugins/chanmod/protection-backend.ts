@@ -53,6 +53,9 @@ export interface ProtectionBackend {
   /** Persistent ban enforcement (ChanServ AKICK). Botnet returns false. */
   canAkick(channel: string): boolean;
 
+  /** True if the access level for this channel was auto-detected (not manually set). */
+  isAutoDetected(channel: string): boolean;
+
   // Action requests — fire-and-forget commands to the backend.
   requestOp(channel: string, nick?: string): void;
   requestDeop(channel: string, nick: string): void;
@@ -129,6 +132,10 @@ export class ProtectionChain {
 
   canAkick(channel: string): boolean {
     return this.backends.some((b) => b.canAkick(channel));
+  }
+
+  isAutoDetected(channel: string): boolean {
+    return this.backends.some((b) => b.isAutoDetected(channel));
   }
 
   // --- Action requests (dispatch to first capable backend) ---
@@ -234,12 +241,11 @@ export class ProtectionChain {
     if (b) b.setAccess(channel, level);
   }
 
-  /** Trigger access verification on all backends for a channel. */
+  /** Trigger access verification on all backends for a channel.
+   *  Always probes regardless of current access level — enables auto-detection. */
   verifyAccess(channel: string): void {
     for (const b of this.backends) {
-      if (b.getAccess(channel) !== 'none') {
-        b.verifyAccess(channel);
-      }
+      b.verifyAccess(channel);
     }
   }
 }

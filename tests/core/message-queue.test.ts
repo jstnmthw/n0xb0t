@@ -217,20 +217,21 @@ describe('MessageQueue', () => {
     q.stop();
   });
 
-  it('drain does not send when tokens are insufficient (covers if(tokens>=1) false branch)', () => {
-    // rate=3 → intervalMs=floor(1000/3)=333ms; refill per drain = (333/1000)*3 = 0.999 < 1
+  it('rate=3 drains correctly with integer budget (no float drift)', () => {
+    // rate=3 → costMs=floor(1000/3)=333ms; one drain interval refills exactly 333ms = 1 message
+    // Old float math: (333/1000)*3 = 0.999 < 1 — message stuck. Integer math: 333ms >= 333ms — sends.
     const q = new MessageQueue({ rate: 3, burst: 0 });
     const sent: number[] = [];
 
     q.enqueue(() => sent.push(1));
     q.enqueue(() => sent.push(2));
-    expect(sent).toEqual([]); // no tokens, nothing sent yet
+    expect(sent).toEqual([]); // no budget, nothing sent yet
     expect(q.pending).toBe(2);
 
-    // Advance exactly one drain interval — drain fires but tokens (0.999) < 1, nothing sends
+    // Advance one drain interval — budget refills 333ms, costMs is 333ms, message sends
     vi.advanceTimersByTime(333);
-    expect(sent).toEqual([]);
-    expect(q.pending).toBe(2);
+    expect(sent).toEqual([1]);
+    expect(q.pending).toBe(1);
 
     q.stop();
   });

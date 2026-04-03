@@ -3229,19 +3229,21 @@ describe('chanmod plugin — stopnethack ignores non-split quits', () => {
 });
 
 // ---------------------------------------------------------------------------
-// chanserv_op: request ops from ChanServ when bot is deopped
+// ChanServ re-op: automatic when chanserv_access >= op (chanserv_op removed)
 // ---------------------------------------------------------------------------
-describe('chanmod plugin — chanserv_op recovery', () => {
-  it('messages ChanServ OP <channel> when bot is deopped and ChanServ is present', async () => {
+describe('chanmod plugin — ChanServ re-op on deop', () => {
+  it('requests OP via ProtectionChain when chanserv_access >= op and bot is deopped', async () => {
     const freshBot = createMockBot({ botNick: 'hexbot' });
     try {
       giveBotOps(freshBot, '#test');
       await freshBot.pluginLoader.load(PLUGIN_PATH, {
         chanmod: {
           enabled: true,
-          config: { chanserv_op: true, chanserv_nick: 'ChanServ', chanserv_op_delay_ms: 10 },
+          config: { chanserv_nick: 'ChanServ', chanserv_op_delay_ms: 10 },
         },
       });
+      freshBot.channelSettings.set('#test', 'chanserv_access', 'op');
+      await tick(10);
       addToChannel(freshBot, 'ChanServ', 'ChanServ', 'services.', '#test');
       giveBotOps(freshBot, '#test');
       freshBot.client.clearMessages();
@@ -3249,7 +3251,7 @@ describe('chanmod plugin — chanserv_op recovery', () => {
       await tick(50);
       expect(
         freshBot.client.messages.find(
-          (m) => m.type === 'say' && m.target === 'ChanServ' && m.message === 'OP #test',
+          (m) => m.type === 'say' && m.target === 'ChanServ' && m.message?.startsWith('OP #test'),
         ),
       ).toBeDefined();
     } finally {
@@ -3257,48 +3259,27 @@ describe('chanmod plugin — chanserv_op recovery', () => {
     }
   });
 
-  it('still messages ChanServ when it is not present in the channel', async () => {
+  it('does NOT request OP when chanserv_access is none', async () => {
     const freshBot = createMockBot({ botNick: 'hexbot' });
     try {
       giveBotOps(freshBot, '#test');
       await freshBot.pluginLoader.load(PLUGIN_PATH, {
         chanmod: {
           enabled: true,
-          config: { chanserv_op: true, chanserv_nick: 'ChanServ', chanserv_op_delay_ms: 10 },
+          config: { chanserv_nick: 'ChanServ', chanserv_op_delay_ms: 10 },
         },
       });
-      giveBotOps(freshBot, '#test');
-      freshBot.client.clearMessages();
-      simulateMode(freshBot, 'SomeOp', '#test', '-o', 'hexbot');
-      await tick(50);
-      expect(
-        freshBot.client.messages.find(
-          (m) => m.type === 'say' && m.target === 'ChanServ' && m.message === 'OP #test',
-        ),
-      ).toBeDefined();
-    } finally {
-      freshBot.cleanup();
-    }
-  });
-
-  it('does NOT message ChanServ when chanserv_op is disabled', async () => {
-    const freshBot = createMockBot({ botNick: 'hexbot' });
-    try {
-      giveBotOps(freshBot, '#test');
-      await freshBot.pluginLoader.load(PLUGIN_PATH, {
-        chanmod: {
-          enabled: true,
-          config: { chanserv_op: false, chanserv_nick: 'ChanServ', chanserv_op_delay_ms: 10 },
-        },
-      });
+      // chanserv_access defaults to 'none' — no re-op
       addToChannel(freshBot, 'ChanServ', 'ChanServ', 'services.', '#test');
       giveBotOps(freshBot, '#test');
       freshBot.client.clearMessages();
       simulateMode(freshBot, 'SomeOp', '#test', '-o', 'hexbot');
       await tick(50);
-      expect(
-        freshBot.client.messages.find((m) => m.type === 'say' && m.target === 'ChanServ'),
-      ).toBeUndefined();
+      // Filter out FLAGS probes — only look for OP commands
+      const opMsg = freshBot.client.messages.find(
+        (m) => m.type === 'say' && m.target === 'ChanServ' && m.message?.startsWith('OP '),
+      );
+      expect(opMsg).toBeUndefined();
     } finally {
       freshBot.cleanup();
     }
@@ -5145,7 +5126,7 @@ describe('chanmod plugin — bot join chanserv_access sync', () => {
     }
   });
 
-  it('does NOT verify access when chanserv_access is none', async () => {
+  it('always sends FLAGS probe on join even when chanserv_access is none (auto-detect)', async () => {
     const freshBot = createMockBot({ botNick: 'hexbot' });
     try {
       await freshBot.pluginLoader.load(PLUGIN_PATH, {
@@ -5169,11 +5150,11 @@ describe('chanmod plugin — bot join chanserv_access sync', () => {
       });
       await tick(10);
 
-      // No FLAGS probe — access is 'none'
+      // FLAGS probe is sent even when access is 'none' — auto-detect needs it
       const flagsMsg = freshBot.client.messages.find(
         (m) => m.type === 'say' && m.target === 'ChanServ' && m.message?.includes('FLAGS'),
       );
-      expect(flagsMsg).toBeUndefined();
+      expect(flagsMsg).toBeDefined();
     } finally {
       freshBot.cleanup();
     }
