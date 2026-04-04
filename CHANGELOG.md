@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.3] - 2026-04-04
+
+### Added
+
+- Startup retry with exponential backoff for initial connection failure
+- ChanServ auto-detect and merged chanserv_op into chanserv_access
+
+### Changed
+
+- Refactored botlink, mode-enforce, and bot.ts for readability
+- Enhanced connection error handling to log detailed disconnect reasons
+
+### Fixed
+
+- IRC connection failure in Docker over WireGuard by disabling Node's Happy Eyeballs algorithm
+
 ## [0.2.2] - 2026-04-03
 
 ### Changed
