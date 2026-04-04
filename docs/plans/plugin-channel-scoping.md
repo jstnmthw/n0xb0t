@@ -27,11 +27,11 @@ Implement the `channels` field in `plugins.json` so plugins can be restricted to
 
 **Goal:** Wire up channel filtering in the plugin loader's bind wrapper.
 
-- [ ] In `src/plugin-loader.ts` `load()`: extract `channels` from `pluginsConfig?.[pluginName]?.channels` and pass it to `createPluginApi()`
-- [ ] In `src/plugin-loader.ts` `createPluginApi()`: accept an optional `channelScope: string[] | undefined` parameter
-- [ ] When `channelScope` is defined and non-empty, build a `Set<string>` of lowercased channel names (using `ircLower` with the current casemapping)
-- [ ] Wrap the `bind()` method: if a channel scope exists, wrap the handler so it checks `ctx.channel` — if `ctx.channel` is `null`, pass through; if `ctx.channel` is set, only call the original handler when the channel is in the scope set
-- [ ] Log at plugin load time when a channel scope is active: `[plugin-loader] Plugin "greeter" scoped to channels: #lobby, #games`
+- [x] In `src/plugin-loader.ts` `load()`: extract `channels` from `pluginsConfig?.[pluginName]?.channels` and pass it to `createPluginApi()`
+- [x] In `src/plugin-loader.ts` `createPluginApi()`: accept an optional `channelScope: string[] | undefined` parameter
+- [x] When `channelScope` is defined and non-empty, build a `Set<string>` of lowercased channel names (using `ircLower` with the current casemapping)
+- [x] Wrap the `bind()` method: if a channel scope exists, wrap the handler so it checks `ctx.channel` — if `ctx.channel` is `null`, pass through; if `ctx.channel` is set, only call the original handler when the channel is in the scope set
+- [x] Log at plugin load time when a channel scope is active: `[plugin-loader] Plugin "greeter" scoped to channels: #lobby, #games`
 
 **Verification:** Load a plugin with `"channels": ["#test"]` in plugins.json. Trigger a command in `#test` (should fire) and `#other` (should not fire). Trigger a PM command (should fire).
 
@@ -39,14 +39,14 @@ Implement the `channels` field in `plugins.json` so plugins can be restricted to
 
 **Goal:** Full test coverage for channel scoping behavior.
 
-- [ ] `tests/plugin-loader-channel-scope.test.ts` (or add to existing plugin-loader tests):
-  - Plugin with no `channels` field → handlers fire in all channels
-  - Plugin with `channels: ["#test"]` → handler fires in `#test`, skipped in `#other`
-  - Plugin with `channels: ["#test"]` → handler fires for PM (`ctx.channel = null`)
-  - Plugin with `channels: ["#test"]` → timer bind fires (`ctx.channel = null`)
-  - Plugin with `channels: []` → handler never fires for channel events
-  - Channel name comparison is case-insensitive (`#Test` matches `#test`)
-  - Multiple channels work (`channels: ["#a", "#b"]` → fires in both)
+- [x] `tests/plugin-loader-channel-scope.test.ts` (or add to existing plugin-loader tests):
+  - [x] Plugin with no `channels` field → handlers fire in all channels
+  - [x] Plugin with `channels: ["#test"]` → handler fires in `#test`, skipped in `#other`
+  - [x] Plugin with `channels: ["#test"]` → handler fires for PM (`ctx.channel = null`)
+  - [x] Plugin with `channels: ["#test"]` → timer bind fires (`ctx.channel = null`)
+  - [x] Plugin with `channels: []` → handler never fires for channel events
+  - [x] Channel name comparison is case-insensitive (`#Test` matches `#test`)
+  - [x] Multiple channels work (`channels: ["#a", "#b"]` → fires in both)
 
 **Verification:** `pnpm test` passes, all new tests green.
 
@@ -54,10 +54,10 @@ Implement the `channels` field in `plugins.json` so plugins can be restricted to
 
 **Goal:** Document the feature in all relevant places.
 
-- [ ] Update `docs/PLUGIN_API.md` — add a "Channel scoping" section explaining the `channels` field
-- [ ] Update `plugins/README.md` — mention channel scoping in the configuration section
-- [ ] Verify `DESIGN.md` section 2.11 still accurately describes the behavior (it already mentions channel restriction)
-- [ ] Add a commented example to `config/plugins.example.json` or mention in a doc that `channels` can be added to any plugin entry
+- [x] Update `docs/PLUGIN_API.md` — add a "Channel scoping" section explaining the `channels` field
+- [x] Update `plugins/README.md` — mention channel scoping in the configuration section
+- [x] Verify `DESIGN.md` section 2.11 still accurately describes the behavior (it already mentions channel restriction)
+- [x] Add a commented example to `config/plugins.example.json` or mention in a doc that `channels` can be added to any plugin entry
 
 **Verification:** Read the docs and confirm they match the implemented behavior.
 

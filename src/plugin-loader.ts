@@ -399,14 +399,23 @@ export class PluginLoader {
     // Build channel scope set for filtering bind handlers.
     // When defined (even if empty), only channel events matching the set fire.
     // Non-channel events (ctx.channel === null) always pass through.
+    // Note: scopeSet is built with the load-time casemapping; dispatch-time folds
+    // call getCasemapping() fresh. Assumes CASEMAPPING doesn't change mid-session.
     const getCasemapping = this.getCasemapping;
     let scopeSet: Set<string> | undefined;
     if (channelScope !== undefined) {
       scopeSet = new Set(channelScope.map((ch) => ircLower(ch, getCasemapping())));
       if (scopeSet.size > 0) {
         pluginLogger?.info(`Channel scope: ${channelScope.join(', ')}`);
+      } else {
+        pluginLogger?.info('Channel scope: (empty — all channel events blocked)');
       }
     }
+
+    // Track the wrapped handler for each original handler so api.unbind() can
+    // find the real bound handler in the dispatcher (dispatcher matches by
+    // reference identity). Only populated when a channel scope is active.
+    const wrappedHandlers = new WeakMap<BindHandler, BindHandler>();
 
     // Build plugin-facing bot config (password omitted; filesystem paths omitted).
     const pluginBotConfig: PluginBotConfig = {
@@ -441,13 +450,15 @@ export class PluginLoader {
             }
             return handler(ctx);
           };
+          wrappedHandlers.set(handler, wrapped);
           dispatcher.bind(type, flags, mask, wrapped, pluginId);
         } else {
           dispatcher.bind(type, flags, mask, handler, pluginId);
         }
       },
       unbind(type: BindType, mask: string, handler: BindHandler): void {
-        dispatcher.unbind(type, mask, handler);
+        const actual = wrappedHandlers.get(handler) ?? handler;
+        dispatcher.unbind(type, mask, actual);
       },
       ...createPluginIrcActionsApi(this.ircClient, this.messageQueue, this.ircCommands),
       ...createPluginChannelStateApi(

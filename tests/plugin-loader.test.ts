@@ -1848,5 +1848,42 @@ describe('PluginLoader', () => {
       await dispatcher.dispatch('join', ctxOut);
       expect(ctxOut.reply).not.toHaveBeenCalled();
     });
+
+    it('should allow api.unbind() to remove scoped handlers', async () => {
+      const UNBIND_PLUGIN = `
+        let handler;
+        export const name = 'unbindable';
+        export const version = '1.0.0';
+        export const description = 'test';
+        export function init(api) {
+          handler = (ctx) => { ctx.reply('fired'); };
+          api.bind('pub', '-', '!cmd', handler);
+          // Expose an unbind trigger via a second bind
+          api.bind('pub', '-', '!stop', () => {
+            api.unbind('pub', '!cmd', handler);
+          });
+        }
+      `;
+      writePlugin(tempDir, 'unbindable', UNBIND_PLUGIN);
+      const cfgPath = writePluginsJson(tempDir, {
+        unbindable: { channels: ['#test'] },
+      });
+      const { loader, dispatcher } = createLoader(tempDir);
+      await loader.loadAll(cfgPath);
+
+      // First fire: handler is bound
+      const ctx1 = makeCtx({ channel: '#test', command: '!cmd' });
+      await dispatcher.dispatch('pub', ctx1);
+      expect(ctx1.reply).toHaveBeenCalledWith('fired');
+
+      // Trigger unbind
+      const ctxStop = makeCtx({ channel: '#test', command: '!stop' });
+      await dispatcher.dispatch('pub', ctxStop);
+
+      // Second fire: handler should be gone
+      const ctx2 = makeCtx({ channel: '#test', command: '!cmd' });
+      await dispatcher.dispatch('pub', ctx2);
+      expect(ctx2.reply).not.toHaveBeenCalled();
+    });
   });
 });
