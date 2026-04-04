@@ -1671,4 +1671,182 @@ describe('PluginLoader', () => {
       mq.stop();
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Channel scoping
+  // -------------------------------------------------------------------------
+
+  describe('channel scoping', () => {
+    const SCOPED_PLUGIN = `
+      export const name = 'scoped';
+      export const version = '1.0.0';
+      export const description = 'test';
+      export function init(api) {
+        api.bind('pub', '-', '!cmd', (ctx) => { ctx.reply('fired'); });
+        api.bind('msg', '-', '!pm', (ctx) => { ctx.reply('pm-fired'); });
+        api.bind('join', '-', '*', (ctx) => { ctx.reply('join-fired'); });
+        api.bind('time', '-', '*', (ctx) => { /* timer */ });
+      }
+    `;
+
+    function makeCtx(
+      overrides: Partial<import('../src/types').HandlerContext> = {},
+    ): import('../src/types').HandlerContext {
+      return {
+        nick: 'testuser',
+        ident: 'user',
+        hostname: 'test.host',
+        channel: '#test',
+        text: '',
+        command: '',
+        args: '',
+        reply: vi.fn(),
+        replyPrivate: vi.fn(),
+        ...overrides,
+      };
+    }
+
+    it('should fire handler in scoped channel', async () => {
+      writePlugin(tempDir, 'scoped', SCOPED_PLUGIN);
+      const cfgPath = writePluginsJson(tempDir, {
+        scoped: { channels: ['#test'] },
+      });
+      const { loader, dispatcher } = createLoader(tempDir);
+      await loader.loadAll(cfgPath);
+
+      const ctx = makeCtx({ channel: '#test', command: '!cmd' });
+      await dispatcher.dispatch('pub', ctx);
+      expect(ctx.reply).toHaveBeenCalledWith('fired');
+    });
+
+    it('should skip handler in non-scoped channel', async () => {
+      writePlugin(tempDir, 'scoped', SCOPED_PLUGIN);
+      const cfgPath = writePluginsJson(tempDir, {
+        scoped: { channels: ['#test'] },
+      });
+      const { loader, dispatcher } = createLoader(tempDir);
+      await loader.loadAll(cfgPath);
+
+      const ctx = makeCtx({ channel: '#other', command: '!cmd' });
+      await dispatcher.dispatch('pub', ctx);
+      expect(ctx.reply).not.toHaveBeenCalled();
+    });
+
+    it('should always fire for non-channel events (msg)', async () => {
+      writePlugin(tempDir, 'scoped', SCOPED_PLUGIN);
+      const cfgPath = writePluginsJson(tempDir, {
+        scoped: { channels: ['#test'] },
+      });
+      const { loader, dispatcher } = createLoader(tempDir);
+      await loader.loadAll(cfgPath);
+
+      const ctx = makeCtx({ channel: null, command: '!pm' });
+      await dispatcher.dispatch('msg', ctx);
+      expect(ctx.reply).toHaveBeenCalledWith('pm-fired');
+    });
+
+    it('should always fire for timer events (ctx.channel = null)', async () => {
+      writePlugin(tempDir, 'scoped', SCOPED_PLUGIN);
+      const cfgPath = writePluginsJson(tempDir, {
+        scoped: { channels: ['#test'] },
+      });
+      const { loader, dispatcher } = createLoader(tempDir);
+      await loader.loadAll(cfgPath);
+
+      const ctx = makeCtx({ channel: null, command: '', text: '' });
+      await dispatcher.dispatch('time', ctx);
+      // No assertion on reply (timer handler doesn't call it) — just confirm no error
+    });
+
+    it('should block all channel events with empty channels array', async () => {
+      writePlugin(tempDir, 'scoped', SCOPED_PLUGIN);
+      const cfgPath = writePluginsJson(tempDir, {
+        scoped: { channels: [] },
+      });
+      const { loader, dispatcher } = createLoader(tempDir);
+      await loader.loadAll(cfgPath);
+
+      const ctx = makeCtx({ channel: '#test', command: '!cmd' });
+      await dispatcher.dispatch('pub', ctx);
+      expect(ctx.reply).not.toHaveBeenCalled();
+    });
+
+    it('should fire in all channels when channels field is omitted', async () => {
+      writePlugin(tempDir, 'scoped', SCOPED_PLUGIN);
+      const cfgPath = writePluginsJson(tempDir, {
+        scoped: {},
+      });
+      const { loader, dispatcher } = createLoader(tempDir);
+      await loader.loadAll(cfgPath);
+
+      const ctx1 = makeCtx({ channel: '#test', command: '!cmd' });
+      await dispatcher.dispatch('pub', ctx1);
+      expect(ctx1.reply).toHaveBeenCalledWith('fired');
+
+      const ctx2 = makeCtx({ channel: '#anywhere', command: '!cmd' });
+      await dispatcher.dispatch('pub', ctx2);
+      expect(ctx2.reply).toHaveBeenCalledWith('fired');
+    });
+
+    it('should match channel names case-insensitively', async () => {
+      writePlugin(tempDir, 'scoped', SCOPED_PLUGIN);
+      const cfgPath = writePluginsJson(tempDir, {
+        scoped: { channels: ['#Test'] },
+      });
+      const { loader, dispatcher } = createLoader(tempDir);
+      await loader.loadAll(cfgPath);
+
+      const ctx = makeCtx({ channel: '#test', command: '!cmd' });
+      await dispatcher.dispatch('pub', ctx);
+      expect(ctx.reply).toHaveBeenCalledWith('fired');
+    });
+
+    it('should support multiple channels in scope', async () => {
+      writePlugin(tempDir, 'scoped', SCOPED_PLUGIN);
+      const cfgPath = writePluginsJson(tempDir, {
+        scoped: { channels: ['#a', '#b'] },
+      });
+      const { loader, dispatcher } = createLoader(tempDir);
+      await loader.loadAll(cfgPath);
+
+      const ctxA = makeCtx({ channel: '#a', command: '!cmd' });
+      await dispatcher.dispatch('pub', ctxA);
+      expect(ctxA.reply).toHaveBeenCalledWith('fired');
+
+      const ctxB = makeCtx({ channel: '#b', command: '!cmd' });
+      await dispatcher.dispatch('pub', ctxB);
+      expect(ctxB.reply).toHaveBeenCalledWith('fired');
+
+      const ctxC = makeCtx({ channel: '#c', command: '!cmd' });
+      await dispatcher.dispatch('pub', ctxC);
+      expect(ctxC.reply).not.toHaveBeenCalled();
+    });
+
+    it('should scope join events to allowed channels', async () => {
+      writePlugin(tempDir, 'scoped', SCOPED_PLUGIN);
+      const cfgPath = writePluginsJson(tempDir, {
+        scoped: { channels: ['#lobby'] },
+      });
+      const { loader, dispatcher } = createLoader(tempDir);
+      await loader.loadAll(cfgPath);
+
+      const ctxIn = makeCtx({
+        channel: '#lobby',
+        nick: 'alice',
+        text: '#lobby alice!user@host',
+        command: 'JOIN',
+      });
+      await dispatcher.dispatch('join', ctxIn);
+      expect(ctxIn.reply).toHaveBeenCalledWith('join-fired');
+
+      const ctxOut = makeCtx({
+        channel: '#other',
+        nick: 'alice',
+        text: '#other alice!user@host',
+        command: 'JOIN',
+      });
+      await dispatcher.dispatch('join', ctxOut);
+      expect(ctxOut.reply).not.toHaveBeenCalled();
+    });
+  });
 });

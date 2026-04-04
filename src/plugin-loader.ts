@@ -199,7 +199,7 @@ export class PluginLoader {
 
     for (const name of pluginNames) {
       const config = pluginsConfig[name];
-      if (config && !config.enabled) {
+      if (config && config.enabled === false) {
         this.logger?.debug(`Skipping disabled plugin: ${name}`);
         continue;
       }
@@ -269,7 +269,8 @@ export class PluginLoader {
 
     // Create scoped API
     const config = this.mergeConfig(pluginName, absPath, pluginsConfig);
-    const api = this.createPluginApi(pluginName, config);
+    const channelScope = pluginsConfig?.[pluginName]?.channels;
+    const api = this.createPluginApi(pluginName, config, channelScope);
 
     // Call init()
     try {
@@ -388,8 +389,24 @@ export class PluginLoader {
   // Scoped plugin API
   // -------------------------------------------------------------------------
 
-  private createPluginApi(pluginId: string, config: Record<string, unknown>): PluginAPI {
+  private createPluginApi(
+    pluginId: string,
+    config: Record<string, unknown>,
+    channelScope?: string[],
+  ): PluginAPI {
     const pluginLogger = this.rootLogger?.child(`plugin:${pluginId}`) ?? null;
+
+    // Build channel scope set for filtering bind handlers.
+    // When defined (even if empty), only channel events matching the set fire.
+    // Non-channel events (ctx.channel === null) always pass through.
+    const getCasemapping = this.getCasemapping;
+    let scopeSet: Set<string> | undefined;
+    if (channelScope !== undefined) {
+      scopeSet = new Set(channelScope.map((ch) => ircLower(ch, getCasemapping())));
+      if (scopeSet.size > 0) {
+        pluginLogger?.info(`Channel scope: ${channelScope.join(', ')}`);
+      }
+    }
 
     // Build plugin-facing bot config (password omitted; filesystem paths omitted).
     const pluginBotConfig: PluginBotConfig = {
@@ -412,13 +429,22 @@ export class PluginLoader {
     };
 
     const dispatcher = this.dispatcher;
-    const getCasemapping = this.getCasemapping;
     const getServerSupports = this.getServerSupports;
 
     const api: PluginAPI = {
       pluginId,
       bind(type: BindType, flags: string, mask: string, handler: BindHandler): void {
-        dispatcher.bind(type, flags, mask, handler, pluginId);
+        if (scopeSet) {
+          const wrapped: BindHandler = (ctx: HandlerContext) => {
+            if (ctx.channel !== null && !scopeSet!.has(ircLower(ctx.channel, getCasemapping()))) {
+              return;
+            }
+            return handler(ctx);
+          };
+          dispatcher.bind(type, flags, mask, wrapped, pluginId);
+        } else {
+          dispatcher.bind(type, flags, mask, handler, pluginId);
+        }
       },
       unbind(type: BindType, mask: string, handler: BindHandler): void {
         dispatcher.unbind(type, mask, handler);

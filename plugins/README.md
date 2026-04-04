@@ -139,13 +139,24 @@ Users override in `config/plugins.json`:
 ```json
 {
   "my-plugin": {
-    "enabled": true,
     "config": {
       "cooldown_seconds": 10
     }
   }
 }
 ```
+
+To restrict a plugin to specific channels, add a `channels` array:
+
+```json
+{
+  "my-plugin": {
+    "channels": ["#lobby", "#games"]
+  }
+}
+```
+
+When `channels` is omitted, the plugin operates in all channels. Non-channel events (PMs, timers) always fire regardless of scope.
 
 Access merged config in `init()`:
 

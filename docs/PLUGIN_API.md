@@ -27,6 +27,21 @@ export function teardown(): void | Promise<void> {
 
 A plugin may also include a `config.json` with default config values. These are merged with (and overridden by) the plugin's entry in `config/plugins.json`. Plugins are auto-discovered from the `plugins/` directory — they do not need an entry in `plugins.json` to be loaded. To disable a plugin, set `"enabled": false` in `plugins.json`.
 
+### Channel scoping
+
+By default, plugins operate in all channels. To restrict a plugin to specific channels, add a `channels` array to its `plugins.json` entry:
+
+```json
+{
+  "greeter": {
+    "channels": ["#lobby", "#welcome"],
+    "config": { "message": "Welcome to {channel}, {nick}!" }
+  }
+}
+```
+
+When `channels` is set, the plugin's bind handlers only fire for events in those channels. Non-channel events (private messages, timers, nick changes, quits) always fire regardless of scope. Channel names are compared case-insensitively using the network's CASEMAPPING. An empty array (`"channels": []`) effectively disables the plugin for all channel events.
+
 ---
 
 ## PluginAPI

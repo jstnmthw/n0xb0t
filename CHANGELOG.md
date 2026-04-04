@@ -9,7 +9,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - `d` (deop) permission flag — suppresses auto-op/halfop on join; auto-voice still works with explicit `+v`
+- Per-plugin channel scoping via `channels` array in `plugins.json` — restricts a plugin to specific channels
 - Greeter help now documents `{nick}` and `{channel}` substitution variables and sub-command help for `!greet set` and `!greet del`
+
+### Fixed
+
+- Plugins listed in `plugins.json` without `"enabled": true` were incorrectly skipped; now only `"enabled": false` disables a plugin
 
 ## [0.2.3] - 2026-04-04
 

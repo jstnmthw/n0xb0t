@@ -541,7 +541,7 @@ export interface PluginBotConfig {
 
 /** Shape for a single plugin entry in config/plugins.json. */
 export interface PluginConfig {
-  enabled: boolean;
+  enabled?: boolean;
   channels?: string[];
   config?: Record<string, unknown>;
 }
