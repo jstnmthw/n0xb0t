@@ -1885,5 +1885,59 @@ describe('PluginLoader', () => {
       await dispatcher.dispatch('pub', ctx2);
       expect(ctx2.reply).not.toHaveBeenCalled();
     });
+
+    it('should unbind correctly when the same handler is bound to multiple type/mask pairs', async () => {
+      const REUSE_PLUGIN = `
+        let handler;
+        export const name = 'reuse';
+        export const version = '1.0.0';
+        export const description = 'test';
+        export function init(api) {
+          handler = (ctx) => { ctx.reply('fired-' + ctx.command); };
+          api.bind('pub', '-', '!one', handler);
+          api.bind('pub', '-', '!two', handler);
+          api.bind('msg', '-', '!one', handler);
+          api.bind('pub', '-', '!drop-two', () => {
+            api.unbind('pub', '!two', handler);
+          });
+        }
+      `;
+      writePlugin(tempDir, 'reuse', REUSE_PLUGIN);
+      const cfgPath = writePluginsJson(tempDir, {
+        reuse: { channels: ['#test'] },
+      });
+      const { loader, dispatcher } = createLoader(tempDir);
+      await loader.loadAll(cfgPath);
+
+      // All three binds fire initially
+      const ctxOne = makeCtx({ channel: '#test', command: '!one' });
+      await dispatcher.dispatch('pub', ctxOne);
+      expect(ctxOne.reply).toHaveBeenCalledWith('fired-!one');
+
+      const ctxTwo = makeCtx({ channel: '#test', command: '!two' });
+      await dispatcher.dispatch('pub', ctxTwo);
+      expect(ctxTwo.reply).toHaveBeenCalledWith('fired-!two');
+
+      const ctxMsg = makeCtx({ channel: null, command: '!one' });
+      await dispatcher.dispatch('msg', ctxMsg);
+      expect(ctxMsg.reply).toHaveBeenCalledWith('fired-!one');
+
+      // Drop only pub|!two
+      const ctxDrop = makeCtx({ channel: '#test', command: '!drop-two' });
+      await dispatcher.dispatch('pub', ctxDrop);
+
+      // pub|!two is gone, but pub|!one and msg|!one remain
+      const ctxOne2 = makeCtx({ channel: '#test', command: '!one' });
+      await dispatcher.dispatch('pub', ctxOne2);
+      expect(ctxOne2.reply).toHaveBeenCalledWith('fired-!one');
+
+      const ctxTwo2 = makeCtx({ channel: '#test', command: '!two' });
+      await dispatcher.dispatch('pub', ctxTwo2);
+      expect(ctxTwo2.reply).not.toHaveBeenCalled();
+
+      const ctxMsg2 = makeCtx({ channel: null, command: '!one' });
+      await dispatcher.dispatch('msg', ctxMsg2);
+      expect(ctxMsg2.reply).toHaveBeenCalledWith('fired-!one');
+    });
   });
 });

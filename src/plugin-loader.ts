@@ -412,10 +412,12 @@ export class PluginLoader {
       }
     }
 
-    // Track the wrapped handler for each original handler so api.unbind() can
-    // find the real bound handler in the dispatcher (dispatcher matches by
-    // reference identity). Only populated when a channel scope is active.
-    const wrappedHandlers = new WeakMap<BindHandler, BindHandler>();
+    // Track the wrapped handler for each (handler, type, mask) triple so
+    // api.unbind() can find the real bound handler in the dispatcher
+    // (dispatcher matches by reference identity). Keyed on handler for GC,
+    // then on "type|mask" so the same handler can be reused across binds.
+    // Only populated when a channel scope is active.
+    const wrappedHandlers = new WeakMap<BindHandler, Map<string, BindHandler>>();
 
     // Build plugin-facing bot config (password omitted; filesystem paths omitted).
     const pluginBotConfig: PluginBotConfig = {
@@ -450,15 +452,23 @@ export class PluginLoader {
             }
             return handler(ctx);
           };
-          wrappedHandlers.set(handler, wrapped);
+          let perHandler = wrappedHandlers.get(handler);
+          if (!perHandler) {
+            perHandler = new Map();
+            wrappedHandlers.set(handler, perHandler);
+          }
+          perHandler.set(`${type}|${mask}`, wrapped);
           dispatcher.bind(type, flags, mask, wrapped, pluginId);
         } else {
           dispatcher.bind(type, flags, mask, handler, pluginId);
         }
       },
       unbind(type: BindType, mask: string, handler: BindHandler): void {
-        const actual = wrappedHandlers.get(handler) ?? handler;
+        const key = `${type}|${mask}`;
+        const perHandler = wrappedHandlers.get(handler);
+        const actual = perHandler?.get(key) ?? handler;
         dispatcher.unbind(type, mask, actual);
+        perHandler?.delete(key);
       },
       ...createPluginIrcActionsApi(this.ircClient, this.messageQueue, this.ircCommands),
       ...createPluginChannelStateApi(
