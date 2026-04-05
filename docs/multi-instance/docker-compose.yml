@@ -1,4 +1,4 @@
-# HexBot docker-compose snippet for multi-instance deployments.
+# HexBot docker-compose for multi-instance deployments.
 #
 # Layout on the host — everything for one bot lives in its own directory:
 #   config/libera/chanbot.json          — per-bot config (nested by network)
@@ -8,24 +8,58 @@
 #   config/rizon/enforcer.env
 #   data/libera-chanbot.db              — per-bot database (created on first run)
 #   data/rizon-enforcer.db
+#
+# DCC port ranges must be unique per bot — both on the host (ports: mapping)
+# and in each bot's dcc.port_range config. If a bot doesn't need DCC, drop its
+# ports: block and set dcc.enabled=false in its config.
 
 services:
   hexbot-libera-chanbot:
     build: .
+    container_name: hexbot-libera-chanbot
     env_file: config/libera/chanbot.env
     command: ['tsx', 'src/index.ts', '--config=config/libera/chanbot.json']
+    ports:
+      - '49152-49171:49152-49171'
     volumes:
       - ./config:/app/config:ro
       - ./plugins:/app/plugins:ro
       - ./data:/app/data
     restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'sh',
+          '-c',
+          '[ -f /tmp/.hexbot-healthy ] && [ $$(( $$(date +%s) - $$(stat -c %Y /tmp/.hexbot-healthy) )) -lt 120 ]',
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   hexbot-rizon-enforcer:
     build: .
+    container_name: hexbot-rizon-enforcer
     env_file: config/rizon/enforcer.env
     command: ['tsx', 'src/index.ts', '--config=config/rizon/enforcer.json']
+    ports:
+      - '49172-49191:49172-49191'
     volumes:
       - ./config:/app/config:ro
       - ./plugins:/app/plugins:ro
       - ./data:/app/data
     restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'sh',
+          '-c',
+          '[ -f /tmp/.hexbot-healthy ] && [ $$(( $$(date +%s) - $$(stat -c %Y /tmp/.hexbot-healthy) )) -lt 120 ]',
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

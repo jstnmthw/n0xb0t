@@ -5,8 +5,8 @@ services:
     ports:
       - '49152-49171:49152-49171'
     volumes:
-      - ./config:/app/config
-      - ./plugins:/app/plugins
+      - ./config:/app/config:ro
+      - ./plugins:/app/plugins:ro
       - ./data:/app/data
     healthcheck:
       test:
