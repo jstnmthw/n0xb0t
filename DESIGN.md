@@ -112,7 +112,7 @@ Inspired by Eggdrop's C modules vs Tcl scripts:
 
 ### 2.3 Event dispatcher (the bind system)
 
-The heart of HexBot. Modeled directly on Eggdrop's `bind` command.
+The heart of HexBot.
 
 ```typescript
 dispatcher.bind(type, flags, mask, handler, pluginId);

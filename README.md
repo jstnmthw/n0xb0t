@@ -6,7 +6,7 @@ HexBot is a modular Internet Relay Chat bot for Node.js, written in TypeScript. 
 
 ## Highlights
 
-- **Event bind system** — register handlers for IRC events with `bind(type, flags, mask, handler)`, modeled directly on Eggdrop
+- **Event bind system** — register handlers for IRC events with `bind(type, flags, mask, handler)`.
 - **Flag-based permissions** — owner/master/op/voice flags with hostmask matching and optional NickServ verification
 - **Hot-reloadable plugins** — load, unload, and reload plugins at runtime without restarting the bot
 - **DCC CHAT console** — remote admin party line with real flag enforcement
