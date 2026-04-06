@@ -5252,3 +5252,40 @@ describe('chanmod plugin — chanserv_services_type selects Anope backend', () =
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Immediate unban when bot is banned (mode-enforce.ts handleBotBannedThreat)
+// ---------------------------------------------------------------------------
+describe('chanmod plugin — immediate unban on bot ban', () => {
+  it('requests ChanServ UNBAN when +b matching bot hostmask is set', async () => {
+    const freshBot = createMockBot({ botNick: 'hexbot' });
+    try {
+      giveBotOps(freshBot, '#test');
+      addToChannel(freshBot, 'Attacker', 'attacker', 'attacker.host', '#test');
+      await freshBot.pluginLoader.load(PLUGIN_PATH, {
+        chanmod: {
+          enabled: true,
+          config: {
+            chanserv_services_type: 'anope',
+            takeover_detection: true,
+          },
+        },
+      });
+      freshBot.channelSettings.set('#test', 'chanserv_access', 'op');
+      freshBot.channelSettings.set('#test', 'takeover_detection', true);
+      freshBot.client.clearMessages();
+
+      // Attacker bans the bot
+      simulateMode(freshBot, 'Attacker', '#test', '+b', '*!*bot@bot.host');
+      await tick(50);
+
+      // Bot should immediately request UNBAN via ChanServ
+      const unbanMsg = freshBot.client.messages.find(
+        (m) => m.type === 'say' && m.target === 'ChanServ' && m.message?.includes('UNBAN #test'),
+      );
+      expect(unbanMsg).toBeDefined();
+    } finally {
+      freshBot.cleanup();
+    }
+  });
+});

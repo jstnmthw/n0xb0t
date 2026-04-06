@@ -364,7 +364,7 @@ function handleBitchMode(
   return true;
 }
 
-/** Threat detection: bot banned (+b matching bot's hostmask). */
+/** Threat detection + immediate unban: bot banned (+b matching bot's hostmask). */
 function handleBotBannedThreat(
   api: PluginAPI,
   channel: string,
@@ -372,14 +372,24 @@ function handleBotBannedThreat(
   modeStr: string,
   target: string,
   isNodesynch: boolean,
+  chain?: ProtectionChain,
   onThreat?: ThreatCallback,
 ): void {
-  if (onThreat && modeStr === '+b' && target && !isNodesynch && !isBotNick(api, setter)) {
-    const botNick = getBotNick(api);
-    const botHostmask = api.getUserHostmask(channel, botNick);
-    if (botHostmask && wildcardMatch(target, botHostmask, true)) {
-      onThreat(channel, 'bot_banned', 5, setter, target);
-    }
+  if (modeStr !== '+b' || !target || isNodesynch || isBotNick(api, setter)) return;
+
+  const botNick = getBotNick(api);
+  const botHostmask = api.getUserHostmask(channel, botNick);
+  if (!botHostmask || !wildcardMatch(target, botHostmask, true)) return;
+
+  if (onThreat) {
+    onThreat(channel, 'bot_banned', 5, setter, target);
+  }
+
+  // Immediate unban — banning the bot is always hostile and the ban is a
+  // time bomb if the bot parts/disconnects. Don't wait for threat scoring.
+  if (chain && chain.canUnban(channel)) {
+    api.log(`Bot banned in ${channel} by ${setter} — requesting immediate unban`);
+    chain.requestUnban(channel);
   }
 }
 
@@ -662,7 +672,7 @@ export function setupModeEnforce(
     )
       return;
 
-    handleBotBannedThreat(api, channel, setter, modeStr, target, isNodesynch, onThreat);
+    handleBotBannedThreat(api, channel, setter, modeStr, target, isNodesynch, chain, onThreat);
 
     if (handleEnforceBans(api, state, channel, modeStr, target)) return;
 
