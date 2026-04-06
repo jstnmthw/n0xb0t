@@ -160,15 +160,16 @@ export class AnopeBackend implements ProtectionBackend {
   // ---------------------------------------------------------------------------
 
   /**
-   * Send an ACCESS LIST probe to verify the bot's actual access level.
+   * Send ACCESS LIST + INFO probes to verify the bot's actual access level.
    *
-   * Sends: `ACCESS #channel LIST`
-   * Anope responds with NOTICE lines listing each user and their level.
-   * We parse the response to find the bot's level and map it to a tier.
+   * ACCESS LIST detects explicit access entries (AOP/SOP/numeric levels).
+   * INFO detects implicit founder status (Rizon/Anope don't list founders
+   * in ACCESS or XOP lists — founder is the channel registrant).
    */
   verifyAccess(channel: string): void {
     this.sendChanServ(`ACCESS ${channel} LIST`);
-    this.api.log(`Anope: verifying access for ${channel} via ACCESS LIST probe`);
+    this.sendChanServ(`INFO ${channel}`);
+    this.api.log(`Anope: verifying access for ${channel} via ACCESS LIST + INFO probes`);
   }
 
   /**

@@ -73,6 +73,10 @@ export interface ProbeState {
   pendingAthemeProbes: Map<string, string>;
   /** Channels with pending Anope ACCESS LIST probes. Value = channel name. */
   pendingAnopeProbes: Map<string, string>;
+  /** Channels with pending Anope INFO probes (founder detection). Value = channel name. */
+  pendingInfoProbes: Map<string, string>;
+  /** Channel that the current multi-line INFO response is about (set on "Information for channel #xxx:"). */
+  activeInfoChannel: string | null;
   /** Timeout timers for probe responses. */
   probeTimers: ReturnType<typeof setTimeout>[];
 }
@@ -81,6 +85,8 @@ export function createProbeState(): ProbeState {
   return {
     pendingAthemeProbes: new Map(),
     pendingAnopeProbes: new Map(),
+    pendingInfoProbes: new Map(),
+    activeInfoChannel: null,
     probeTimers: [],
   };
 }
@@ -123,6 +129,8 @@ export function setupChanServNotice(opts: ChanServNoticeOptions): () => void {
   return () => {
     probeState.pendingAthemeProbes.clear();
     probeState.pendingAnopeProbes.clear();
+    probeState.pendingInfoProbes.clear();
+    probeState.activeInfoChannel = null;
     for (const t of probeState.probeTimers) clearTimeout(t);
     probeState.probeTimers.length = 0;
   };
@@ -132,16 +140,20 @@ export function setupChanServNotice(opts: ChanServNoticeOptions): () => void {
 // Mark a channel as having a pending probe
 // ---------------------------------------------------------------------------
 
-/** Call when a FLAGS/ACCESS probe is sent, so the notice handler knows to expect a response. */
+/** Call when a FLAGS/ACCESS/INFO probe is sent, so the notice handler knows to expect a response. */
 export function markProbePending(
   api: PluginAPI,
   probeState: ProbeState,
   channel: string,
-  backendType: 'atheme' | 'anope',
+  backendType: 'atheme' | 'anope' | 'anope-info',
 ): void {
   const key = api.ircLower(channel);
   const probes =
-    backendType === 'atheme' ? probeState.pendingAthemeProbes : probeState.pendingAnopeProbes;
+    backendType === 'atheme'
+      ? probeState.pendingAthemeProbes
+      : backendType === 'anope-info'
+        ? probeState.pendingInfoProbes
+        : probeState.pendingAnopeProbes;
   probes.set(key, channel);
 
   // Set a timeout — if ChanServ doesn't respond, clean up and log
@@ -310,6 +322,16 @@ function handleAnopeNotice(
     return;
   }
 
+  // "#channel access list is empty." — Rizon/Anope sends this when the list has no entries
+  if (text.match(/^#\S+\s+access list is empty/i)) {
+    const channel = consumeFirstPendingProbe(probeState.pendingAnopeProbes);
+    if (channel) {
+      api.debug(`ChanServ ACCESS response for ${channel}: access list empty`);
+      backend.handleAccessResponse(channel, 0);
+    }
+    return;
+  }
+
   // "Channel #xxx isn't registered" — resolve the probe for that specific channel.
   const notReg = ANOPE_NOT_REGISTERED_RE.exec(text);
   if (notReg) {
@@ -328,6 +350,48 @@ function handleAnopeNotice(
     if (channel) {
       api.debug(`ChanServ ACCESS response for ${channel}: denied (${text.trim()})`);
       backend.handleAccessResponse(channel, 0);
+    }
+    return;
+  }
+
+  // --- INFO response parsing (founder detection) ---
+
+  // "Information for channel #xxx:" — start of multi-line INFO response
+  const infoHeader = /^Information for channel (#[^\s:]+):?\s*$/i.exec(text);
+  if (infoHeader) {
+    const channel = infoHeader[1];
+    const key = api.ircLower(channel);
+    if (probeState.pendingInfoProbes.has(key)) {
+      probeState.activeInfoChannel = channel;
+    }
+    return;
+  }
+
+  // "Founder: <nick>" — if bot is the founder, resolve INFO probe as founder level
+  if (probeState.activeInfoChannel) {
+    const founderMatch = /^\s*Founder:\s*(\S+)/i.exec(text);
+    if (founderMatch) {
+      const founder = founderMatch[1];
+      const channel = probeState.activeInfoChannel;
+      const key = api.ircLower(channel);
+      if (api.ircLower(founder) === api.ircLower(botNick)) {
+        probeState.pendingInfoProbes.delete(key);
+        probeState.activeInfoChannel = null;
+        api.debug(`ChanServ INFO response for ${channel}: bot is founder`);
+        backend.handleAccessResponse(channel, 10000);
+        syncAccessToSettings(api, backend, channel);
+      }
+      return;
+    }
+
+    // "For more verbose information..." — end of INFO response, clean up
+    if (/^For more verbose information/i.test(text)) {
+      const channel = probeState.activeInfoChannel;
+      const key = api.ircLower(channel);
+      probeState.pendingInfoProbes.delete(key);
+      probeState.activeInfoChannel = null;
+      api.debug(`ChanServ INFO response for ${channel}: bot is not founder`);
+      return;
     }
   }
 }

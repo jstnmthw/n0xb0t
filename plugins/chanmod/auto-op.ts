@@ -38,6 +38,11 @@ export function setupAutoOp(
         }
         if (probeState) {
           markProbePending(api, probeState, channel, config.chanserv_services_type);
+          // Anope: also mark an INFO probe for founder detection (ACCESS LIST
+          // doesn't include implicit founder status on Rizon/Anope)
+          if (config.chanserv_services_type === 'anope') {
+            markProbePending(api, probeState, channel, 'anope-info');
+          }
         }
         chain.verifyAccess(channel);
       }

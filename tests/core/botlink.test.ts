@@ -34,7 +34,7 @@ function hubConfig(overrides?: Partial<BotlinkConfig>): BotlinkConfig {
     enabled: true,
     role: 'hub',
     botname: 'hub',
-    listen: { host: '0.0.0.0', port: 5051 },
+    listen: { host: '0.0.0.0', port: 15051 },
     password: TEST_PASSWORD,
     ping_interval_ms: 60_000, // Long interval to avoid timer noise in tests
     link_timeout_ms: 120_000,
@@ -47,7 +47,7 @@ function leafConfig(overrides?: Partial<BotlinkConfig>): BotlinkConfig {
     enabled: true,
     role: 'leaf',
     botname: 'leaf1',
-    hub: { host: '127.0.0.1', port: 5051 },
+    hub: { host: '127.0.0.1', port: 15051 },
     password: TEST_PASSWORD,
     reconnect_delay_ms: 100,
     reconnect_max_delay_ms: 1000,
@@ -2910,7 +2910,7 @@ describe('frame field fallback branches', () => {
       role: 'leaf',
       botname: 'test',
       password: 'p',
-      hub: { host: '127.0.0.1', port: 5051 },
+      hub: { host: '127.0.0.1', port: 15051 },
       ping_interval_ms: 30_000,
       link_timeout_ms: 90_000,
     };
