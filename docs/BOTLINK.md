@@ -44,23 +44,35 @@ In the hub bot's `config/bot.json`:
   "sync_channel_state": true,
   "sync_bans": true,
   "ping_interval_ms": 30000,
-  "link_timeout_ms": 90000
+  "link_timeout_ms": 90000,
+  "max_auth_failures": 5,
+  "auth_window_ms": 60000,
+  "auth_ban_duration_ms": 300000,
+  "auth_ip_whitelist": [],
+  "handshake_timeout_ms": 10000,
+  "max_pending_handshakes": 3
 }
 ```
 
-| Field                | Description                                                           |
-| -------------------- | --------------------------------------------------------------------- |
-| `role`               | Must be `"hub"`                                                       |
-| `botname`            | Unique name for this bot in the network                               |
-| `listen.host`        | Bind address. Use `0.0.0.0` for all interfaces or a specific IP       |
-| `listen.port`        | TCP port for leaf connections                                         |
-| `password`           | Shared secret. Never sent in plaintext (SHA-256 hashed on the wire)   |
-| `max_leaves`         | Maximum simultaneous leaf connections (default 10)                    |
-| `sync_permissions`   | Push permission database to leaves on connect                         |
-| `sync_channel_state` | Push channel user lists and modes to leaves                           |
-| `sync_bans`          | Push shared ban/exempt lists to leaves                                |
-| `ping_interval_ms`   | How often the hub pings leaves (default 30s)                          |
-| `link_timeout_ms`    | Disconnect leaves that don't respond within this window (default 90s) |
+| Field                    | Description                                                                |
+| ------------------------ | -------------------------------------------------------------------------- |
+| `role`                   | Must be `"hub"`                                                            |
+| `botname`                | Unique name for this bot in the network                                    |
+| `listen.host`            | Bind address. Use `0.0.0.0` for all interfaces or a specific IP            |
+| `listen.port`            | TCP port for leaf connections                                              |
+| `password`               | Shared secret. Never sent in plaintext (scrypt-hashed on the wire)         |
+| `max_leaves`             | Maximum simultaneous leaf connections (default 10)                         |
+| `sync_permissions`       | Push permission database to leaves on connect                              |
+| `sync_channel_state`     | Push channel user lists and modes to leaves                                |
+| `sync_bans`              | Push shared ban/exempt lists to leaves                                     |
+| `ping_interval_ms`       | How often the hub pings leaves (default 30s)                               |
+| `link_timeout_ms`        | Disconnect leaves that don't respond within this window (default 90s)      |
+| `max_auth_failures`      | Auth failures per IP before temporary ban (default 5)                      |
+| `auth_window_ms`         | Sliding window for counting failures (default 60s)                         |
+| `auth_ban_duration_ms`   | Initial ban duration; doubles on each re-ban, capped at 24h (default 5min) |
+| `auth_ip_whitelist`      | CIDR strings whose IPs bypass auth rate limiting (default `[]`)            |
+| `handshake_timeout_ms`   | Time to wait for HELLO before closing (default 10s)                        |
+| `max_pending_handshakes` | Max concurrent unauthenticated connections per IP (default 3)              |
 
 ---
 

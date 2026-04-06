@@ -261,9 +261,24 @@ The bot link protocol (`src/core/botlink.ts`) introduces a trusted TCP channel b
 
 ### Authentication
 
-- Passwords are **never sent in plaintext**. Leaves send `sha256:<hex>` hashes in the `HELLO` frame.
-- The hub compares against the pre-computed expected hash. Failed auth produces `AUTH_FAILED` and the connection is closed.
+- Passwords are **never sent in plaintext**. Leaves send `scrypt:<hex>` hashes in the `HELLO` frame.
+- The hub compares against a pre-computed expected hash. Failed auth produces `AUTH_FAILED` and the connection is closed.
 - All bots in a botnet share the same password. Use a strong, unique password per botnet.
+
+### Auth brute-force protection
+
+The hub tracks per-IP auth failures and temporarily bans IPs that exceed the threshold:
+
+- After `max_auth_failures` (default 5) within `auth_window_ms` (default 60s), the IP is banned for `auth_ban_duration_ms` (default 5 minutes).
+- Ban duration **doubles on each re-ban** (5m → 10m → 20m → …), capped at 24 hours. The tracker entry never resets — persistent scanners stay at the 24h ceiling.
+- Banned IPs are rejected **before any protocol setup** — no readline allocation, no scrypt, no timer. Zero resource cost.
+- Per-IP `max_pending_handshakes` (default 3) limits concurrent unauthenticated connections from the same source.
+- Handshake timeout is configurable via `handshake_timeout_ms` (default 10s). Connections that don't send `HELLO` in time are closed.
+- `auth_ip_whitelist` accepts CIDR strings (e.g., `["10.0.0.0/8"]`) whose IPs bypass all auth rate limiting.
+- `auth:ban` events are emitted on the EventBus with the IP, failure count, and ban duration.
+- Source IP is included in all auth-related log lines (failure, success, ban, timeout).
+
+**Defense in depth:** Application-level protection complements but does not replace network-level controls. For production hubs exposed beyond localhost, use firewall rules or a VPN in addition to these settings.
 
 ### Frame validation
 

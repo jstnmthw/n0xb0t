@@ -106,7 +106,7 @@ Three classes in one file, following the `DCCManager`/`DCCSession` pattern from 
 
 - [x] `listen(port, host)` — starts `net.Server`
 - [x] Accepts connections, runs four-step handshake (see Protocol Design)
-- [x] Authenticates password (`sha256:<hex>` format; never logged)
+- [x] Authenticates password (`scrypt:<hex>` format; never logged)
 - [x] Maintains `Map<string, BotLinkLeafConnection>` keyed by botname
 - [x] On auth success: broadcasts `BOTJOIN`, initiates state sync (Phase 4)
 - [x] Fan-out: frame from one leaf forwarded to all other leaves
@@ -324,7 +324,7 @@ Plain TCP, line-oriented (`\r\n` terminators), JSON-framed. Maximum frame size: 
 Hub listens on TCP port (e.g. 5051)
 Leaf connects
 
-Leaf → Hub:  {"type":"HELLO","botname":"leaf1","password":"sha256:<hex>","version":"0.1.0"}
+Leaf → Hub:  {"type":"HELLO","botname":"leaf1","password":"scrypt:<hex>","version":"0.1.0"}
 Hub  → Leaf: {"type":"WELCOME","botname":"hub","version":"0.1.0"}   (success)
           or {"type":"ERROR","code":"AUTH_FAILED","message":"bad password"}
 
@@ -335,9 +335,9 @@ Hub  → Leaf: {"type":"SYNC_END"}
 Link enters steady state: bidirectional event and command relay
 ```
 
-Password is transmitted as `sha256:<hex-of-shared-secret>`. The `password` field is **never logged** — mask as `[REDACTED]` in any debug output.
+Password is transmitted as `scrypt:<hex>` (scrypt-derived key). The `password` field is **never logged** — mask as `[REDACTED]` in any debug output.
 
-Handshake timeout: 30 seconds. If `HELLO` is not received within 30 seconds, close the socket.
+Handshake timeout: configurable via `handshake_timeout_ms` (default 10 seconds). If `HELLO` is not received within this window, close the socket.
 
 ### Message Types (steady state)
 
@@ -506,9 +506,9 @@ None. Bot link sessions and topology are ephemeral (in-memory only). Permission 
 1. **Password never logged** — the `HELLO` frame's `password` field must be masked as `[REDACTED]` in all debug output.
 2. **Input validation from link** — all string fields from link frames must be sanitized with `sanitize()` before use; nick/ident/hostname validated against IRC character sets before injecting into `ChannelState`.
 3. **Hub re-checks permissions** — `CMD` relay uses `fromHandle` to look up flags in the hub's own database; a compromised leaf cannot spoof elevated permissions.
-4. **DoS mitigations** — 64 KB frame limit; 30s handshake timeout; 10 CMD/sec rate limit per leaf; `max_leaves` cap.
+4. **DoS mitigations** — 64 KB frame limit; configurable handshake timeout (default 10s); per-IP pending handshake limit; per-IP auth failure tracking with escalating bans; 10 CMD/sec rate limit per leaf; `max_leaves` cap.
 5. **TLS future** — initial implementation is plaintext TCP; document that the link should be on a private network or VPN. A future `botlink.tls: true` option can use `tls.connect()`/`tls.createServer()`.
-6. **SHA-256 password** — not replay-resistant; document. A future improvement is HMAC challenge-response.
+6. **scrypt password hash** — not replay-resistant; document. A future improvement is HMAC challenge-response.
 7. **File permissions** — `config/bot.json` must be `chmod 600`; the existing world-readable check in `bot.ts` already warns on this.
 
 ---
@@ -518,7 +518,7 @@ None. Bot link sessions and topology are ephemeral (in-memory only). Permission 
 **Unit tests** (`tests/core/botlink.test.ts`):
 
 - [x] `BotLinkProtocol`: frame serialization roundtrip, oversized frame rejected, `\r\n` stripped from string fields
-- [x] Handshake: valid password accepted, wrong password → `ERROR` frame, handshake timeout fires at 30s
+- [x] Handshake: valid password accepted, wrong password → `ERROR` frame, handshake timeout fires at configured `handshake_timeout_ms` (default 10s)
 - [x] Hub fan-out: frame from leaf1 forwarded to leaf2 and leaf3 but not back to leaf1
 - [x] Leaf reconnect: failure triggers retry after delay; succeeds on second attempt
 - [x] `ChannelStateSyncer`: `buildSyncFrames` → `applyFrame` roundtrip without data loss

@@ -480,6 +480,8 @@ Separate from the IRC dispatcher, the bot maintains a simple `EventEmitter` for 
 - `bot:connected`, `bot:disconnected`, `bot:error`
 - `user:identified`, `user:added`, `user:removed`
 - `channel:modesReady` — fired after RPL_CHANNELMODEIS populates channel-state modes/key/limit
+- `botlink:connected`, `botlink:disconnected`, `botlink:syncComplete`
+- `auth:ban`, `auth:unban` — fired when the hub bans/unbans an IP for auth failures
 
 This is how the future web panel (phase 3) will tap into bot state without modifying the core. It's also useful for plugins that want to react to bot-level events rather than IRC events.
 

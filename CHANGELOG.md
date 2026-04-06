@@ -11,7 +11,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `d` (deop) permission flag — suppresses auto-op/halfop on join; auto-voice still works with explicit `+v`
 - Per-plugin channel scoping via `channels` array in `plugins.json` — restricts a plugin to specific channels
 - Greeter help now documents `{nick}` and `{channel}` substitution variables and sub-command help for `!greet set` and `!greet del`
-- Secrets live in `.env`, referenced from `bot.json` via `<field>_env` suffix keys. Startup validates every required secret for enabled features and fails loudly with the exact env var name when one is missing. Plugin configs support the same `_env` pattern — the loader resolves values before plugin `init()` runs, so plugins never touch `process.env`. See [docs/MIGRATION-env-secrets.md](docs/MIGRATION-env-secrets.md) for the one-time migration steps.
+- Secrets live in `.env`, referenced from `bot.json` via `<field>_env` suffix keys. Startup validates every required secret for enabled features and fails loudly with the exact env var name when one is missing. Plugin configs support the same `_env` pattern — the loader resolves values before plugin `init()` runs, so plugins never touch `process.env`.
+- Per-IP auth brute-force protection on BotLink hub: failure tracking with escalating bans (5min → 24h cap), CIDR whitelist, per-IP pending handshake limit, configurable handshake timeout (10s default), `auth:ban`/`auth:unban` EventBus events, source IP in all auth log lines
 
 ### Changed
 
