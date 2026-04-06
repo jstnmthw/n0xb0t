@@ -7,6 +7,9 @@ import { type BackendAccess, type ProtectionBackend, accessAtLeast } from './pro
 /** Default delay between steps in the synthetic RECOVER sequence. */
 const RECOVER_STEP_DELAY_MS = 200;
 
+/** Timeout for GETKEY probe responses (matches other probe timeouts in chanserv-notice.ts). */
+const GETKEY_TIMEOUT_MS = 10_000;
+
 /**
  * Anope ChanServ backend.
  *
@@ -176,6 +179,17 @@ export class AnopeBackend implements ProtectionBackend {
           this.api.debug(`Anope: GETKEY for ${channel} returned no key`);
         }
       });
+
+      // Timeout: clean up if ChanServ doesn't respond (matches other probe timeouts)
+      const timer = setTimeout(() => {
+        if (this.probeState?.pendingGetKey.has(chanKey)) {
+          this.probeState.pendingGetKey.delete(chanKey);
+          this.api.debug(`Anope: GETKEY probe for ${channel} timed out`);
+        }
+        const idx = this.probeState?.probeTimers.indexOf(timer) ?? -1;
+        if (idx !== -1) this.probeState!.probeTimers.splice(idx, 1);
+      }, GETKEY_TIMEOUT_MS);
+      this.probeState.probeTimers.push(timer);
     }
   }
 

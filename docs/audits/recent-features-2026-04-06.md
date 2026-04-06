@@ -158,9 +158,12 @@ This is an edge case that only affects channels with bracket/tilde characters in
 - **IRC-specific:** `isBotNick()` checks prevent self-triggering loops in mode-enforce. `wildcardMatch` with case-insensitive flag for ban mask comparison. IRC-aware `ircLower()` used throughout chanmod (except the INVITE handler noted above).
 - **Immediate unban on +b** (`handleBotBannedThreat`): Correctly checks `!isNodesynch` and `!isBotNick(setter)` to avoid reacting to friendly bans. Only triggers when the ban mask actually matches the bot's hostmask via `wildcardMatch`. Fails safe when bot hostmask is unknown.
 
-## Recommendations
+## Remediation Status
 
-1. **Fix join recovery backoff** (WARNING finding #1) — highest priority. An attacker with channel ops can abuse this now.
-2. **Add TTL sweep for auth tracker** (WARNING finding #2) — medium priority. Only relevant for long-running hubs exposed to scanning.
-3. **Add GETKEY timeout** (INFO finding #3) — low priority, minor resource leak.
-4. Consider adding a per-channel or global cap on ChanServ requests per time window as a defense-in-depth measure independent of the backoff fix.
+All actionable findings have been fixed:
+
+1. **[WARNING] Join recovery backoff** — **Fixed.** Backoff state now persists across ban-rejoin cycles. A 5-minute sustained-presence timer must elapse before backoff resets. Timer is cancelled if the bot is banned again before it fires.
+2. **[WARNING] Auth tracker growth** — **Fixed.** `sweepStaleTrackers()` now also removes entries with `banCount > 0` once 24 hours have elapsed since the ban expired.
+3. **[INFO] GETKEY timeout** — **Fixed.** Added 10-second timeout for `pendingGetKey` callbacks, matching other probe types.
+4. **[INFO] FIFO ordering** — Not addressed (inherent protocol limitation, benign failure mode).
+5. **[INFO] INVITE ircLower** — **Fixed.** Replaced `.toLowerCase()` with `ircLower(name, 'rfc1459')` in the core INVITE auto-rejoin handler.

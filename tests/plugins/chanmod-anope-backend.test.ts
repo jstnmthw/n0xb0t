@@ -556,4 +556,31 @@ describe('Anope backend — requestRemoveKey (GETKEY)', () => {
     b.setAccess('#test', 'founder');
     expect(b.isAutoDetected('#test')).toBe(false);
   });
+
+  it('GETKEY callback is cleaned up after 10s timeout', async () => {
+    const debugMsgs: string[] = [];
+    const shim = {
+      say: () => {},
+      log: () => {},
+      debug: (...args: unknown[]) => debugMsgs.push(String(args[0])),
+      warn: () => {},
+      join: vi.fn(),
+      ircLower: (s: string) => s.toLowerCase(),
+      botConfig: { irc: { nick: 'hexbot' } },
+    };
+    const probeState = createProbeState();
+    const b = new AnopeBackend(shim as never, 'ChanServ', undefined, probeState);
+    b.setAccess('#test', 'op');
+    b.requestRemoveKey('#test');
+
+    expect(probeState.pendingGetKey.has('#test')).toBe(true);
+
+    // Advance past the 10s timeout
+    await tick(10_100);
+
+    // Callback should be cleaned up
+    expect(probeState.pendingGetKey.has('#test')).toBe(false);
+    expect(shim.join).not.toHaveBeenCalled();
+    expect(debugMsgs.some((m) => m.includes('timed out'))).toBe(true);
+  });
 });

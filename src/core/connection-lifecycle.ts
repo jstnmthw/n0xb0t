@@ -6,6 +6,7 @@ import type { Logger } from '../logger';
 import type { BotConfig, Casemapping } from '../types';
 import type { BindHandler, BindType } from '../types';
 import { toEventObject } from '../utils/irc-event';
+import { ircLower } from '../utils/wildcard';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -255,7 +256,10 @@ function bindCoreInviteHandler(deps: ConnectionLifecycleDeps): void {
     (ctx) => {
       const channel = ctx.channel;
       if (!channel) return;
-      const ch = configuredChannels.find((c) => c.name.toLowerCase() === channel.toLowerCase());
+      // Use IRC-aware casemapping (rfc1459 as safe default — superset of all mappings)
+      const ch = configuredChannels.find(
+        (c) => ircLower(c.name, 'rfc1459') === ircLower(channel, 'rfc1459'),
+      );
       if (!ch) return;
       client.join(ch.name, ch.key);
       logger.info(`INVITE from ${ctx.nick}: re-joining configured channel ${ch.name}`);

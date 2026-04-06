@@ -354,4 +354,54 @@ describe('auth brute-force protection', () => {
 
     expect(infos.some((i) => i.includes('10.99.0.12'))).toBe(true);
   });
+
+  it('sweeps escalated tracker entries 24h after ban expiry', async () => {
+    vi.useFakeTimers();
+    const hub = new BotLinkHub(
+      hubConfig({ max_auth_failures: 1, auth_ban_duration_ms: 1000, auth_window_ms: 1000 }),
+      '1.0.0',
+    );
+    const ip = '10.99.2.1';
+
+    // Trigger a ban (banCount becomes 1)
+    await sendBadAuth(hub, ip, fakeTick);
+
+    // Advance past the ban (1s) + auth window (1s)
+    vi.advanceTimersByTime(2001);
+
+    // Trigger sweep by connecting from a different IP — escalated entry NOT swept yet
+    await sendGoodAuth(hub, '10.99.2.2', 'leaf-sweep-a', fakeTick);
+
+    // Same IP fails again — should escalate (banCount was preserved)
+    await sendBadAuth(hub, ip, fakeTick);
+
+    // Ban duration is now 2000ms (doubled). Advance past it.
+    vi.advanceTimersByTime(2001);
+
+    // Now advance 24 hours past the ban expiry — escalated entry should be swept
+    vi.advanceTimersByTime(86_400_001);
+
+    // Trigger sweep
+    await sendGoodAuth(hub, '10.99.2.3', 'leaf-sweep-b', fakeTick);
+
+    // Same IP fails again — should start fresh (banCount reset by sweep)
+    const eventBus = new BotEventBus();
+    const bans: number[] = [];
+    eventBus.on('auth:ban', (_ip, _f, dur) => bans.push(dur));
+
+    // We need a new hub for event tracking, but we can verify the behavior:
+    // After sweep, the IP should be able to fail without immediately escalating.
+    // The entry was cleared, so 1 failure = ban at base duration (1000ms, not 2000ms).
+    await sendBadAuth(hub, ip, fakeTick);
+
+    // If the escalation info was preserved, the ban would be 4000ms.
+    // If swept (fresh counter), the ban is 1000ms. We can't directly check
+    // the ban duration without an event bus, but we can verify the IP
+    // isn't immediately rejected (ban is fresh, not a stale escalated one).
+    vi.advanceTimersByTime(1001);
+
+    const { written } = await sendGoodAuth(hub, ip, 'leaf-after-sweep', fakeTick);
+    const frames = parseWritten(written);
+    expect(frames[0]).toMatchObject({ type: 'WELCOME' });
+  });
 });

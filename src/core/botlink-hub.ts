@@ -677,17 +677,23 @@ export class BotLinkHub {
     }
   }
 
-  /** Prune expired auth tracker entries that have never been escalated and have no recent failures. */
+  /** Prune expired auth tracker entries that are stale.
+   *  - Entries with banCount === 0: cleaned up once the failure window expires.
+   *  - Entries with banCount > 0: cleaned up 24 hours after the ban expires
+   *    to prevent unbounded growth from distributed scanners. */
   private sweepStaleTrackers(): void {
     const now = Date.now();
     const windowMs = this.config.auth_window_ms ?? 60_000;
+    const ESCALATED_STALE_MS = 86_400_000; // 24 hours
     for (const [ip, tracker] of this.authTracker) {
-      if (
-        tracker.bannedUntil < now &&
-        tracker.banCount === 0 &&
-        now - tracker.firstFailure > windowMs
-      ) {
-        this.authTracker.delete(ip);
+      const banExpired = tracker.bannedUntil < now;
+      const failureWindowExpired = now - tracker.firstFailure > windowMs;
+      if (banExpired && failureWindowExpired) {
+        if (tracker.banCount === 0) {
+          this.authTracker.delete(ip);
+        } else if (now - tracker.bannedUntil > ESCALATED_STALE_MS) {
+          this.authTracker.delete(ip);
+        }
       }
     }
   }

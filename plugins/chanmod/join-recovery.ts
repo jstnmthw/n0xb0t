@@ -22,10 +22,15 @@ import type { ChanmodConfig, SharedState } from './state';
 interface JoinRecoveryState {
   lastAttempt: number;
   backoffMs: number; // starts at 30_000, doubles each attempt, caps at 300_000
+  /** Timer that resets backoff after sustained channel presence. */
+  resetTimer: ReturnType<typeof setTimeout> | null;
 }
 
 const INITIAL_BACKOFF_MS = 30_000;
 const MAX_BACKOFF_MS = 300_000;
+
+/** How long the bot must stay in the channel before backoff resets (5 minutes). */
+const SUSTAINED_PRESENCE_MS = 300_000;
 
 /** Delay after ChanServ request before retrying join (services processing time). */
 const SERVICES_DELAY_MS = 3_000;
@@ -103,20 +108,44 @@ export function setupJoinRecovery(opts: JoinRecoveryOptions): () => void {
     dispatchRecovery(api, chain, state, recoveryState, channel, chanKey, error);
   });
 
-  // --- Reset backoff on successful join ---
+  // --- Delayed backoff reset on successful join ---
+  //
+  // Don't wipe backoff immediately — an attacker with ops could cycle
+  // ban→rejoin indefinitely, generating unlimited ChanServ requests.
+  // Instead, schedule a delayed reset after sustained channel presence.
+  // If the bot is banned again before the timer fires, the timer is
+  // cancelled and backoff continues escalating.
 
   api.bind('join', '-', '*', (ctx: HandlerContext) => {
     if (!isBotNick(api, ctx.nick)) return;
     if (!ctx.channel) return;
     const chanKey = api.ircLower(ctx.channel);
-    if (recoveryState.has(chanKey)) {
-      recoveryState.delete(chanKey);
-      api.debug(`Join recovery backoff reset for ${ctx.channel}`);
-    }
     probedChannels.delete(chanKey);
+
+    const rs = recoveryState.get(chanKey);
+    if (!rs) return;
+
+    // Cancel any previous reset timer (e.g., from a prior join in the same cycle)
+    if (rs.resetTimer) clearTimeout(rs.resetTimer);
+
+    // Schedule backoff reset after sustained presence.
+    // Guard: verify this timer is still current before acting — if a re-ban
+    // arrived in the same event loop tick (timers phase fires before I/O poll),
+    // getOrCreateState may have nulled rs.resetTimer after clearTimeout lost
+    // the race against an already-dequeued callback.
+    const timer = setTimeout(() => {
+      if (rs.resetTimer !== timer) return;
+      recoveryState.delete(chanKey);
+      api.debug(`Join recovery backoff reset for ${ctx.channel} (sustained presence)`);
+    }, SUSTAINED_PRESENCE_MS);
+    rs.resetTimer = timer;
+    state.cycleTimers.push(timer);
   });
 
   return () => {
+    for (const rs of recoveryState.values()) {
+      if (rs.resetTimer) clearTimeout(rs.resetTimer);
+    }
     recoveryState.clear();
     probedChannels.clear();
   };
@@ -312,8 +341,14 @@ function handleFull(
 function getOrCreateState(map: Map<string, JoinRecoveryState>, chanKey: string): JoinRecoveryState {
   let rs = map.get(chanKey);
   if (!rs) {
-    rs = { lastAttempt: 0, backoffMs: INITIAL_BACKOFF_MS };
+    rs = { lastAttempt: 0, backoffMs: INITIAL_BACKOFF_MS, resetTimer: null };
     map.set(chanKey, rs);
+  }
+  // Cancel any pending sustained-presence reset — the bot was banned again
+  // before the timer fired, so backoff should continue escalating.
+  if (rs.resetTimer) {
+    clearTimeout(rs.resetTimer);
+    rs.resetTimer = null;
   }
   return rs;
 }

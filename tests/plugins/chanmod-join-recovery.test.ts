@@ -290,8 +290,8 @@ describe('chanmod join-error recovery', () => {
       expect(csMessages(bot)).toHaveLength(0);
     });
 
-    it('resets backoff on successful join', async () => {
-      // First attempt
+    it('does not immediately reset backoff on successful join', async () => {
+      // First attempt — advances backoff to 60s
       bot.client.simulateEvent('irc error', {
         error: 'banned_from_channel',
         channel: '#test',
@@ -300,7 +300,43 @@ describe('chanmod join-error recovery', () => {
       await flush();
       bot.client.clearMessages();
 
-      // Simulate successful join — resets backoff
+      // Simulate successful join — does NOT wipe backoff immediately
+      bot.client.simulateEvent('join', {
+        nick: 'hexbot',
+        ident: 'bot',
+        hostname: 'bot.host',
+        channel: '#test',
+      });
+      await flush();
+      bot.client.clearMessages();
+
+      // Immediate re-ban — should be on cooldown (backoff is 60s)
+      bot.client.simulateEvent('irc error', {
+        error: 'banned_from_channel',
+        channel: '#test',
+        reason: 'banned',
+      });
+      await flush();
+
+      // No UNBAN/INVITE recovery messages — backoff still active
+      const recovery = csMessages(bot).filter(
+        (m) =>
+          m.includes('UNBAN') || m.includes('INVITE') || (m.includes('MODE') && m.includes('-k')),
+      );
+      expect(recovery).toHaveLength(0);
+    });
+
+    it('resets backoff after sustained channel presence (5 minutes)', async () => {
+      // First attempt — advances backoff to 60s
+      bot.client.simulateEvent('irc error', {
+        error: 'banned_from_channel',
+        channel: '#test',
+        reason: 'banned',
+      });
+      await flush();
+      bot.client.clearMessages();
+
+      // Simulate successful join — schedules delayed reset
       bot.client.simulateEvent('join', {
         nick: 'hexbot',
         ident: 'bot',
@@ -309,7 +345,10 @@ describe('chanmod join-error recovery', () => {
       });
       await flush();
 
-      // Next attempt should work immediately (backoff reset)
+      // Wait 5 minutes (sustained presence) — backoff should reset
+      await tick(300_100);
+
+      // Next attempt should work immediately (backoff was cleared)
       bot.client.simulateEvent('irc error', {
         error: 'banned_from_channel',
         channel: '#test',
@@ -318,6 +357,65 @@ describe('chanmod join-error recovery', () => {
       await flush();
 
       expect(csMessages(bot).length).toBeGreaterThan(0);
+    });
+
+    it('cancels sustained-presence reset timer if banned again', async () => {
+      // First attempt — advances backoff to 60s
+      bot.client.simulateEvent('irc error', {
+        error: 'banned_from_channel',
+        channel: '#test',
+        reason: 'banned',
+      });
+      await flush();
+      bot.client.clearMessages();
+
+      // Successful join → schedules 5-min reset
+      bot.client.simulateEvent('join', {
+        nick: 'hexbot',
+        ident: 'bot',
+        hostname: 'bot.host',
+        channel: '#test',
+      });
+      await flush();
+
+      // Wait 60s (past first backoff) then ban again — cancel the reset timer
+      await tick(61_000);
+      bot.client.clearMessages();
+      bot.client.simulateEvent('irc error', {
+        error: 'banned_from_channel',
+        channel: '#test',
+        reason: 'banned',
+      });
+      await flush();
+      // This attempt should succeed (60s cooldown elapsed)
+      const recovery1 = csMessages(bot).filter((m) => m.includes('UNBAN'));
+      expect(recovery1.length).toBeGreaterThan(0);
+      bot.client.clearMessages();
+
+      // Successful join again
+      bot.client.simulateEvent('join', {
+        nick: 'hexbot',
+        ident: 'bot',
+        hostname: 'bot.host',
+        channel: '#test',
+      });
+      await flush();
+      bot.client.clearMessages();
+
+      // Immediate re-ban — backoff should be 240s now (escalated from 120s)
+      bot.client.simulateEvent('irc error', {
+        error: 'banned_from_channel',
+        channel: '#test',
+        reason: 'banned',
+      });
+      await flush();
+
+      // Should be on cooldown — backoff escalated, no recovery messages
+      const recovery2 = csMessages(bot).filter(
+        (m) =>
+          m.includes('UNBAN') || m.includes('INVITE') || (m.includes('MODE') && m.includes('-k')),
+      );
+      expect(recovery2).toHaveLength(0);
     });
 
     it('doubles backoff on each attempt, caps at 300s', async () => {
