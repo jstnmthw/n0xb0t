@@ -357,7 +357,9 @@ function handleAnopeNotice(
   // --- INFO response parsing (founder detection) ---
 
   // "Information for channel #xxx:" — start of multi-line INFO response
-  const infoHeader = /^Information for channel (#[^\s:]+):?\s*$/i.exec(text);
+  // \x02 is IRC bold — Anope may wrap the channel name in bold markers.
+  // eslint-disable-next-line no-control-regex
+  const infoHeader = /^Information for channel \x02?(#[^\s:\x02]+)\x02?:?\s*$/i.exec(text);
   if (infoHeader) {
     const channel = infoHeader[1];
     const key = api.ircLower(channel);

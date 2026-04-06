@@ -472,6 +472,24 @@ describe('ChanServ notice handler — Anope INFO (founder detection)', () => {
     expect(calls).toHaveLength(0);
   });
 
+  it('detects founder when channel name is IRC-bold-wrapped', () => {
+    const { api, notice, logs } = createMockApi();
+    const { backend, calls } = createMockAnopeBackend();
+    const probeState = createProbeState();
+
+    setupChanServNotice({ api, config: createMockConfig('anope'), backend, probeState });
+    markProbePending(api, probeState, '#hexbot', 'anope-info');
+
+    // Anope may wrap channel name in \x02 (bold) markers
+    notice('ChanServ', 'Information for channel \x02#hexbot\x02:');
+    notice('ChanServ', '        Founder: hexbot');
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].channel).toBe('#hexbot');
+    expect(calls[0].level).toBe(10000);
+    expect(logs.some((l) => l.includes('bot is founder'))).toBe(true);
+  });
+
   it('cleans up INFO probe on timeout', async () => {
     const { api } = createMockApi();
     const probeState = createProbeState();
