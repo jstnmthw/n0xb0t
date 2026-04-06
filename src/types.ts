@@ -492,20 +492,14 @@ export interface IrcConfigOnDisk extends Omit<IrcConfig, 'channels'> {
   channels: (string | ChannelEntryOnDisk)[];
 }
 
-/** On-disk services config — NickServ password is sourced from env. */
-export interface ServicesConfigOnDisk extends Omit<ServicesConfig, 'password'> {
+/** Swap a runtime `password` field for an on-disk `password_env` reference. */
+type WithPasswordEnv<T extends { password?: string }> = Omit<T, 'password'> & {
   password_env?: string;
-}
+};
 
-/** On-disk botlink config — shared secret is sourced from env. */
-export interface BotlinkConfigOnDisk extends Omit<BotlinkConfig, 'password'> {
-  password_env?: string;
-}
-
-/** On-disk proxy config — SOCKS5 password is sourced from env. */
-export interface ProxyConfigOnDisk extends Omit<ProxyConfig, 'password'> {
-  password_env?: string;
-}
+export type ServicesConfigOnDisk = WithPasswordEnv<ServicesConfig>;
+export type BotlinkConfigOnDisk = WithPasswordEnv<BotlinkConfig>;
+export type ProxyConfigOnDisk = WithPasswordEnv<ProxyConfig>;
 
 /** On-disk chanmod bot credentials — nick recovery password is sourced from env. */
 export interface ChanmodBotConfigOnDisk {
