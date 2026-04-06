@@ -1281,7 +1281,7 @@ describe('chanmod plugin — timed bans', () => {
   it('!ban with duration stores record in DB', async () => {
     simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!ban *!*@timed.host 60');
     await flush();
-    const entry = bot.db.get('chanmod', 'ban:#test:*!*@timed.host');
+    const entry = bot.db.get('_bans', 'ban:#test:*!*@timed.host');
     expect(entry).toBeDefined();
     const record = JSON.parse(entry!) as { mask: string; expires: number };
     expect(record.mask).toBe('*!*@timed.host');
@@ -1291,7 +1291,7 @@ describe('chanmod plugin — timed bans', () => {
   it('!ban with 0 duration stores permanent record (expires=0)', async () => {
     simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!ban *!*@perm.host 0');
     await flush();
-    const entry = bot.db.get('chanmod', 'ban:#test:*!*@perm.host');
+    const entry = bot.db.get('_bans', 'ban:#test:*!*@perm.host');
     expect(entry).toBeDefined();
     const record = JSON.parse(entry!) as { expires: number };
     expect(record.expires).toBe(0);
@@ -1316,7 +1316,7 @@ describe('chanmod plugin — timed bans', () => {
   it('!unban removes DB record', async () => {
     simulatePrivmsg(bot, 'Admin', 'admin', 'admin.host', '#test', '!unban *!*@timed.host');
     await flush();
-    const entry = bot.db.get('chanmod', 'ban:#test:*!*@timed.host');
+    const entry = bot.db.get('_bans', 'ban:#test:*!*@timed.host');
     expect(entry).toBeNull();
   });
 });
@@ -2610,7 +2610,7 @@ describe('chanmod plugin — ban auto-lift timers', () => {
       await freshBot.pluginLoader.load(PLUGIN_PATH);
       const mask = '*!bad@bad.host';
       freshBot.db.set(
-        'chanmod',
+        '_bans',
         `ban:#test:${mask}`,
         JSON.stringify({
           mask,
@@ -2627,7 +2627,7 @@ describe('chanmod plugin — ban auto-lift timers', () => {
           (m) => m.type === 'raw' && m.message?.includes('-b') && m.message.includes(mask),
         ),
       ).toBeDefined();
-      expect(freshBot.db.get('chanmod', `ban:#test:${mask}`)).toBeNull();
+      expect(freshBot.db.get('_bans', `ban:#test:${mask}`)).toBeNull();
     } finally {
       freshBot.cleanup();
     }
@@ -2643,7 +2643,7 @@ describe('chanmod plugin — ban auto-lift timers', () => {
       freshBot.client.clearMessages();
       const mask = '*!stale@old.host';
       freshBot.db.set(
-        'chanmod',
+        '_bans',
         `ban:#test:${mask}`,
         JSON.stringify({
           mask,
@@ -2660,7 +2660,7 @@ describe('chanmod plugin — ban auto-lift timers', () => {
           (m) => m.type === 'raw' && m.message?.includes('-b') && m.message.includes(mask),
         ),
       ).toBeDefined();
-      expect(freshBot.db.get('chanmod', `ban:#test:${mask}`)).toBeNull();
+      expect(freshBot.db.get('_bans', `ban:#test:${mask}`)).toBeNull();
     } finally {
       freshBot.cleanup();
     }

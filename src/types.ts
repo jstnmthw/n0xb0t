@@ -115,6 +115,32 @@ export interface PluginDB {
   list(prefix?: string): Array<{ key: string; value: string }>;
 }
 
+/** Ban record stored in the core ban store. */
+export interface BanRecord {
+  mask: string;
+  channel: string;
+  by: string;
+  ts: number;
+  expires: number; // 0 = permanent, otherwise unix timestamp ms
+  sticky?: boolean;
+}
+
+/** Core-owned ban store API provided to plugins. */
+export interface PluginBanStore {
+  storeBan(channel: string, mask: string, by: string, durationMs: number): void;
+  removeBan(channel: string, mask: string): void;
+  getBan(channel: string, mask: string): BanRecord | null;
+  getChannelBans(channel: string): BanRecord[];
+  getAllBans(): BanRecord[];
+  setSticky(channel: string, mask: string, sticky: boolean): boolean;
+  liftExpiredBans(
+    hasOps: (channel: string) => boolean,
+    mode: (channel: string, modes: string, param: string) => void,
+  ): number;
+  /** Migrate ban records from a plugin's old namespace to the core _bans namespace. */
+  migrateFromPluginNamespace(pluginDb: PluginDB): number;
+}
+
 /** Read-only permissions API for plugins. */
 export interface PluginPermissions {
   findByHostmask(hostmask: string): UserRecord | null;
@@ -186,6 +212,9 @@ export interface PluginAPI {
 
   // Database (namespaced to this plugin)
   db: PluginDB;
+
+  // Core ban store (shared across all plugins, namespace _bans)
+  banStore: PluginBanStore;
 
   // Bot config (read-only, password redacted)
   botConfig: PluginBotConfig;

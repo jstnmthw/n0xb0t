@@ -1,7 +1,6 @@
 // chanmod — mode enforcement: re-op, channel modes, cycle-on-deop, bitch mode, punish deop, enforcebans
 import type { HandlerContext, PluginAPI } from '../../src/types';
 import { wildcardMatch } from '../../src/utils/wildcard';
-import { storeBan } from './bans';
 import {
   botCanHalfop,
   botHasOps,
@@ -866,7 +865,12 @@ function performHostileResponse(
         // kickban (or akick fallback when backend unavailable)
         if (mask) {
           api.ban(channel, mask);
-          storeBan(api, channel, mask, getBotNick(api), config.default_ban_duration);
+          api.banStore.storeBan(
+            channel,
+            mask,
+            getBotNick(api),
+            config.default_ban_duration === 0 ? 0 : config.default_ban_duration * 60_000,
+          );
         }
         markIntentional(state, api, channel, actor);
         api.kick(channel, actor, 'Takeover response');
@@ -905,7 +909,12 @@ function punishDeop(
       const mask = buildBanMask(hostmask, 1);
       if (mask) {
         api.ban(channel, mask);
-        storeBan(api, channel, mask, getBotNick(api), config.default_ban_duration);
+        api.banStore.storeBan(
+          channel,
+          mask,
+          getBotNick(api),
+          config.default_ban_duration === 0 ? 0 : config.default_ban_duration * 60_000,
+        );
       }
     }
   }

@@ -2,8 +2,9 @@
 // Registers .botlink, .bots, .bottree, .whom, .bot, .bsay, .bannounce with the command handler.
 import type { CommandHandler } from '../../command-handler';
 import type { BotlinkConfig } from '../../types';
+import { formatDuration, parseDuration } from '../../utils/duration';
 import { sanitize } from '../../utils/sanitize';
-import type { BotLinkHub } from '../botlink-hub';
+import { type BotLinkHub, isValidIP } from '../botlink-hub';
 import type { BotLinkLeaf } from '../botlink-leaf';
 import type { PartyLineUser } from '../botlink-protocol';
 import type { BotlinkDCCView } from '../dcc';
@@ -94,8 +95,77 @@ export function registerBotlinkCommands(
           break;
         }
 
+        case 'bans': {
+          if (!hub) {
+            ctx.reply('Only available on hub bots.');
+            return;
+          }
+          const bans = hub.getAuthBans();
+          if (bans.length === 0) {
+            ctx.reply('No active link bans.');
+            return;
+          }
+          const lines = [`Link bans (${bans.length}):`];
+          for (const ban of bans) {
+            const type = ban.manual ? 'manual' : 'auto';
+            const remaining =
+              ban.bannedUntil === 0
+                ? 'permanent'
+                : `expires in ${formatDuration(ban.bannedUntil - Date.now())}`;
+            const esc = ban.banCount > 0 ? ` (escalation: ${ban.banCount})` : '';
+            lines.push(`  ${ban.ip.padEnd(20)} ${type.padEnd(7)} ${remaining}${esc}`);
+          }
+          ctx.reply(lines.join('\n'));
+          break;
+        }
+
+        case 'ban': {
+          if (!hub) {
+            ctx.reply('Only available on hub bots.');
+            return;
+          }
+          const banIp = rest[0];
+          if (!banIp) {
+            ctx.reply('Usage: .botlink ban <ip|cidr> [duration] [reason...]');
+            return;
+          }
+          if (!isValidIP(banIp)) {
+            ctx.reply('Invalid IPv4 address or CIDR range.');
+            return;
+          }
+          let durationMs = 0; // default: permanent
+          let reasonParts = rest.slice(1);
+          if (reasonParts.length > 0) {
+            const parsed = parseDuration(reasonParts[0]);
+            if (parsed !== null) {
+              durationMs = parsed;
+              reasonParts = reasonParts.slice(1);
+            }
+          }
+          const reason = reasonParts.join(' ') || 'manual ban';
+          hub.manualBan(banIp, durationMs, reason, ctx.nick);
+          const durStr = durationMs === 0 ? 'permanent' : formatDuration(durationMs);
+          ctx.reply(`Banned ${banIp} (${durStr}): ${reason}`);
+          break;
+        }
+
+        case 'unban': {
+          if (!hub) {
+            ctx.reply('Only available on hub bots.');
+            return;
+          }
+          const unbanIp = rest[0];
+          if (!unbanIp) {
+            ctx.reply('Usage: .botlink unban <ip|cidr>');
+            return;
+          }
+          hub.unban(unbanIp);
+          ctx.reply(`Unbanned ${unbanIp}.`);
+          break;
+        }
+
         default:
-          ctx.reply('Usage: .botlink <status|disconnect|reconnect>');
+          ctx.reply('Usage: .botlink <status|disconnect|reconnect|bans|ban|unban>');
       }
     },
   );

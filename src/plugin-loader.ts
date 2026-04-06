@@ -5,6 +5,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { resolveSecrets } from './config';
+import type { BanStore } from './core/ban-store';
 import type { ChannelSettings } from './core/channel-settings';
 import type { ChannelState } from './core/channel-state';
 import { HelpRegistry } from './core/help-registry';
@@ -27,6 +28,7 @@ import type {
   HandlerContext,
   HelpEntry,
   PluginAPI,
+  PluginBanStore,
   PluginBotConfig,
   PluginChannelSettings,
   PluginDB,
@@ -83,6 +85,7 @@ export interface PluginLoaderDeps {
   services?: Services | null;
   helpRegistry?: HelpRegistry | null;
   channelSettings?: ChannelSettings | null;
+  banStore?: BanStore | null;
   logger?: Logger | null;
   getCasemapping?: () => Casemapping;
   getServerSupports?: () => Record<string, string>;
@@ -119,6 +122,7 @@ export class PluginLoader {
   private services: Services | null;
   private helpRegistry: HelpRegistry | null;
   private channelSettings: ChannelSettings | null;
+  private banStore: BanStore | null;
   private logger: Logger | null;
   private rootLogger: Logger | null;
   private getCasemapping: () => Casemapping;
@@ -141,6 +145,7 @@ export class PluginLoader {
     this.services = deps.services ?? null;
     this.helpRegistry = deps.helpRegistry ?? null;
     this.channelSettings = deps.channelSettings ?? null;
+    this.banStore = deps.banStore ?? null;
     this.rootLogger = deps.logger ?? null;
     this.logger = deps.logger?.child('plugin-loader') ?? null;
     this.getCasemapping = deps.getCasemapping ?? (() => 'rfc1459');
@@ -488,6 +493,7 @@ export class PluginLoader {
       permissions: createPluginPermissionsApi(this.permissions),
       services: createPluginServicesApi(this.services),
       db: createPluginDbApi(this.db, pluginId),
+      banStore: createPluginBanStoreApi(this.banStore),
       botConfig: Object.freeze(pluginBotConfig),
       config: Object.freeze({ ...config }),
       getServerSupports(): Record<string, string> {
@@ -709,6 +715,46 @@ export class PluginLoader {
 // Plugin API sub-factories
 // These are module-level (not class members) to keep createPluginApi() short.
 // ---------------------------------------------------------------------------
+
+function createPluginBanStoreApi(
+  banStore: import('./core/ban-store').BanStore | null,
+): PluginBanStore {
+  if (banStore) {
+    return Object.freeze({
+      storeBan: banStore.storeBan.bind(banStore),
+      removeBan: banStore.removeBan.bind(banStore),
+      getBan: banStore.getBan.bind(banStore),
+      getChannelBans: banStore.getChannelBans.bind(banStore),
+      getAllBans: banStore.getAllBans.bind(banStore),
+      setSticky: banStore.setSticky.bind(banStore),
+      liftExpiredBans: banStore.liftExpiredBans.bind(banStore),
+      migrateFromPluginNamespace: banStore.migrateFromPluginNamespace.bind(banStore),
+    });
+  }
+  // No DB available — return a no-op stub (return type enforced by PluginBanStore)
+  return Object.freeze({
+    storeBan() {},
+    removeBan() {},
+    getBan() {
+      return null;
+    },
+    getChannelBans() {
+      return [];
+    },
+    getAllBans() {
+      return [];
+    },
+    setSticky() {
+      return false;
+    },
+    liftExpiredBans() {
+      return 0;
+    },
+    migrateFromPluginNamespace() {
+      return 0;
+    },
+  });
+}
 
 function createPluginDbApi(
   db: import('./database').BotDatabase | null,

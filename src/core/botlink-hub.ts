@@ -4,9 +4,11 @@
 import { createServer } from 'node:net';
 import type { Server as NetServer, Socket } from 'node:net';
 
+import type { BotDatabase } from '../database';
 import type { BotEventBus } from '../event-bus';
 import type { Logger } from '../logger';
 import type { BotlinkConfig } from '../types';
+import { AdminListStore } from '../utils/admin-list-store';
 import {
   BotLinkProtocol,
   type CommandRelay,
@@ -45,6 +47,21 @@ interface AuthTracker {
   banCount: number;
 }
 
+export interface AuthBanEntry {
+  ip: string;
+  bannedUntil: number; // 0 = permanent
+  banCount: number;
+  manual: boolean;
+}
+
+export interface LinkBan {
+  ip: string; // single IP or CIDR range
+  bannedUntil: number; // 0 = permanent
+  reason: string;
+  setBy: string;
+  setAt: number; // unix ms
+}
+
 // ---------------------------------------------------------------------------
 // CIDR whitelist helper
 // ---------------------------------------------------------------------------
@@ -66,6 +83,17 @@ function ipv4ToNum(ip: string): number {
 function normalizeIP(ip: string): string {
   const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(ip);
   return mapped ? mapped[1] : ip;
+}
+
+/** Validate that a string is a valid IPv4 address or IPv4 CIDR range. */
+export function isValidIP(input: string): boolean {
+  const slash = input.indexOf('/');
+  if (slash === -1) {
+    return !Number.isNaN(ipv4ToNum(input));
+  }
+  const base = input.slice(0, slash);
+  const prefix = Number(input.slice(slash + 1));
+  return !Number.isNaN(ipv4ToNum(base)) && Number.isInteger(prefix) && prefix >= 0 && prefix <= 32;
 }
 
 /** Check whether an IP matches any CIDR in the whitelist. IPv4 only (IPv6 CIDRs are ignored). */
@@ -115,6 +143,9 @@ export class BotLinkHub {
   private linkTimeoutMs: number;
   private authTracker: Map<string, AuthTracker> = new Map();
   private pendingHandshakes: Map<string, number> = new Map();
+  private linkBanStore: AdminListStore<LinkBan> | null = null;
+  /** CIDR manual bans — checked after the authTracker Map lookup for single IPs. */
+  private manualCidrBans: Map<string, LinkBan> = new Map();
 
   /** Fired when a leaf completes handshake. */
   onLeafConnected: ((botname: string) => void) | null = null;
@@ -132,6 +163,7 @@ export class BotLinkHub {
     version: string,
     logger?: Logger | null,
     eventBus?: BotEventBus | null,
+    db?: BotDatabase | null,
   ) {
     this.config = config;
     this.version = version;
@@ -140,6 +172,15 @@ export class BotLinkHub {
     this.expectedHash = hashPassword(config.password);
     this.pingIntervalMs = config.ping_interval_ms;
     this.linkTimeoutMs = config.link_timeout_ms;
+
+    // Initialize link ban persistence if DB is available
+    if (db) {
+      this.linkBanStore = new AdminListStore<LinkBan>(db, {
+        namespace: '_linkbans',
+        keyFn: (ban) => ban.ip,
+      });
+      this.loadPersistedBans();
+    }
   }
 
   /** Start listening for leaf connections. Uses config values when port/host not specified. */
@@ -449,6 +490,122 @@ export class BotLinkHub {
     return true;
   }
 
+  // -----------------------------------------------------------------------
+  // Link ban management (manual + auto)
+  // -----------------------------------------------------------------------
+
+  /** Get all active auth bans (auto from authTracker + manual from DB). */
+  getAuthBans(): AuthBanEntry[] {
+    const now = Date.now();
+    const result: AuthBanEntry[] = [];
+
+    // Auto bans from authTracker
+    for (const [ip, tracker] of this.authTracker) {
+      if (tracker.bannedUntil > now) {
+        // Normalize MAX_SAFE_INTEGER sentinel (permanent manual ban) to 0 in output
+        const bannedUntil =
+          tracker.bannedUntil === Number.MAX_SAFE_INTEGER ? 0 : tracker.bannedUntil;
+        result.push({ ip, bannedUntil, banCount: tracker.banCount, manual: false });
+      }
+    }
+
+    // Manual bans from DB (may overlap with authTracker entries)
+    if (this.linkBanStore) {
+      for (const ban of this.linkBanStore.list()) {
+        // Skip expired manual bans
+        if (ban.bannedUntil !== 0 && ban.bannedUntil <= now) continue;
+        // Check if already listed from authTracker
+        const existing = result.find((r) => r.ip === ban.ip);
+        if (existing) {
+          existing.manual = true;
+        } else {
+          result.push({ ip: ban.ip, bannedUntil: ban.bannedUntil, banCount: 0, manual: true });
+        }
+      }
+    }
+
+    return result;
+  }
+
+  private static readonly MAX_CIDR_BANS = 500;
+
+  /** Manually ban an IP or CIDR range. Persists to DB and loads into hot path. */
+  manualBan(ip: string, durationMs: number, reason: string, setBy: string): void {
+    const now = Date.now();
+    const bannedUntil = durationMs === 0 ? 0 : now + durationMs;
+    const ban: LinkBan = { ip, bannedUntil, reason, setBy, setAt: now };
+
+    // Persist to DB
+    this.linkBanStore?.set(ban);
+
+    // Load into hot path
+    if (ip.includes('/')) {
+      // CIDR range — enforce cap to prevent connection-path DoS
+      if (!this.manualCidrBans.has(ip) && this.manualCidrBans.size >= BotLinkHub.MAX_CIDR_BANS) {
+        this.logger?.warn(`CIDR ban limit (${BotLinkHub.MAX_CIDR_BANS}) reached, rejecting ${ip}`);
+        return;
+      }
+      this.manualCidrBans.set(ip, ban);
+    } else {
+      // Single IP — set in authTracker for fast Map lookup
+      const tracker = this.authTracker.get(ip) ?? {
+        failures: 0,
+        firstFailure: now,
+        bannedUntil: 0,
+        banCount: 0,
+      };
+      // For permanent bans, use a far-future timestamp
+      tracker.bannedUntil = bannedUntil === 0 ? Number.MAX_SAFE_INTEGER : bannedUntil;
+      this.authTracker.set(ip, tracker);
+    }
+
+    this.logger?.info(`Manual ban: ${ip} by ${setBy} (${reason})`);
+    this.eventBus?.emit('auth:ban', ip, 0, durationMs);
+  }
+
+  /** Remove a ban (auto or manual) for an IP or CIDR. */
+  unban(ip: string): void {
+    // Remove from authTracker (single IPs)
+    this.authTracker.delete(ip);
+
+    // Remove from CIDR map
+    this.manualCidrBans.delete(ip);
+
+    // Remove from DB
+    this.linkBanStore?.del(ip);
+
+    this.logger?.info(`Unbanned: ${ip}`);
+    this.eventBus?.emit('auth:unban', ip);
+  }
+
+  /** Load persisted manual bans from DB into the hot path on startup. */
+  private loadPersistedBans(): void {
+    if (!this.linkBanStore) return;
+    const now = Date.now();
+    let loaded = 0;
+    for (const ban of this.linkBanStore.list()) {
+      // Skip expired non-permanent bans
+      if (ban.bannedUntil !== 0 && ban.bannedUntil <= now) continue;
+
+      if (ban.ip.includes('/')) {
+        this.manualCidrBans.set(ban.ip, ban);
+      } else {
+        const tracker = this.authTracker.get(ban.ip) ?? {
+          failures: 0,
+          firstFailure: ban.setAt,
+          bannedUntil: 0,
+          banCount: 0,
+        };
+        tracker.bannedUntil = ban.bannedUntil === 0 ? Number.MAX_SAFE_INTEGER : ban.bannedUntil;
+        this.authTracker.set(ban.ip, tracker);
+      }
+      loaded++;
+    }
+    if (loaded > 0) {
+      this.logger?.info(`Loaded ${loaded} persisted link ban(s)`);
+    }
+  }
+
   /** Shut down the hub: close all leaf connections and the server. */
   close(): void {
     for (const leaf of this.leaves.values()) {
@@ -487,6 +644,16 @@ export class BotLinkHub {
         this.logger?.debug(`Rejected banned IP ${ip}`);
         socket.destroy();
         return;
+      }
+      // Check CIDR manual bans (small admin-managed list, linear scan is fine)
+      const normalizedIP = normalizeIP(ip);
+      for (const cidrBan of this.manualCidrBans.values()) {
+        if (cidrBan.bannedUntil !== 0 && cidrBan.bannedUntil <= Date.now()) continue;
+        if (isWhitelisted(normalizedIP, [cidrBan.ip])) {
+          this.logger?.debug(`Rejected IP ${ip} by CIDR ban ${cidrBan.ip}`);
+          socket.destroy();
+          return;
+        }
       }
     }
 
@@ -694,6 +861,14 @@ export class BotLinkHub {
         } else if (now - tracker.bannedUntil > ESCALATED_STALE_MS) {
           this.authTracker.delete(ip);
         }
+      }
+    }
+
+    // Sweep expired CIDR manual bans
+    for (const [ip, ban] of this.manualCidrBans) {
+      if (ban.bannedUntil !== 0 && ban.bannedUntil <= now) {
+        this.manualCidrBans.delete(ip);
+        this.linkBanStore?.del(ip);
       }
     }
   }

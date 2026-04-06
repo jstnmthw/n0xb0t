@@ -1,6 +1,5 @@
 // chanmod — adversarial protection: rejoin on kick, revenge, nick recovery, stopnethack
 import type { HandlerContext, PluginAPI } from '../../src/types';
-import { storeBan } from './bans';
 import {
   botHasOps,
   buildBanMask,
@@ -216,7 +215,12 @@ export function setupProtection(
             return;
           }
           api.ban(channel, mask);
-          storeBan(api, channel, mask, getBotNick(api), config.default_ban_duration);
+          api.banStore.storeBan(
+            channel,
+            mask,
+            getBotNick(api),
+            config.default_ban_duration === 0 ? 0 : config.default_ban_duration * 60_000,
+          );
           api.kick(channel, kickerNick, config.revenge_kick_reason);
           api.log(`Revenge: kickbanned ${kickerNick} from ${channel} for kicking bot`);
         }

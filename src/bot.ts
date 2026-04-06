@@ -14,6 +14,7 @@ import {
   validateChannelKeys,
   validateResolvedSecrets,
 } from './config';
+import { BanStore } from './core/ban-store';
 import { BotLinkHub } from './core/botlink-hub';
 import { BotLinkLeaf } from './core/botlink-leaf';
 import { handleProtectFrame } from './core/botlink-protect';
@@ -23,6 +24,7 @@ import { BanListSyncer, SharedBanList } from './core/botlink-sharing';
 import { ChannelStateSyncer, PermissionSyncer } from './core/botlink-sync';
 import { ChannelSettings } from './core/channel-settings';
 import { ChannelState } from './core/channel-state';
+import { registerBanCommands } from './core/commands/ban-commands';
 import { registerBotlinkCommands } from './core/commands/botlink-commands';
 import { registerChannelCommands } from './core/commands/channel-commands';
 import { registerDispatcherCommands } from './core/commands/dispatcher-commands';
@@ -52,6 +54,7 @@ import type { BotConfig } from './types';
 import { buildSocksOptions } from './utils/socks';
 import { stripFormatting } from './utils/strip-formatting';
 import { requiresVerificationForFlags } from './utils/verify-flags';
+import { ircLower } from './utils/wildcard';
 
 // ---------------------------------------------------------------------------
 // Bot
@@ -74,6 +77,7 @@ export class Bot {
   readonly messageQueue: MessageQueue;
   readonly services: Services;
   readonly helpRegistry: HelpRegistry;
+  readonly banStore: BanStore;
   readonly memo: MemoManager;
 
   private bridge: IRCBridge | null = null;
@@ -142,6 +146,7 @@ export class Bot {
     });
     this.helpRegistry = new HelpRegistry();
     this.channelSettings = new ChannelSettings(this.db, this.logger.child('channel-settings'));
+    this.banStore = new BanStore(this.db, (s) => ircLower(s, this.getCasemapping()));
     this.memo = new MemoManager({
       config: this.config.memo,
       dispatcher: this.dispatcher,
@@ -189,6 +194,7 @@ export class Bot {
       services: this.services,
       helpRegistry: this.helpRegistry,
       channelSettings: this.channelSettings,
+      banStore: this.banStore,
       logger: this.logger,
       getCasemapping: () => this.getCasemapping(),
       getServerSupports: () => {
@@ -297,7 +303,13 @@ export class Bot {
 
       const version = this.readPackageVersion();
       if (this.config.botlink.role === 'hub') {
-        this._botLinkHub = new BotLinkHub(this.config.botlink, version, this.logger, this.eventBus);
+        this._botLinkHub = new BotLinkHub(
+          this.config.botlink,
+          version,
+          this.logger,
+          this.eventBus,
+          this.db,
+        );
         this._botLinkHub.setCommandRelay(this.commandHandler, this.permissions, this.eventBus);
         this._botLinkHub.onSyncRequest = (_botname, send) => {
           for (const f of ChannelStateSyncer.buildSyncFrames(this.channelState)) send(f);
@@ -365,6 +377,15 @@ export class Bot {
       this._dccManager,
       (target, message) => this.client.say(target, message),
     );
+    registerBanCommands({
+      commandHandler: this.commandHandler,
+      banStore: this.banStore,
+      ircCommands: this.ircCommands,
+      db: this.db,
+      hub: this._botLinkHub,
+      sharedBanList: this._sharedBanList,
+      ircLower: (s: string) => ircLower(s, this.getCasemapping()),
+    });
 
     // 7b. Wire memo DCC-connect notification (after botlink may have set onPartyJoin)
     if (this._dccManager) {

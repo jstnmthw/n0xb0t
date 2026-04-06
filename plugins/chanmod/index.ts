@@ -3,7 +3,7 @@ import type { PluginAPI } from '../../src/types';
 import { AnopeBackend } from './anope-backend';
 import { AthemeBackend } from './atheme-backend';
 import { setupAutoOp } from './auto-op';
-import { setupBans } from './bans';
+import { migrateBansToCore, setupBans } from './bans';
 import { createProbeState, setupChanServNotice } from './chanserv-notice';
 import { setupCommands } from './commands';
 import { setupInvite } from './invite';
@@ -13,6 +13,7 @@ import { setupModeEnforce } from './mode-enforce';
 import { setupProtection } from './protection';
 import { ProtectionChain } from './protection-backend';
 import { createState, readConfig } from './state';
+import { setupStickyBans } from './sticky';
 import { assessThreat } from './takeover-detect';
 import { setupTopicRecovery } from './topic-recovery';
 
@@ -25,6 +26,9 @@ let teardowns: Array<() => void> = [];
 export function init(api: PluginAPI): void {
   const config = readConfig(api);
   const state = createState();
+
+  // Migrate any bans from old plugin namespace to core _bans namespace
+  migrateBansToCore(api);
 
   // Deprecation notice for removed chanserv_op config key
   if (api.config.chanserv_op !== undefined) {
@@ -222,6 +226,9 @@ export function init(api: PluginAPI): void {
     setupInvite(api, config, state),
     setupTopicRecovery(api, config, state),
   );
+
+  // Sticky ban enforcement doesn't return a teardown (binds are auto-cleaned)
+  setupStickyBans(api);
 }
 
 export function teardown(): void {

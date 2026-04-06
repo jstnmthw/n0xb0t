@@ -1157,3 +1157,113 @@ describe('.bannounce command', () => {
     expect(replies[0]).toContain('Announcement sent');
   });
 });
+
+// ---------------------------------------------------------------------------
+// .botlink bans / ban / unban subcommands
+// ---------------------------------------------------------------------------
+
+describe('.botlink ban subcommands', () => {
+  it('.botlink bans shows active link bans', async () => {
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+    await hub.listen(0, '127.0.0.1');
+    hub.manualBan('10.0.0.1', 0, 'test', 'admin');
+
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, hub, null, hubConfig());
+    const replies: string[] = [];
+    await handler.execute('.botlink bans', makeCtx(replies));
+
+    expect(replies[0]).toContain('Link bans');
+    expect(replies[0]).toContain('10.0.0.1');
+    hub.close();
+  });
+
+  it('.botlink bans shows "No active link bans" when empty', async () => {
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+    await hub.listen(0, '127.0.0.1');
+
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, hub, null, hubConfig());
+    const replies: string[] = [];
+    await handler.execute('.botlink bans', makeCtx(replies));
+
+    expect(replies[0]).toContain('No active link bans');
+    hub.close();
+  });
+
+  it('.botlink ban adds a manual ban', async () => {
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+    await hub.listen(0, '127.0.0.1');
+
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, hub, null, hubConfig());
+    const replies: string[] = [];
+    await handler.execute('.botlink ban 10.0.0.1 5m test reason', makeCtx(replies));
+
+    expect(replies[0]).toContain('Banned 10.0.0.1');
+    expect(hub.getAuthBans().find((b) => b.ip === '10.0.0.1')).toBeDefined();
+    hub.close();
+  });
+
+  it('.botlink ban rejects invalid IP', async () => {
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+    await hub.listen(0, '127.0.0.1');
+
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, hub, null, hubConfig());
+    const replies: string[] = [];
+    await handler.execute('.botlink ban not-an-ip', makeCtx(replies));
+
+    expect(replies[0]).toContain('Invalid');
+    hub.close();
+  });
+
+  it('.botlink ban shows usage when no args', async () => {
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+    await hub.listen(0, '127.0.0.1');
+
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, hub, null, hubConfig());
+    const replies: string[] = [];
+    await handler.execute('.botlink ban', makeCtx(replies));
+
+    expect(replies[0]).toContain('Usage');
+    hub.close();
+  });
+
+  it('.botlink unban removes a ban', async () => {
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+    await hub.listen(0, '127.0.0.1');
+    hub.manualBan('10.0.0.1', 0, 'test', 'admin');
+
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, hub, null, hubConfig());
+    const replies: string[] = [];
+    await handler.execute('.botlink unban 10.0.0.1', makeCtx(replies));
+
+    expect(replies[0]).toContain('Unbanned');
+    expect(hub.getAuthBans()).toHaveLength(0);
+    hub.close();
+  });
+
+  it('.botlink unban shows usage when no args', async () => {
+    const hub = new BotLinkHub(hubConfig(), '1.0.0');
+    await hub.listen(0, '127.0.0.1');
+
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, hub, null, hubConfig());
+    const replies: string[] = [];
+    await handler.execute('.botlink unban', makeCtx(replies));
+
+    expect(replies[0]).toContain('Usage');
+    hub.close();
+  });
+
+  it('.botlink bans replies "Only available on hub" for leaf', async () => {
+    const handler = new CommandHandler();
+    registerBotlinkCommands(handler, null, null, hubConfig());
+    const replies: string[] = [];
+    await handler.execute('.botlink bans', makeCtx(replies));
+    expect(replies[0]).toContain('Only available on hub');
+  });
+});

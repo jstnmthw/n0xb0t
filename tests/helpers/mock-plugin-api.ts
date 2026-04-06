@@ -49,6 +49,16 @@ export function createMockPluginAPI(overrides: Partial<PluginAPI> = {}): PluginA
       del: noop,
       list: vi.fn().mockReturnValue([]),
     },
+    banStore: {
+      storeBan: noop,
+      removeBan: noop,
+      getBan: vi.fn().mockReturnValue(null),
+      getChannelBans: vi.fn().mockReturnValue([]),
+      getAllBans: vi.fn().mockReturnValue([]),
+      setSticky: vi.fn().mockReturnValue(false),
+      liftExpiredBans: vi.fn().mockReturnValue(0),
+      migrateFromPluginNamespace: vi.fn().mockReturnValue(0),
+    },
     botConfig: {
       irc: {
         nick: 'hexbot',

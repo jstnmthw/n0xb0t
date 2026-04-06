@@ -1,6 +1,7 @@
 // HexBot — Mock bot helper for testing
 // Creates a Bot-like object with real modules but a mock IRC client.
 import { CommandHandler } from '../../src/command-handler';
+import { BanStore } from '../../src/core/ban-store';
 import { ChannelSettings } from '../../src/core/channel-settings';
 import { ChannelState } from '../../src/core/channel-state';
 import { registerChannelCommands } from '../../src/core/commands/channel-commands';
@@ -32,6 +33,7 @@ export interface MockBot {
   ircCommands: IRCCommands;
   services: Services;
   channelSettings: ChannelSettings;
+  banStore: BanStore;
   pluginLoader: PluginLoader;
   botConfig: BotConfig;
   logger: Logger;
@@ -111,6 +113,7 @@ export function createMockBot(options?: { botNick?: string; currentNick?: string
   services.attach();
 
   const channelSettings = new ChannelSettings(db, logger.child('channel-settings'));
+  const banStore = new BanStore(db, (s) => s.toLowerCase());
 
   const pluginLoader = new PluginLoader({
     pluginDir: './plugins',
@@ -124,6 +127,7 @@ export function createMockBot(options?: { botNick?: string; currentNick?: string
     ircCommands,
     services,
     channelSettings,
+    banStore,
     logger,
   });
 
@@ -151,6 +155,7 @@ export function createMockBot(options?: { botNick?: string; currentNick?: string
     ircCommands,
     services,
     channelSettings,
+    banStore,
     pluginLoader,
     botConfig,
     logger,

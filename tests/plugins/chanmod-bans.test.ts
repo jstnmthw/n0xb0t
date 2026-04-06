@@ -1,15 +1,8 @@
-// Unit tests for plugins/chanmod/bans.ts
-// Tests liftExpiredBans, storeBan, getAllBanRecords, getChannelBanRecords directly.
+// Unit tests for chanmod ban integration with core BanStore.
+// Tests liftExpiredBans via setupBans, and ban helpers.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  getAllBanRecords,
-  getChannelBanRecords,
-  liftExpiredBans,
-  removeBanRecord,
-  setupBans,
-  storeBan,
-} from '../../plugins/chanmod/bans';
+import { migrateBansToCore, setupBans } from '../../plugins/chanmod/bans';
 import {
   botCanHalfop,
   buildBanMask,
@@ -17,9 +10,10 @@ import {
   getUserFlags,
 } from '../../plugins/chanmod/helpers';
 import { createState } from '../../plugins/chanmod/state';
+import { BanStore } from '../../src/core/ban-store.js';
 import { BotDatabase } from '../../src/database';
 import { createLogger } from '../../src/logger';
-import type { PluginAPI, PluginDB } from '../../src/types';
+import type { PluginAPI, PluginBanStore, PluginDB } from '../../src/types';
 import { createMockPluginAPI } from '../helpers/mock-plugin-api';
 
 /** Wrap a BotDatabase with a namespace to create a PluginDB (as plugin-loader does). */
@@ -32,19 +26,41 @@ function makePluginDb(db: BotDatabase, ns: string): PluginDB {
   };
 }
 
-function makeApi(botHasOps = true): { api: PluginAPI; modeSpy: ReturnType<typeof vi.fn> } {
+function makeApi(botHasOps = true): {
+  api: PluginAPI;
+  modeSpy: ReturnType<typeof vi.fn>;
+  modeCallback: (channel: string, modes: string, param: string) => void;
+  banStore: BanStore;
+  rawDb: BotDatabase;
+} {
   const rawDb = new BotDatabase(':memory:', createLogger('error'));
   rawDb.open();
   const pluginDb = makePluginDb(rawDb, 'chanmod');
+  const banStore = new BanStore(rawDb, (s) => s.toLowerCase());
 
   const botNick = 'hexbot';
   const users = new Map<string, { modes: string[] }>();
   if (botHasOps) users.set(botNick, { modes: ['o'] });
 
   const modeSpy = vi.fn();
+  /** Typed wrapper for passing modeSpy to liftExpiredBans (vitest Mock doesn't satisfy typed callbacks). */
+  const modeCallback = (...args: [string, string, string]) => modeSpy(...args);
+
+  // Build a real PluginBanStore from the BanStore instance
+  const pluginBanStore: PluginBanStore = {
+    storeBan: banStore.storeBan.bind(banStore),
+    removeBan: banStore.removeBan.bind(banStore),
+    getBan: banStore.getBan.bind(banStore),
+    getChannelBans: banStore.getChannelBans.bind(banStore),
+    getAllBans: banStore.getAllBans.bind(banStore),
+    setSticky: banStore.setSticky.bind(banStore),
+    liftExpiredBans: banStore.liftExpiredBans.bind(banStore),
+    migrateFromPluginNamespace: banStore.migrateFromPluginNamespace.bind(banStore),
+  };
 
   const api = createMockPluginAPI({
     db: pluginDb,
+    banStore: pluginBanStore,
     botConfig: {
       irc: {
         nick: botNick,
@@ -67,19 +83,19 @@ function makeApi(botHasOps = true): { api: PluginAPI; modeSpy: ReturnType<typeof
     bind: vi.fn(),
   });
 
-  return { api, modeSpy };
+  return { api, modeSpy, modeCallback, banStore, rawDb };
 }
 
-describe('chanmod bans — storeBan / getAllBanRecords / getChannelBanRecords', () => {
+describe('chanmod bans — storeBan / getAllBans / getChannelBans via core BanStore', () => {
   let api: PluginAPI;
 
   beforeEach(() => {
     ({ api } = makeApi());
   });
 
-  it('storeBan stores a permanent ban (durationMinutes=0)', () => {
-    storeBan(api, '#test', '*!*@bad.host', 'Admin', 0);
-    const records = getAllBanRecords(api);
+  it('storeBan stores a permanent ban (durationMs=0)', () => {
+    api.banStore.storeBan('#test', '*!*@bad.host', 'Admin', 0);
+    const records = api.banStore.getAllBans();
     expect(records.length).toBe(1);
     expect(records[0].expires).toBe(0);
     expect(records[0].mask).toBe('*!*@bad.host');
@@ -87,64 +103,47 @@ describe('chanmod bans — storeBan / getAllBanRecords / getChannelBanRecords', 
 
   it('storeBan stores a timed ban with future expiry', () => {
     const before = Date.now();
-    storeBan(api, '#test', '*!*@bad.host', 'Admin', 60);
-    const records = getAllBanRecords(api);
+    api.banStore.storeBan('#test', '*!*@bad.host', 'Admin', 3_600_000);
+    const records = api.banStore.getAllBans();
     expect(records.length).toBe(1);
     expect(records[0].expires).toBeGreaterThan(before);
   });
 
-  it('getChannelBanRecords returns only bans for a specific channel', () => {
-    storeBan(api, '#test', '*!*@a.host', 'Admin', 0);
-    storeBan(api, '#other', '*!*@b.host', 'Admin', 0);
-    const testBans = getChannelBanRecords(api, '#test');
+  it('getChannelBans returns only bans for a specific channel', () => {
+    api.banStore.storeBan('#test', '*!*@a.host', 'Admin', 0);
+    api.banStore.storeBan('#other', '*!*@b.host', 'Admin', 0);
+    const testBans = api.banStore.getChannelBans('#test');
     expect(testBans.length).toBe(1);
     expect(testBans[0].mask).toBe('*!*@a.host');
   });
 
-  it('removeBanRecord deletes the ban entry', () => {
-    storeBan(api, '#test', '*!*@gone.host', 'Admin', 0);
-    removeBanRecord(api, '#test', '*!*@gone.host');
-    expect(getAllBanRecords(api).length).toBe(0);
+  it('removeBan deletes the ban entry', () => {
+    api.banStore.storeBan('#test', '*!*@gone.host', 'Admin', 0);
+    api.banStore.removeBan('#test', '*!*@gone.host');
+    expect(api.banStore.getAllBans().length).toBe(0);
   });
 });
 
-describe('chanmod bans — liftExpiredBans', () => {
+describe('chanmod bans — liftExpiredBans via core BanStore', () => {
   it('does not lift permanent bans (expires=0)', () => {
-    const { api, modeSpy } = makeApi();
-    storeBan(api, '#test', '*!*@perm.host', 'Admin', 0);
-    const lifted = liftExpiredBans(api);
+    const { api, modeSpy, modeCallback } = makeApi();
+    api.banStore.storeBan('#test', '*!*@perm.host', 'Admin', 0);
+    const lifted = api.banStore.liftExpiredBans(() => true, modeCallback);
     expect(lifted).toBe(0);
     expect(modeSpy).not.toHaveBeenCalled();
   });
 
   it('does not lift bans that have not expired yet', () => {
-    const { api, modeSpy } = makeApi();
-    storeBan(api, '#test', '*!*@future.host', 'Admin', 60); // 60 minutes in future
-    const lifted = liftExpiredBans(api);
+    const { api, modeSpy, modeCallback } = makeApi();
+    api.banStore.storeBan('#test', '*!*@future.host', 'Admin', 3_600_000);
+    const lifted = api.banStore.liftExpiredBans(() => true, modeCallback);
     expect(lifted).toBe(0);
     expect(modeSpy).not.toHaveBeenCalled();
   });
 
   it('lifts expired bans when bot has ops', () => {
-    const { api, modeSpy } = makeApi(true); // bot has ops
+    const { api, modeSpy, modeCallback, rawDb } = makeApi(true);
     // Manually store a ban that expires in the past
-    const expiredRecord = {
-      mask: '*!*@expired.host',
-      channel: '#test',
-      by: 'Admin',
-      ts: Date.now() - 120_000,
-      expires: Date.now() - 60_000, // expired 1 minute ago
-    };
-    api.db.set('ban:#test:*!*@expired.host', JSON.stringify(expiredRecord));
-
-    const lifted = liftExpiredBans(api);
-    expect(lifted).toBe(1);
-    expect(modeSpy).toHaveBeenCalledWith('#test', '-b', '*!*@expired.host');
-    expect(getAllBanRecords(api).length).toBe(0);
-  });
-
-  it('does not lift expired ban when bot has no ops', () => {
-    const { api, modeSpy } = makeApi(false); // bot has no ops
     const expiredRecord = {
       mask: '*!*@expired.host',
       channel: '#test',
@@ -152,18 +151,36 @@ describe('chanmod bans — liftExpiredBans', () => {
       ts: Date.now() - 120_000,
       expires: Date.now() - 60_000,
     };
-    api.db.set('ban:#test:*!*@expired.host', JSON.stringify(expiredRecord));
+    rawDb.set('_bans', 'ban:#test:*!*@expired.host', JSON.stringify(expiredRecord));
 
-    const lifted = liftExpiredBans(api);
+    const lifted = api.banStore.liftExpiredBans(() => true, modeCallback);
+    expect(lifted).toBe(1);
+    expect(modeSpy).toHaveBeenCalledWith('#test', '-b', '*!*@expired.host');
+    expect(api.banStore.getAllBans().length).toBe(0);
+  });
+
+  it('does not lift expired ban when bot has no ops', () => {
+    const { api, modeSpy, modeCallback, rawDb } = makeApi(false);
+    const expiredRecord = {
+      mask: '*!*@expired.host',
+      channel: '#test',
+      by: 'Admin',
+      ts: Date.now() - 120_000,
+      expires: Date.now() - 60_000,
+    };
+    rawDb.set('_bans', 'ban:#test:*!*@expired.host', JSON.stringify(expiredRecord));
+
+    const lifted = api.banStore.liftExpiredBans(() => false, modeCallback);
     expect(lifted).toBe(0);
     expect(modeSpy).not.toHaveBeenCalled();
   });
 
   it('lifts multiple expired bans in one pass', () => {
-    const { api, modeSpy } = makeApi(true);
+    const { api, modeSpy, modeCallback, rawDb } = makeApi(true);
     const now = Date.now();
     ['*!*@a.host', '*!*@b.host', '*!*@c.host'].forEach((mask) => {
-      api.db.set(
+      rawDb.set(
+        '_bans',
         `ban:#test:${mask}`,
         JSON.stringify({
           mask,
@@ -175,7 +192,7 @@ describe('chanmod bans — liftExpiredBans', () => {
       );
     });
 
-    const lifted = liftExpiredBans(api);
+    const lifted = api.banStore.liftExpiredBans(() => true, modeCallback);
     expect(lifted).toBe(3);
     expect(modeSpy).toHaveBeenCalledTimes(3);
   });
@@ -191,13 +208,14 @@ describe('chanmod bans — setupBans', () => {
   });
 
   it('logs lifted bans after startup timer fires when expired bans exist (singular)', () => {
-    const { api, modeSpy } = makeApi(true);
+    const { api, modeSpy, rawDb } = makeApi(true);
     const state = createState();
     const logSpy = api.log as ReturnType<typeof vi.fn>;
 
-    // Store an expired ban
+    // Store an expired ban in core _bans namespace
     const now = Date.now();
-    api.db.set(
+    rawDb.set(
+      '_bans',
       'ban:#test:*!*@expired.host',
       JSON.stringify({
         mask: '*!*@expired.host',
@@ -221,14 +239,14 @@ describe('chanmod bans — setupBans', () => {
   });
 
   it('logs lifted bans with plural form when multiple bans expired (covers "s" branch)', () => {
-    const { api, modeSpy } = makeApi(true);
+    const { api, modeSpy, rawDb } = makeApi(true);
     const state = createState();
     const logSpy = api.log as ReturnType<typeof vi.fn>;
 
     const now = Date.now();
-    // Store two expired bans
     for (const mask of ['*!*@expired1.host', '*!*@expired2.host']) {
-      api.db.set(
+      rawDb.set(
+        '_bans',
         `ban:#test:${mask}`,
         JSON.stringify({
           mask,
@@ -253,14 +271,10 @@ describe('chanmod bans — setupBans', () => {
 
     const teardown = setupBans(api, {} as never, state);
 
-    // Timer is still pending
     expect(state.startupTimer).not.toBeNull();
-
-    // Calling teardown before the timer fires should clear it
     teardown();
     expect(state.startupTimer).toBeNull();
 
-    // Advancing time should not trigger the startup logic
     vi.advanceTimersByTime(10_000);
     expect(api.log).not.toHaveBeenCalled();
   });
@@ -270,11 +284,40 @@ describe('chanmod bans — setupBans', () => {
     const state = createState();
 
     const teardown = setupBans(api, {} as never, state);
-    vi.advanceTimersByTime(5001); // timer fires, sets startupTimer = null
+    vi.advanceTimersByTime(5001);
 
     expect(state.startupTimer).toBeNull();
-    // Calling teardown again should not throw
     expect(() => teardown()).not.toThrow();
+  });
+});
+
+describe('chanmod bans — migration from plugin namespace', () => {
+  it('migrates old ban records to core namespace', () => {
+    const { api, rawDb } = makeApi();
+
+    // Store a ban in old chanmod plugin namespace
+    rawDb.set(
+      'chanmod',
+      'ban:#test:*!*@evil.com',
+      JSON.stringify({
+        mask: '*!*@evil.com',
+        channel: '#test',
+        by: 'admin',
+        ts: Date.now(),
+        expires: 0,
+      }),
+    );
+
+    const count = migrateBansToCore(api);
+    expect(count).toBe(1);
+    expect(api.banStore.getBan('#test', '*!*@evil.com')).not.toBeNull();
+    expect(rawDb.get('chanmod', 'ban:#test:*!*@evil.com')).toBeNull();
+  });
+
+  it('reports zero when no old bans exist', () => {
+    const { api } = makeApi();
+    const count = migrateBansToCore(api);
+    expect(count).toBe(0);
   });
 });
 
@@ -284,7 +327,6 @@ describe('chanmod bans — setupBans', () => {
 
 describe('chanmod helpers — buildBanMask', () => {
   it('returns null when host is empty (covers !host guard)', () => {
-    // hostmask with empty host: "nick!ident@"
     expect(buildBanMask('nick!ident@', 1)).toBeNull();
     expect(buildBanMask('nick!ident@', 2)).toBeNull();
     expect(buildBanMask('nick!ident@', 3)).toBeNull();
@@ -297,7 +339,7 @@ describe('chanmod helpers — buildBanMask', () => {
 
 describe('chanmod helpers — formatExpiry', () => {
   it('returns "expired" when ban has already expired (diff <= 0)', () => {
-    const past = Date.now() - 60_000; // 1 minute in the past
+    const past = Date.now() - 60_000;
     expect(formatExpiry(past)).toBe('expired');
   });
 });
@@ -318,7 +360,6 @@ describe('chanmod helpers — getUserFlags', () => {
 
 describe('chanmod helpers — botCanHalfop', () => {
   it("returns false when bot is not in the channel users map (covers modes ?? '' branch)", () => {
-    // Channel exists but the bot nick is absent from its users map
     const users = new Map<string, { modes: string[] }>();
     const api = createMockPluginAPI({
       getChannel: vi.fn().mockReturnValue({ users }),
@@ -331,14 +372,12 @@ describe('chanmod helpers — botCanHalfop', () => {
 
 describe('chanmod helpers — buildBanMask additional branches', () => {
   it('returns null when there is no @ in the hostmask', () => {
-    // atIdx === -1 branch in buildBanMask
     expect(buildBanMask('noatsignhere', 1)).toBeNull();
     expect(buildBanMask('noatsignhere', 2)).toBeNull();
     expect(buildBanMask('noatsignhere', 3)).toBeNull();
   });
 
   it('uses * as ident when no ! precedes @ (ident ternary false branch)', () => {
-    // bangIdx === -1: ident falls back to '*' → type 2 mask = *!**@host
     expect(buildBanMask('@bad.host.com', 2)).toBe('*!**@bad.host.com');
   });
 });

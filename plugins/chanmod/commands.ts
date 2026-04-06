@@ -1,6 +1,5 @@
 // chanmod — IRC commands: !op !deop !halfop !dehalfop !voice !devoice !kick !ban !unban !kickban !bans
 import type { HandlerContext, PluginAPI } from '../../src/types';
-import { getChannelBanRecords, removeBanRecord, storeBan } from './bans';
 import {
   botCanHalfop,
   botHasOps,
@@ -246,11 +245,12 @@ export function setupCommands(
     const lastArg = parts[parts.length - 1];
     const hasDuration = parts.length > 1 && /^\d+$/.test(lastArg);
     const durationMinutes = hasDuration ? parseInt(lastArg, 10) : config.default_ban_duration;
+    const durationMs = durationMinutes === 0 ? 0 : durationMinutes * 60_000;
     const target = hasDuration ? parts.slice(0, -1).join(' ') : parts.join(' ');
 
     if (target.includes('!') || target.includes('@')) {
       api.ban(channel, target);
-      storeBan(api, channel, target, ctx.nick, durationMinutes);
+      api.banStore.storeBan(channel, target, ctx.nick, durationMs);
       const durStr = durationMinutes === 0 ? 'permanent' : `${durationMinutes}m`;
       api.log(`${ctx.nick} banned ${target} in ${channel} (${durStr})`);
       return;
@@ -278,7 +278,7 @@ export function setupCommands(
     }
 
     api.ban(channel, banMask);
-    storeBan(api, channel, banMask, ctx.nick, durationMinutes);
+    api.banStore.storeBan(channel, banMask, ctx.nick, durationMs);
     const durStr = durationMinutes === 0 ? 'permanent' : `${durationMinutes}m`;
     api.log(`${ctx.nick} banned ${target} (${banMask}) in ${channel} (${durStr})`);
   });
@@ -296,7 +296,7 @@ export function setupCommands(
     }
     if (arg.includes('!') || arg.includes('@')) {
       api.mode(channel, '-b', arg);
-      removeBanRecord(api, channel, arg);
+      api.banStore.removeBan(channel, arg);
       api.log(`${ctx.nick} unbanned ${arg} in ${channel}`);
       return;
     }
@@ -311,12 +311,12 @@ export function setupCommands(
     const candidates = [1, 2, 3]
       .map((t) => buildBanMask(hostmask, t))
       .filter((m): m is string => m !== null);
-    const records = getChannelBanRecords(api, channel);
+    const records = api.banStore.getChannelBans(channel);
     const storedMasks = new Set(records.map((r) => r.mask));
     const match = candidates.find((m) => storedMasks.has(m));
     if (match) {
       api.mode(channel, '-b', match);
-      removeBanRecord(api, channel, match);
+      api.banStore.removeBan(channel, match);
       api.log(`${ctx.nick} unbanned ${arg} (${match}) in ${channel}`);
     } else {
       for (const m of candidates) {
@@ -358,7 +358,9 @@ export function setupCommands(
     }
 
     api.ban(channel, banMask);
-    storeBan(api, channel, banMask, ctx.nick, config.default_ban_duration);
+    const kickbanDurationMs =
+      config.default_ban_duration === 0 ? 0 : config.default_ban_duration * 60_000;
+    api.banStore.storeBan(channel, banMask, ctx.nick, kickbanDurationMs);
     api.kick(channel, target, reason);
     api.log(`${ctx.nick} kickbanned ${target} (${banMask}) from ${channel} (${reason})`);
   });
@@ -366,7 +368,7 @@ export function setupCommands(
   api.bind('pub', '+o', '!bans', (ctx: HandlerContext) => {
     const channel = ctx.channel!;
     const targetChannel = ctx.args.trim() || channel;
-    const bans = getChannelBanRecords(api, targetChannel);
+    const bans = api.banStore.getChannelBans(targetChannel);
     if (bans.length === 0) {
       ctx.reply(`No tracked bans for ${targetChannel}.`);
       return;
