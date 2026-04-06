@@ -1,6 +1,7 @@
 // HexBot — Per-channel settings registry
 // Plugins register typed setting definitions; values are stored in the DB under 'chanset' namespace.
 import type { BotDatabase } from '../database';
+import type { Logger } from '../logger';
 import type {
   ChannelSettingChangeCallback,
   ChannelSettingDef,
@@ -16,7 +17,10 @@ export class ChannelSettings {
   private defs: Map<string, ChannelSettingEntry> = new Map();
   private changeListeners: Map<string, ChannelSettingChangeCallback[]> = new Map();
 
-  constructor(private readonly db: BotDatabase) {}
+  constructor(
+    private readonly db: BotDatabase,
+    private readonly logger?: Logger,
+  ) {}
 
   /**
    * Register per-channel setting definitions for a plugin.
@@ -27,7 +31,7 @@ export class ChannelSettings {
     for (const def of defs) {
       const existing = this.defs.get(def.key);
       if (existing && existing.pluginId !== pluginId) {
-        console.warn(
+        (this.logger ?? console).warn(
           `[channel-settings] Key collision: "${def.key}" already registered by "${existing.pluginId}" — skipping "${pluginId}"`,
         );
         continue;

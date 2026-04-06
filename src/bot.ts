@@ -102,7 +102,6 @@ export class Bot {
     return this._botLinkLeaf;
   }
   private startTime: number = Date.now();
-  private bootStart: number = Date.now();
   private configuredChannels: Array<{ name: string; key?: string }> = [];
 
   constructor(configPath?: string) {
@@ -140,7 +139,7 @@ export class Bot {
       logger: this.logger,
     });
     this.helpRegistry = new HelpRegistry();
-    this.channelSettings = new ChannelSettings(this.db);
+    this.channelSettings = new ChannelSettings(this.db, this.logger.child('channel-settings'));
 
     // Wire verification provider: gates privileged dispatch on NickServ identity.
     // Uses the live account map from account-notify/extended-join (fast path),
@@ -207,8 +206,6 @@ export class Bot {
 
   /** Start the bot: open DB, load permissions, connect to IRC, wire everything. */
   async start(): Promise<void> {
-    this.bootStart = Date.now();
-
     // Print startup banner
     this.printBanner();
 
@@ -365,8 +362,6 @@ export class Bot {
     this.services.identify();
 
     this.startTime = Date.now();
-    const elapsed = this.startTime - this.bootStart;
-    this.botLogger.info(`Ready in ${elapsed}ms`);
   }
 
   /** Graceful shutdown. */

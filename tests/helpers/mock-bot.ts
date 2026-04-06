@@ -110,7 +110,7 @@ export function createMockBot(options?: { botNick?: string; currentNick?: string
   });
   services.attach();
 
-  const channelSettings = new ChannelSettings(db);
+  const channelSettings = new ChannelSettings(db, logger.child('channel-settings'));
 
   const pluginLoader = new PluginLoader({
     pluginDir: './plugins',
