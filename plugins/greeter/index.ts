@@ -1,5 +1,5 @@
 // greeter — Configurable join greeting plugin with user-settable custom greets
-import type { HandlerContext, PluginAPI, UserRecord } from '../../src/types';
+import type { PluginAPI, UserRecord } from '../../src/types';
 
 export const name = 'greeter';
 export const version = '3.0.0';
@@ -82,10 +82,10 @@ export function init(api: PluginAPI): void {
   ]);
 
   // --- Join handler ---
-  api.bind('join', '-', '*', (ctx: HandlerContext) => {
+  api.bind('join', '-', '*', (ctx) => {
     if (api.ircLower(ctx.nick) === api.ircLower(botNick)) return;
 
-    const channel = ctx.channel!;
+    const { channel } = ctx;
 
     // Precedence: user custom greet > channel greet_msg setting > global default
     let greeting = api.channelSettings.getString(channel, 'greet_msg');
@@ -117,7 +117,7 @@ export function init(api: PluginAPI): void {
   });
 
   // --- !greet command ---
-  api.bind('pub', '-', '!greet', async (ctx: HandlerContext) => {
+  api.bind('pub', '-', '!greet', async (ctx) => {
     const sub = ctx.args.trim();
 
     // !greet (no args) — show current greet
@@ -145,7 +145,7 @@ export function init(api: PluginAPI): void {
         ctx.replyPrivate('You must be a registered user to set a greet.');
         return;
       }
-      if (!meetsMinFlag(record, minFlag, api.ircLower(ctx.channel!))) {
+      if (!meetsMinFlag(record, minFlag, api.ircLower(ctx.channel))) {
         ctx.replyPrivate(`You need at least +${minFlag} to set a custom greet.`);
         return;
       }
@@ -163,7 +163,7 @@ export function init(api: PluginAPI): void {
         ctx.replyPrivate('You must be a registered user to remove a greet.');
         return;
       }
-      if (!meetsMinFlag(record, minFlag, api.ircLower(ctx.channel!))) {
+      if (!meetsMinFlag(record, minFlag, api.ircLower(ctx.channel))) {
         ctx.replyPrivate(`You need at least +${minFlag} to remove a custom greet.`);
         return;
       }

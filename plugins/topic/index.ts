@@ -1,7 +1,7 @@
 // topic — IRC topic creator with color-coded themes + topic protection
 // Sets channel topics using pre-built color theme borders.
 // Also provides !topic lock / !topic unlock for topic protection.
-import type { HandlerContext, PluginAPI } from '../../src/types';
+import type { PluginAPI } from '../../src/types';
 import { themeNames, themes } from './themes';
 
 export const name = 'topic';
@@ -71,7 +71,7 @@ export function init(api: PluginAPI): void {
   // !topic lock                      — lock the current live topic
   // !topic unlock                    — disable topic protection
   // !topic preview <theme> <text>    — preview the themed text in channel
-  api.bind('pub', '+o', '!topic', (ctx: HandlerContext) => {
+  api.bind('pub', '+o', '!topic', (ctx) => {
     const args = ctx.args.trim();
     if (!args) {
       ctx.reply(
@@ -85,7 +85,7 @@ export function init(api: PluginAPI): void {
 
     // Handle lock subcommand
     if (firstArg === 'lock') {
-      const live = api.getChannel(ctx.channel!)?.topic ?? '';
+      const live = api.getChannel(ctx.channel)?.topic ?? '';
       if (!live) {
         ctx.reply('Cannot lock: no topic is currently set.');
         return;
@@ -95,16 +95,16 @@ export function init(api: PluginAPI): void {
           `Warning: topic is ${live.length} chars (typical limit is ~390). It may be truncated by the server.`,
         );
       }
-      api.channelSettings.set(ctx.channel!, 'topic_text', live);
-      api.channelSettings.set(ctx.channel!, 'protect_topic', true);
+      api.channelSettings.set(ctx.channel, 'topic_text', live);
+      api.channelSettings.set(ctx.channel, 'protect_topic', true);
       ctx.reply('Topic locked.');
       return;
     }
 
     // Handle unlock subcommand
     if (firstArg === 'unlock') {
-      api.channelSettings.set(ctx.channel!, 'protect_topic', false);
-      api.channelSettings.set(ctx.channel!, 'topic_text', '');
+      api.channelSettings.set(ctx.channel, 'protect_topic', false);
+      api.channelSettings.set(ctx.channel, 'topic_text', '');
       ctx.reply('Topic protection disabled.');
       return;
     }
@@ -125,7 +125,7 @@ export function init(api: PluginAPI): void {
       }
 
       const formatted = template.replace('$text', () => text);
-      api.say(ctx.channel!, formatted);
+      api.say(ctx.channel, formatted);
       return;
     }
 
@@ -152,13 +152,13 @@ export function init(api: PluginAPI): void {
       );
     }
 
-    api.topic(ctx.channel!, formatted);
+    api.topic(ctx.channel, formatted);
     ctx.reply(`Topic set using theme "${themeName}".`);
   });
 
   // !topics — list available themes (anyone can use)
   // !topics preview [text] — PM all themes rendered with sample text
-  api.bind('pub', '-', '!topics', (ctx: HandlerContext) => {
+  api.bind('pub', '-', '!topics', (ctx) => {
     const args = ctx.args.trim();
     const parts = args.split(/\s+/);
     const subcommand = parts[0]?.toLowerCase();
@@ -168,7 +168,7 @@ export function init(api: PluginAPI): void {
       const cooldownExpires = previewCooldown.get(cooldownKey) ?? 0;
       if (Date.now() < cooldownExpires) {
         const secsLeft = Math.ceil((cooldownExpires - Date.now()) / 1000);
-        api.notice(ctx.channel!, `Preview cooldown active — try again in ${secsLeft}s.`);
+        api.notice(ctx.channel, `Preview cooldown active — try again in ${secsLeft}s.`);
         return;
       }
       previewCooldown.set(cooldownKey, Date.now() + PREVIEW_COOLDOWN_MS);
@@ -190,8 +190,8 @@ export function init(api: PluginAPI): void {
   });
 
   // topic bind — enforce topic protection on unauthorized changes
-  api.bind('topic', '-', '*', (ctx: HandlerContext) => {
-    const channel = ctx.channel!;
+  api.bind('topic', '-', '*', (ctx) => {
+    const { channel } = ctx;
 
     const protect = api.channelSettings.getFlag(channel, 'protect_topic');
     if (!protect) return;

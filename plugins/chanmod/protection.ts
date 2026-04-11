@@ -1,5 +1,5 @@
 // chanmod — adversarial protection: rejoin on kick, revenge, nick recovery, stopnethack
-import type { HandlerContext, PluginAPI } from '../../src/types';
+import type { PluginAPI } from '../../src/types';
 import {
   botHasOps,
   buildBanMask,
@@ -66,9 +66,8 @@ export function setupProtection(
   // Rejoin on kick + revenge + backend-assisted recovery
   // ---------------------------------------------------------------------------
 
-  api.bind('kick', '-', '*', (ctx: HandlerContext) => {
-    const { nick: kicked, args } = ctx;
-    const channel = ctx.channel!;
+  api.bind('kick', '-', '*', (ctx) => {
+    const { nick: kicked, args, channel } = ctx;
 
     // Only act when the bot itself is kicked
     if (!isBotNick(api, kicked)) return;
@@ -254,13 +253,13 @@ export function setupProtection(
       }
     };
 
-    api.bind('nick', '-', '*', (ctx: HandlerContext) => {
+    api.bind('nick', '-', '*', (ctx) => {
       if (api.ircLower(ctx.nick) === api.ircLower(desiredNick)) {
         attemptRecovery(`${ctx.nick} changed nick`);
       }
     });
 
-    api.bind('quit', '-', '*', (ctx: HandlerContext) => {
+    api.bind('quit', '-', '*', (ctx) => {
       if (api.ircLower(ctx.nick) === api.ircLower(desiredNick)) {
         attemptRecovery(`${ctx.nick} quit`);
       }
@@ -276,7 +275,7 @@ export function setupProtection(
     const SPLIT_THRESHOLD = 3;
 
     // Detect netsplit via burst of split-quit messages
-    api.bind('quit', '-', '*', (ctx: HandlerContext) => {
+    api.bind('quit', '-', '*', (ctx) => {
       if (!isSplitQuit(ctx.text)) return;
 
       const now = Date.now();
@@ -297,8 +296,8 @@ export function setupProtection(
     });
 
     // Check suspicious +o grants during/after a split
-    api.bind('mode', '-', '*', (ctx: HandlerContext) => {
-      const channel = ctx.channel!;
+    api.bind('mode', '-', '*', (ctx) => {
+      const { channel } = ctx;
       if (ctx.command !== '+o') return;
 
       // Only act within the split window

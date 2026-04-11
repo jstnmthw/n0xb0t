@@ -1,5 +1,5 @@
 // chanmod — topic recovery: snapshot known-good topics and restore after takeover
-import type { HandlerContext, PluginAPI } from '../../src/types';
+import type { PluginAPI } from '../../src/types';
 import type { ChanmodConfig, SharedState } from './state';
 import { THREAT_NORMAL, getThreatLevel } from './takeover-detect';
 
@@ -21,8 +21,8 @@ export function setupTopicRecovery(
   state: SharedState,
 ): () => void {
   // Track topic changes — update snapshot only at threat level 0
-  api.bind('topic', '-', '*', (ctx: HandlerContext) => {
-    const channel = ctx.channel!;
+  api.bind('topic', '-', '*', (ctx) => {
+    const { channel } = ctx;
     if (!ctx.text) return;
 
     const threatLevel = getThreatLevel(api, config, state, channel);

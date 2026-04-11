@@ -1,7 +1,7 @@
 // flood — Inbound flood protection plugin.
 // Detects message floods, join/part spam, and nick-change spam.
 // Escalating responses: warn → kick → tempban (configurable).
-import type { HandlerContext, PluginAPI } from '../../src/types';
+import type { ChannelHandlerContext, JoinContext, NickContext, PluginAPI } from '../../src/types';
 import { SlidingWindowCounter } from '../../src/utils/sliding-window';
 
 export const name = 'flood';
@@ -198,8 +198,8 @@ async function applyAction(
 // Bind handlers (module-level so init() stays thin)
 // ---------------------------------------------------------------------------
 
-async function handleMsgFlood(ctx: HandlerContext): Promise<void> {
-  const channel = ctx.channel!;
+async function handleMsgFlood(ctx: ChannelHandlerContext): Promise<void> {
+  const { channel } = ctx;
   if (isBotNick(ctx.nick)) return;
   if (isPrivileged(ctx.nick, channel, cfg.ignoreOps)) return;
   const key = `${api.ircLower(ctx.nick)}@${api.ircLower(channel)}`;
@@ -214,8 +214,8 @@ async function handleMsgFlood(ctx: HandlerContext): Promise<void> {
   );
 }
 
-function handleJoinFlood(ctx: HandlerContext): void {
-  const channel = ctx.channel!;
+function handleJoinFlood(ctx: JoinContext): void {
+  const { channel } = ctx;
   if (isBotNick(ctx.nick)) return;
   const hostmask = `${ctx.nick}!${ctx.ident}@${ctx.hostname}`;
   const key = `join:${api.ircLower(hostmask)}`;
@@ -231,7 +231,7 @@ function handleJoinFlood(ctx: HandlerContext): void {
   ).catch((err) => api.error('Join flood action error:', err));
 }
 
-function handleNickFlood(ctx: HandlerContext): void {
+function handleNickFlood(ctx: NickContext): void {
   const { ident, hostname } = ctx;
   if (!ident && !hostname) return; // Incomplete hostmask data — skip
   const hostmask = `${ctx.nick}!${ident}@${hostname}`;

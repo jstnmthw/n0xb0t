@@ -40,37 +40,47 @@ export type Flag = 'n' | 'm' | 'o' | 'v' | 'd' | '-';
 // ---------------------------------------------------------------------------
 
 /**
- * Context object passed to every bind handler.
+ * Context object passed to every bind handler. The plugin-facing `api.bind` is
+ * generic on `BindType`, so each handler receives a context narrowed to its
+ * bind type — see {@link BindContextFor}. For example, a `'pub'` handler gets
+ * {@link ChannelHandlerContext} (channel is `string`), and a `'join'` handler
+ * gets {@link JoinContext} (channel is `string`, command is the literal
+ * `'JOIN'`, args is the literal `''`).
  *
- * Field semantics vary by bind type:
+ * `HandlerContext` below is the *union* of every per-type shape, used by the
+ * dispatcher and permission internals where the bind type isn't known at
+ * compile time.
  *
- * | type    | nick           | channel      | text                        | command             | args                    |
- * |---------|----------------|--------------|-----------------------------|---------------------|-------------------------|
- * | pub     | sender         | #channel     | full message (raw)          | command word        | text after command      |
- * | pubm    | sender         | #channel     | full message (raw)          | command word / `''` for `/me` | args / action text |
- * | msg     | sender         | null (PM)    | full message (raw)          | command word        | text after command      |
- * | msgm    | sender         | null (PM)    | full message (raw)          | command word / `''` for `/me` | args / action text |
- * | join    | joiner         | #channel     | `"#chan nick!ident@host"`    | `'JOIN'`            | `''`                    |
- * | part    | parter         | #channel     | `"#chan nick!ident@host"`    | `'PART'`            | part reason             |
- * | kick    | **kicked** nick | #channel    | `"#chan kicked!ident@host"`  | `'KICK'`            | `"reason (by kicker)"` |
- * | nick    | old nick       | null         | new nick                    | `'NICK'`            | new nick                |
- * | mode    | mode setter    | #channel     | `"#chan +o nick"`            | mode string (`+o`)  | mode param              |
- * | ctcp    | sender         | null         | CTCP payload (no type prefix)| CTCP type (upper)  | CTCP payload            |
- * | notice  | sender         | #chan / null | notice text                 | `'NOTICE'`          | notice text             |
- * | topic   | setter         | #channel     | new topic                   | `'topic'`           | `''`                    |
- * | quit    | quitter        | null         | quit reason                 | `'quit'`            | `''`                    |
- * | invite  | inviter        | #channel     | `"#chan nick!ident@host"`    | `'INVITE'`          | `''`                    |
- * | time    | `''`           | null         | `''`                        | `''`                | `''`                    |
+ * Field semantics by bind type (cross-reference the type names in the last
+ * column — each one is exported for use outside `api.bind` callbacks):
+ *
+ * | type        | nick            | channel       | text                         | command             | args                    | interface                        |
+ * |-------------|-----------------|---------------|------------------------------|---------------------|-------------------------|----------------------------------|
+ * | pub         | sender          | #channel      | full message (raw)           | command word        | text after command      | {@link ChannelHandlerContext}    |
+ * | pubm        | sender          | #channel      | full message (raw)           | command word / `''` for `/me` | args / action text | {@link ChannelHandlerContext}    |
+ * | msg         | sender          | null (PM)     | full message (raw)           | command word        | text after command      | {@link NullChannelHandlerContext}|
+ * | msgm        | sender          | null (PM)     | full message (raw)           | command word / `''` for `/me` | args / action text | {@link NullChannelHandlerContext}|
+ * | join        | joiner          | #channel      | `"#chan nick!ident@host"`    | `'JOIN'`            | `''`                    | {@link JoinContext}              |
+ * | part        | parter          | #channel      | `"#chan nick!ident@host"`    | `'PART'`            | part reason             | {@link PartContext}              |
+ * | kick        | **kicked** nick | #channel      | `"#chan kicked!ident@host"`  | `'KICK'`            | `"reason (by kicker)"`  | {@link KickContext}              |
+ * | nick        | old nick        | null          | new nick                     | `'NICK'`            | new nick                | {@link NickContext}              |
+ * | mode        | mode setter     | #channel      | `"#chan +o nick"`            | mode string (`+o`)  | mode param              | {@link ModeContext}              |
+ * | ctcp        | sender          | null          | CTCP payload (no type prefix)| CTCP type (upper)   | CTCP payload            | {@link CtcpContext}              |
+ * | notice      | sender          | #chan / null  | notice text                  | `'NOTICE'`          | notice text             | {@link NullableChannelHandlerContext}|
+ * | topic       | setter          | #channel      | new topic                    | `'topic'`           | `''`                    | {@link TopicContext}             |
+ * | quit        | quitter         | null          | quit reason                  | `'quit'`            | `''`                    | {@link QuitContext}              |
+ * | invite      | inviter         | #channel      | `"#chan nick!ident@host"`    | `'INVITE'`          | `''`                    | {@link InviteContext}            |
+ * | time        | `''`            | null          | `''`                         | `''`                | `''`                    | {@link TimeContext}              |
+ * | raw         | `''`            | null          | raw server line              | raw command         | raw params              | {@link RawContext}               |
+ * | join_error  | bot nick        | #channel      | failure reason               | error name          | `''`                    | {@link JoinErrorContext}         |
  */
-export interface HandlerContext {
+export interface BaseHandlerContext {
   /** Nick of the user who triggered this event. For `kick`: the kicked user (not the kicker). */
   nick: string;
   /** Ident of the user who triggered this event. */
   ident: string;
   /** Hostname of the user who triggered this event. */
   hostname: string;
-  /** Channel the event occurred in. `null` for private messages, nick events, CTCP, and quit. */
-  channel: string | null;
   /**
    * Raw message text (for `pub`/`msg`/`pubm`/`msgm`: includes IRC formatting codes).
    * For non-message events, a synthetic string — see table above.
@@ -100,8 +110,148 @@ export interface HandlerContext {
   replyPrivate(msg: string): void;
 }
 
-/** Signature for bind handler functions. */
-export type BindHandler = (ctx: HandlerContext) => void | Promise<void>;
+/** Channel is guaranteed to be set. Bind types: `pub`, `pubm`, `join`, `part`, `kick`, `mode`, `topic`, `invite`, `join_error`. */
+export interface ChannelHandlerContext extends BaseHandlerContext {
+  channel: string;
+}
+
+/** Channel is guaranteed to be null. Bind types: `msg`, `msgm`, `nick`, `ctcp`, `quit`, `time`, `raw`. */
+export interface NullChannelHandlerContext extends BaseHandlerContext {
+  channel: null;
+}
+
+/**
+ * Channel may be either. Bind type: `notice` — channel notices carry a channel,
+ * PM notices do not. Handlers must narrow before using `channel`.
+ */
+export interface NullableChannelHandlerContext extends BaseHandlerContext {
+  channel: string | null;
+}
+
+/** Context for `'join'` binds. */
+export interface JoinContext extends ChannelHandlerContext {
+  command: 'JOIN';
+  args: '';
+}
+
+/** Context for `'part'` binds. `args` is the part reason (may be empty). */
+export interface PartContext extends ChannelHandlerContext {
+  command: 'PART';
+}
+
+/**
+ * Context for `'kick'` binds. `nick` is the *kicked* user (not the kicker);
+ * `args` is `"reason (by kicker)"` or `"by kicker"`.
+ */
+export interface KickContext extends ChannelHandlerContext {
+  command: 'KICK';
+}
+
+/** Context for `'nick'` binds. `nick` is the old nick; `args` and `text` are the new nick. */
+export interface NickContext extends NullChannelHandlerContext {
+  command: 'NICK';
+}
+
+/** Context for `'mode'` binds. `command` is the mode string (e.g. `'+o'`); `args` is the mode parameter. */
+// Mode strings are not literal-narrowable, so this is structurally identical to ChannelHandlerContext.
+export type ModeContext = ChannelHandlerContext;
+
+/** Context for `'topic'` binds. `text` is the new topic. */
+export interface TopicContext extends ChannelHandlerContext {
+  command: 'topic';
+  args: '';
+}
+
+/** Context for `'invite'` binds. */
+export interface InviteContext extends ChannelHandlerContext {
+  command: 'INVITE';
+  args: '';
+}
+
+/** Context for `'quit'` binds. `text` is the quit reason. */
+export interface QuitContext extends NullChannelHandlerContext {
+  command: 'quit';
+  args: '';
+}
+
+/** Context for `'time'` (timer) binds. All user fields are empty — timers fire on a schedule, not on user input. */
+export interface TimeContext extends NullChannelHandlerContext {
+  nick: '';
+  ident: '';
+  hostname: '';
+  text: '';
+  command: '';
+  args: '';
+}
+
+/** Context for `'join_error'` binds. `command` is the irc-framework error name (or `'need_registered_nick'`); `text` is the failure reason. */
+export interface JoinErrorContext extends ChannelHandlerContext {
+  args: '';
+}
+
+/** Context for `'ctcp'` binds. `command` is the uppercased CTCP type (e.g. `'PING'`); `text`/`args` are the payload. */
+// CTCP types are user-controlled and unbounded, so this is structurally identical to NullChannelHandlerContext.
+export type CtcpContext = NullChannelHandlerContext;
+
+/** Context for `'raw'` binds. Free-form fields carrying the raw server line. */
+// Raw binds are rarely used and fields are already loose, so this is structurally identical to NullChannelHandlerContext.
+export type RawContext = NullChannelHandlerContext;
+
+/**
+ * Mapped type: pick the right handler context for a given bind type.
+ * Used by {@link BindHandler} to narrow `ctx` at plugin call sites.
+ */
+export type BindContextFor<T extends BindType> = T extends 'pub'
+  ? ChannelHandlerContext
+  : T extends 'pubm'
+    ? ChannelHandlerContext
+    : T extends 'msg'
+      ? NullChannelHandlerContext
+      : T extends 'msgm'
+        ? NullChannelHandlerContext
+        : T extends 'join'
+          ? JoinContext
+          : T extends 'part'
+            ? PartContext
+            : T extends 'kick'
+              ? KickContext
+              : T extends 'nick'
+                ? NickContext
+                : T extends 'mode'
+                  ? ModeContext
+                  : T extends 'raw'
+                    ? RawContext
+                    : T extends 'time'
+                      ? TimeContext
+                      : T extends 'ctcp'
+                        ? CtcpContext
+                        : T extends 'notice'
+                          ? NullableChannelHandlerContext
+                          : T extends 'topic'
+                            ? TopicContext
+                            : T extends 'quit'
+                              ? QuitContext
+                              : T extends 'invite'
+                                ? InviteContext
+                                : T extends 'join_error'
+                                  ? JoinErrorContext
+                                  : never;
+
+/**
+ * The widest handler context — a union over every bind type. Used by dispatcher
+ * and permission internals where the bind type isn't statically known. Plugin
+ * authors rarely see this directly; `api.bind<'pub'>(...)` narrows automatically.
+ */
+export type HandlerContext = BindContextFor<BindType>;
+
+/**
+ * Signature for bind handler functions. Generic on `BindType` so `ctx` narrows
+ * to the specific per-type shape at the call site. Defaults to the widest
+ * `HandlerContext` union for code that takes handlers without knowing the type.
+ */
+export type BindHandler<T extends BindType = BindType> = (
+  ctx: BindContextFor<T>,
+) => void | Promise<void>;
 
 // ---------------------------------------------------------------------------
 // Plugin system
@@ -168,8 +318,8 @@ export interface PluginAPI {
   pluginId: string;
 
   // Bind system (auto-tagged with plugin ID)
-  bind(type: BindType, flags: string, mask: string, handler: BindHandler): void;
-  unbind(type: BindType, mask: string, handler: BindHandler): void;
+  bind<T extends BindType>(type: T, flags: string, mask: string, handler: BindHandler<T>): void;
+  unbind<T extends BindType>(type: T, mask: string, handler: BindHandler<T>): void;
 
   // IRC actions
   say(target: string, message: string): void;

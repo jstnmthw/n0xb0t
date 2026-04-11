@@ -1,5 +1,5 @@
 // chanmod — invite handling: accept invites from flagged users
-import type { HandlerContext, PluginAPI } from '../../src/types';
+import type { PluginAPI } from '../../src/types';
 import { hasAnyFlag } from './helpers';
 import type { ChanmodConfig, SharedState } from './state';
 
@@ -8,8 +8,8 @@ export function setupInvite(
   _config: ChanmodConfig,
   _state: SharedState,
 ): () => void {
-  api.bind('invite', '-', '*', (ctx: HandlerContext) => {
-    const channel = ctx.channel!;
+  api.bind('invite', '-', '*', (ctx) => {
+    const { channel } = ctx;
 
     const enabled = api.channelSettings.getFlag(channel, 'invite');
     if (!enabled) return;

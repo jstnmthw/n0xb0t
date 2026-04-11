@@ -4,7 +4,7 @@
 // and routes them to the appropriate backend's handler method. This completes
 // the verifyAccess() round-trip: the backend sends a probe, ChanServ responds
 // via NOTICE, and this handler delivers the parsed result back to the backend.
-import type { HandlerContext, PluginAPI } from '../../src/types';
+import type { PluginAPI } from '../../src/types';
 import type { AnopeBackend } from './anope-backend';
 import type { AthemeBackend } from './atheme-backend';
 import { getBotNick } from './helpers';
@@ -114,7 +114,7 @@ export function setupChanServNotice(opts: ChanServNoticeOptions): () => void {
   const csNick = config.chanserv_nick;
   const isAtheme = backend.name === 'atheme';
 
-  api.bind('notice', '-', '*', (ctx: HandlerContext) => {
+  api.bind('notice', '-', '*', (ctx) => {
     // Only process notices from ChanServ (PM — channel is null)
     if (ctx.channel !== null) return;
     if (api.ircLower(ctx.nick) !== api.ircLower(csNick)) return;

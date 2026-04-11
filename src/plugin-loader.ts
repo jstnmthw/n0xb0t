@@ -457,30 +457,40 @@ export class PluginLoader {
 
     const api: PluginAPI = {
       pluginId,
-      bind(type: BindType, flags: string, mask: string, handler: BindHandler): void {
+      bind<T extends BindType>(
+        type: T,
+        flags: string,
+        mask: string,
+        handler: BindHandler<T>,
+      ): void {
+        // The dispatcher stores handlers as the widest BindHandler<BindType>.
+        // Cast is safe because the plugin-facing api.bind guarantees the runtime
+        // ctx will match the generic T the caller asked for.
+        const widenedHandler = handler as BindHandler;
         if (scopeSet) {
           const boundScope = scopeSet;
           const wrapped: BindHandler = (ctx: HandlerContext) => {
             if (ctx.channel !== null && !boundScope.has(ircLower(ctx.channel, getCasemapping()))) {
               return;
             }
-            return handler(ctx);
+            return widenedHandler(ctx);
           };
-          let perHandler = wrappedHandlers.get(handler);
+          let perHandler = wrappedHandlers.get(widenedHandler);
           if (!perHandler) {
             perHandler = new Map();
-            wrappedHandlers.set(handler, perHandler);
+            wrappedHandlers.set(widenedHandler, perHandler);
           }
           perHandler.set(`${type}|${mask}`, wrapped);
           dispatcher.bind(type, flags, mask, wrapped, pluginId);
         } else {
-          dispatcher.bind(type, flags, mask, handler, pluginId);
+          dispatcher.bind(type, flags, mask, widenedHandler, pluginId);
         }
       },
-      unbind(type: BindType, mask: string, handler: BindHandler): void {
+      unbind<T extends BindType>(type: T, mask: string, handler: BindHandler<T>): void {
+        const widenedHandler = handler as BindHandler;
         const key = `${type}|${mask}`;
-        const perHandler = wrappedHandlers.get(handler);
-        const actual = perHandler?.get(key) ?? handler;
+        const perHandler = wrappedHandlers.get(widenedHandler);
+        const actual = perHandler?.get(key) ?? widenedHandler;
         dispatcher.unbind(type, mask, actual);
         perHandler?.delete(key);
       },

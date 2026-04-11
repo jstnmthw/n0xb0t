@@ -1,5 +1,5 @@
 // chanmod — mode enforcement: re-op, channel modes, cycle-on-deop, bitch mode, punish deop, enforcebans
-import type { HandlerContext, PluginAPI } from '../../src/types';
+import type { PluginAPI } from '../../src/types';
 import { wildcardMatch } from '../../src/utils/wildcard';
 import {
   botCanHalfop,
@@ -617,10 +617,8 @@ export function setupModeEnforce(
   chain?: ProtectionChain,
   onThreat?: ThreatCallback,
 ): () => void {
-  api.bind('mode', '-', '*', (ctx: HandlerContext) => {
-    const { nick: setter, command: modeStr, args: target } = ctx;
-    if (!ctx.channel) return;
-    const channel = ctx.channel;
+  api.bind('mode', '-', '*', (ctx) => {
+    const { nick: setter, command: modeStr, args: target, channel } = ctx;
 
     // Read per-channel settings (fall back to config default via channelSettings)
     const channelModes = api.channelSettings.getString(channel, 'channel_modes');

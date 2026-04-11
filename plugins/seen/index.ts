@@ -1,6 +1,6 @@
 // seen — Last-seen tracking plugin
 // Tracks when users were last active in a channel and responds to !seen queries.
-import type { HandlerContext, PluginAPI } from '../../src/types';
+import type { PluginAPI } from '../../src/types';
 
 export const name = 'seen';
 export const version = '1.1.0';
@@ -24,7 +24,7 @@ export function init(api: PluginAPI): void {
   const MAX_TEXT_LENGTH = 200;
 
   // Track every channel message (pubm is stackable, won't interfere with others)
-  api.bind('pubm', '-', '*', (ctx: HandlerContext) => {
+  api.bind('pubm', '-', '*', (ctx) => {
     const text =
       ctx.text.length > MAX_TEXT_LENGTH ? ctx.text.substring(0, MAX_TEXT_LENGTH) + '...' : ctx.text;
 
@@ -39,7 +39,7 @@ export function init(api: PluginAPI): void {
   });
 
   // Respond to !seen queries
-  api.bind('pub', '-', '!seen', (ctx: HandlerContext) => {
+  api.bind('pub', '-', '!seen', (ctx) => {
     cleanupStale(api, maxAgeMs);
     const targetNick = ctx.args.trim().split(/\s+/)[0];
     if (!targetNick) {
@@ -68,7 +68,7 @@ export function init(api: PluginAPI): void {
     }
 
     const ago = formatRelativeTime(age);
-    const sameChannel = api.ircLower(record.channel) === api.ircLower(ctx.channel!);
+    const sameChannel = api.ircLower(record.channel) === api.ircLower(ctx.channel);
     if (sameChannel) {
       ctx.reply(
         `${api.stripFormatting(record.nick)} was last seen ${ago} in ` +

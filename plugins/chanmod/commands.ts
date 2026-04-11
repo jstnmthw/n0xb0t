@@ -1,5 +1,5 @@
 // chanmod — IRC commands: !op !deop !halfop !dehalfop !voice !devoice !kick !ban !unban !kickban !bans
-import type { HandlerContext, PluginAPI } from '../../src/types';
+import type { PluginAPI } from '../../src/types';
 import {
   botCanHalfop,
   botHasOps,
@@ -100,8 +100,8 @@ export function setupCommands(
   // !op / !deop / !voice / !devoice / !halfop / !dehalfop
   // ---------------------------------------------------------------------------
 
-  api.bind('pub', '+o', '!op', (ctx: HandlerContext) => {
-    const channel = ctx.channel!;
+  api.bind('pub', '+o', '!op', (ctx) => {
+    const { channel } = ctx;
     if (!botHasOps(api, channel)) {
       ctx.reply('I am not opped in this channel.');
       return;
@@ -115,8 +115,8 @@ export function setupCommands(
     api.log(`${ctx.nick} opped ${target} in ${channel}`);
   });
 
-  api.bind('pub', '+o', '!deop', (ctx: HandlerContext) => {
-    const channel = ctx.channel!;
+  api.bind('pub', '+o', '!deop', (ctx) => {
+    const { channel } = ctx;
     if (!botHasOps(api, channel)) {
       ctx.reply('I am not opped in this channel.');
       return;
@@ -135,8 +135,8 @@ export function setupCommands(
     api.log(`${ctx.nick} deopped ${target} in ${channel}`);
   });
 
-  api.bind('pub', '+o', '!voice', (ctx: HandlerContext) => {
-    const channel = ctx.channel!;
+  api.bind('pub', '+o', '!voice', (ctx) => {
+    const { channel } = ctx;
     if (!botHasOps(api, channel)) {
       ctx.reply('I am not opped in this channel.');
       return;
@@ -150,8 +150,8 @@ export function setupCommands(
     api.log(`${ctx.nick} voiced ${target} in ${channel}`);
   });
 
-  api.bind('pub', '+o', '!devoice', (ctx: HandlerContext) => {
-    const channel = ctx.channel!;
+  api.bind('pub', '+o', '!devoice', (ctx) => {
+    const { channel } = ctx;
     if (!botHasOps(api, channel)) {
       ctx.reply('I am not opped in this channel.');
       return;
@@ -166,8 +166,8 @@ export function setupCommands(
     api.log(`${ctx.nick} devoiced ${target} in ${channel}`);
   });
 
-  api.bind('pub', '+o', '!halfop', (ctx: HandlerContext) => {
-    const channel = ctx.channel!;
+  api.bind('pub', '+o', '!halfop', (ctx) => {
+    const { channel } = ctx;
     if (!botCanHalfop(api, channel)) {
       ctx.reply('I do not have +h or +o in this channel.');
       return;
@@ -181,8 +181,8 @@ export function setupCommands(
     api.log(`${ctx.nick} halfopped ${target} in ${channel}`);
   });
 
-  api.bind('pub', '+o', '!dehalfop', (ctx: HandlerContext) => {
-    const channel = ctx.channel!;
+  api.bind('pub', '+o', '!dehalfop', (ctx) => {
+    const { channel } = ctx;
     if (!botCanHalfop(api, channel)) {
       ctx.reply('I do not have +h or +o in this channel.');
       return;
@@ -205,8 +205,8 @@ export function setupCommands(
   // !kick
   // ---------------------------------------------------------------------------
 
-  api.bind('pub', '+o', '!kick', (ctx: HandlerContext) => {
-    const channel = ctx.channel!;
+  api.bind('pub', '+o', '!kick', (ctx) => {
+    const { channel } = ctx;
     if (!botHasOps(api, channel)) {
       ctx.reply('I am not opped in this channel.');
       return;
@@ -230,8 +230,8 @@ export function setupCommands(
   // !ban / !unban / !kickban / !bans
   // ---------------------------------------------------------------------------
 
-  api.bind('pub', '+o', '!ban', (ctx: HandlerContext) => {
-    const channel = ctx.channel!;
+  api.bind('pub', '+o', '!ban', (ctx) => {
+    const { channel } = ctx;
     if (!botHasOps(api, channel)) {
       ctx.reply('I am not opped in this channel.');
       return;
@@ -283,8 +283,8 @@ export function setupCommands(
     api.log(`${ctx.nick} banned ${target} (${banMask}) in ${channel} (${durStr})`);
   });
 
-  api.bind('pub', '+o', '!unban', (ctx: HandlerContext) => {
-    const channel = ctx.channel!;
+  api.bind('pub', '+o', '!unban', (ctx) => {
+    const { channel } = ctx;
     if (!botHasOps(api, channel)) {
       ctx.reply('I am not opped in this channel.');
       return;
@@ -326,8 +326,8 @@ export function setupCommands(
     }
   });
 
-  api.bind('pub', '+o', '!kickban', (ctx: HandlerContext) => {
-    const channel = ctx.channel!;
+  api.bind('pub', '+o', '!kickban', (ctx) => {
+    const { channel } = ctx;
     if (!botHasOps(api, channel)) {
       ctx.reply('I am not opped in this channel.');
       return;
@@ -365,8 +365,8 @@ export function setupCommands(
     api.log(`${ctx.nick} kickbanned ${target} (${banMask}) from ${channel} (${reason})`);
   });
 
-  api.bind('pub', '+o', '!bans', (ctx: HandlerContext) => {
-    const channel = ctx.channel!;
+  api.bind('pub', '+o', '!bans', (ctx) => {
+    const { channel } = ctx;
     const targetChannel = ctx.args.trim() || channel;
     const bans = api.banStore.getChannelBans(targetChannel);
     if (bans.length === 0) {

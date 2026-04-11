@@ -8,7 +8,7 @@
 // bypasses +k, but on Anope/Rizon it does NOT — so for +k we also send
 // ChanServ MODE -k to strip the key. An attacker who sets +k +i +l +b
 // and kicks the bot is defeated with UNBAN + MODE -k + INVITE + rejoin.
-import type { HandlerContext, PluginAPI } from '../../src/types';
+import type { PluginAPI } from '../../src/types';
 import type { ProbeState } from './chanserv-notice';
 import { markProbePending } from './chanserv-notice';
 import { isBotNick } from './helpers';
@@ -63,9 +63,8 @@ export function setupJoinRecovery(opts: JoinRecoveryOptions): () => void {
 
   // --- Handle join errors ---
 
-  api.bind('join_error', '-', '*', (ctx: HandlerContext) => {
-    if (!ctx.channel) return;
-    const channel = ctx.channel;
+  api.bind('join_error', '-', '*', (ctx) => {
+    const { channel } = ctx;
     const error = ctx.command;
     const chanKey = api.ircLower(channel);
 
@@ -116,9 +115,8 @@ export function setupJoinRecovery(opts: JoinRecoveryOptions): () => void {
   // If the bot is banned again before the timer fires, the timer is
   // cancelled and backoff continues escalating.
 
-  api.bind('join', '-', '*', (ctx: HandlerContext) => {
+  api.bind('join', '-', '*', (ctx) => {
     if (!isBotNick(api, ctx.nick)) return;
-    if (!ctx.channel) return;
     const chanKey = api.ircLower(ctx.channel);
     probedChannels.delete(chanKey);
 

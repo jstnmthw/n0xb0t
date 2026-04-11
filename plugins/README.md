@@ -68,10 +68,12 @@ Or load at runtime from the REPL: `.load my-plugin`
 Use `api.bind()` to register event handlers. The most common bind type is `pub` (channel message with exact command match):
 
 ```typescript
-api.bind('pub', '-', '!hello', (ctx: HandlerContext) => {
+api.bind('pub', '-', '!hello', (ctx) => {
   ctx.reply(`Hello, ${ctx.nick}!`);
 });
 ```
+
+`api.bind` is generic on the bind type, so `ctx` is narrowed automatically — for a `'pub'` bind, `ctx.channel` is `string` (not `string | null`). You rarely need to annotate `ctx` explicitly.
 
 The arguments are:
 
@@ -93,22 +95,24 @@ The arguments are:
 
 ### The handler context
 
-Every handler gets a `ctx` object:
+Every handler gets a `ctx` object. The shape is narrowed by bind type — see `src/types.ts` for the full table (`ChannelHandlerContext`, `JoinContext`, `NickContext`, etc.):
 
 ```typescript
-api.bind('pub', '-', '!greet', (ctx: HandlerContext) => {
+api.bind('pub', '-', '!greet', (ctx) => {
   ctx.nick; // "alice"
   ctx.ident; // "alice"
   ctx.hostname; // "user.example.com"
-  ctx.channel; // "#lobby" (null for PMs)
+  ctx.channel; // "#lobby" — always string for `pub` binds
   ctx.text; // "!greet everyone"
   ctx.command; // "!greet"
   ctx.args; // "everyone"
 
-  ctx.reply('Hi!'); // sends to #lobby (or PM if private)
+  ctx.reply('Hi!'); // sends to #lobby
   ctx.replyPrivate('Secret'); // sends a NOTICE to alice
 });
 ```
+
+For bind types where `channel` can be null (`msg`, `ctcp`, `quit`, `time`, `nick`), the generic narrows `ctx.channel` to `null` so you don't have to check it. The only type with a nullable channel is `'notice'` — channel notices carry a channel, PM notices don't — so notice handlers must narrow themselves.
 
 ### Permission flags
 
@@ -197,7 +201,7 @@ All outgoing messages go through a shared rate-limiting queue (default 1 msg/sec
   export function init(api: PluginAPI): void {
     cooldown = new Map(); // reset on hot-reload
 
-    api.bind('pub', '-', '!bigcmd', (ctx: HandlerContext) => {
+    api.bind('pub', '-', '!bigcmd', (ctx) => {
       const key = ctx.nick.toLowerCase();
       const expires = cooldown.get(key) ?? 0;
       if (Date.now() < expires) {
@@ -260,7 +264,7 @@ import { setupHelpers } from './helpers.js';
 ### Complete example: a dice roller
 
 ```typescript
-import type { HandlerContext, PluginAPI } from '../../src/types.js';
+import type { PluginAPI } from '../../src/types.js';
 
 export const name = 'dice';
 export const version = '1.0.0';
@@ -270,7 +274,7 @@ export function init(api: PluginAPI): void {
   const maxDice = (api.config.max_dice as number) ?? 20;
   const maxSides = (api.config.max_sides as number) ?? 100;
 
-  api.bind('pub', '-', '!roll', (ctx: HandlerContext) => {
+  api.bind('pub', '-', '!roll', (ctx) => {
     const input = ctx.args.trim() || '1d6';
     const match = input.match(/^(\d+)d(\d+)$/i);
 
