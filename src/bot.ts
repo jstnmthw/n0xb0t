@@ -42,6 +42,7 @@ import { MemoManager } from './core/memo';
 import { MessageQueue } from './core/message-queue';
 import { Permissions } from './core/permissions';
 import { Services } from './core/services';
+import { STSStore, enforceSTS } from './core/sts';
 import { BotDatabase } from './database';
 import { EventDispatcher } from './dispatcher';
 import type { VerificationProvider } from './dispatcher';
@@ -79,6 +80,7 @@ export class Bot {
   readonly helpRegistry: HelpRegistry;
   readonly banStore: BanStore;
   readonly memo: MemoManager;
+  readonly stsStore: STSStore;
 
   private bridge: IRCBridge | null = null;
   private _dccManager: DCCManager | null = null;
@@ -151,6 +153,7 @@ export class Bot {
     this.helpRegistry = new HelpRegistry();
     this.channelSettings = new ChannelSettings(this.db, this.logger.child('channel-settings'));
     this.banStore = new BanStore(this.db, (s) => ircLower(s, this.getCasemapping()));
+    this.stsStore = new STSStore(this.db);
     this.memo = new MemoManager({
       config: this.config.memo,
       dispatcher: this.dispatcher,
@@ -466,6 +469,12 @@ export class Bot {
   // -------------------------------------------------------------------------
 
   private connect(): Promise<void> {
+    // Enforce any stored IRCv3 STS policy BEFORE we touch the socket. If
+    // the policy upgrades us, mutate the in-memory config so downstream
+    // code (message-queue cost calcs, logging, Services) sees a
+    // TLS-consistent view for the rest of the session.
+    this.applySTSPolicyToConfig();
+
     const options = this.buildClientOptions();
     this.botLogger.info(`Connecting to ${this.config.irc.host}:${this.config.irc.port}...`);
     return new Promise<void>((resolve, reject) => {
@@ -496,6 +505,30 @@ export class Bot {
             // extended-join / account-notify / account-tag on rejoin.
             this.channelState.clearNetworkAccounts();
           },
+          onSTSDirective: (directive, currentTls) => {
+            // Persist the directive so future startups inherit the policy.
+            const record = this.stsStore.put(this.config.irc.host, directive);
+            if (record) {
+              this.botLogger.info(
+                `STS policy for ${this.config.irc.host} stored until ` +
+                  new Date(record.expiresAt).toISOString(),
+              );
+            }
+            // If we're still on plaintext and the directive names a TLS
+            // port, reconnect immediately via TLS. This matches the IRCv3
+            // spec: clients SHOULD upgrade the current session on first
+            // contact rather than waiting for the next run.
+            if (!currentTls && directive.port !== undefined) {
+              this.botLogger.warn(
+                `STS upgrade: reconnecting ${this.config.irc.host} on port ${directive.port} via TLS`,
+              );
+              this.config.irc.tls = true;
+              this.config.irc.port = directive.port;
+              // Drop the current session; the reconnect lifecycle will kick
+              // back in and the next connect picks up the mutated config.
+              this.client.quit('STS upgrade to TLS');
+            }
+          },
           messageQueue: this.messageQueue,
           dispatcher: this.dispatcher,
           channelState: this.channelState,
@@ -507,6 +540,36 @@ export class Bot {
       );
       this.client.connect(options);
     });
+  }
+
+  /**
+   * Consult the STS store and, if there's an active policy for the
+   * configured host, either upgrade the effective config to TLS (when a
+   * port is recorded) or abort startup loudly (when we'd have to guess).
+   * Must run before `buildClientOptions` so the upgraded values land in
+   * the irc-framework options object.
+   */
+  private applySTSPolicyToConfig(): void {
+    const outcome = enforceSTS(
+      this.stsStore,
+      this.config.irc.host,
+      this.config.irc.tls,
+      this.config.irc.port,
+    );
+    if (outcome.kind === 'allow') return;
+    if (outcome.kind === 'upgrade') {
+      this.botLogger.warn(
+        `STS policy active for ${this.config.irc.host} until ` +
+          `${new Date(outcome.expiresAt).toISOString()} — ` +
+          `upgrading to TLS on port ${outcome.port}`,
+      );
+      this.config.irc.tls = true;
+      this.config.irc.port = outcome.port;
+      return;
+    }
+    // `refuse` — no safe path. Stop hard so an operator sees the reason
+    // instead of hexbot silently reverting to plaintext.
+    throw new Error(`[bot] STS enforcement refused connection: ${outcome.reason}`);
   }
 
   /** Build the irc-framework connection options from the bot config. Pure config read — no side effects. */

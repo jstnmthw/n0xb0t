@@ -8,6 +8,7 @@ import type { BindHandler, BindType } from '../types';
 import { toEventObject } from '../utils/irc-event';
 import { ircLower } from '../utils/wildcard';
 import { type ServerCapabilities, parseISupport } from './isupport';
+import { type STSDirective, parseSTSDirective } from './sts';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -23,7 +24,18 @@ export interface LifecycleIRCClient {
    * cases (`PREFIX`, `CHANMODES`, `CHANTYPES`). The widest honest type is
    * `unknown` — callers that care narrow from there.
    */
-  network: { supports(feature: string): unknown };
+  network: {
+    supports(feature: string): unknown;
+    /**
+     * Cap metadata from irc-framework. `available` is a `Map<cap, value>`
+     * populated during CAP LS; `enabled` is the array of caps that survived
+     * the CAP REQ/ACK round-trip. Both are needed to ingest the `sts=` cap.
+     */
+    cap?: {
+      available?: Map<string, string>;
+      enabled?: string[];
+    };
+  };
 }
 
 /** Minimal channel-state interface for presence checks (avoids importing the full class). */
@@ -53,6 +65,14 @@ export interface ConnectionLifecycleDeps {
    * on the new session.
    */
   onReconnecting?: () => void;
+  /**
+   * Called when a parsed IRCv3 STS directive is received on the connection.
+   * Consumers persist the policy and, when the directive arrived on a
+   * plaintext connection and contains a port, trigger a reconnect so the
+   * policy is satisfied. `currentTls` is the session's current transport
+   * so the caller can tell plaintext ingestion from TLS refresh.
+   */
+  onSTSDirective?: (directive: STSDirective, currentTls: boolean) => void;
   messageQueue: { clear(): void };
   dispatcher: {
     bind(type: BindType, flags: string, mask: string, handler: BindHandler, owner?: string): void;
@@ -126,6 +146,7 @@ export function registerConnectionEvents(
     deps.eventBus.emit('bot:connected');
     applyCasemapping(deps);
     applyServerCapabilities(deps);
+    ingestSTSDirective(deps);
 
     joinConfiguredChannels(deps);
 
@@ -152,9 +173,23 @@ export function registerConnectionEvents(
   client.on('close', () => {
     if (registered && !expectingReconnect) {
       // irc-framework exhausted all reconnect attempts — the bot is a zombie.
+      // If the ERROR reason says we were K/G-lined, exit non-zero immediately
+      // instead of exiting after the usual exhaustion path (supervisord
+      // should surface the reason in the restart log).
       const detail = lastCloseReason ? ` (${lastCloseReason})` : '';
-      logger.error(`Reconnect attempts exhausted${detail} — exiting`);
+      const policy = classifyCloseReason(lastCloseReason);
+      if (policy.kind === 'banned') {
+        logger.error(
+          `FATAL: ${policy.label} on ${cfg.host} — refusing to reconnect. ` +
+            `Resolve the ban before restarting the bot.`,
+        );
+      } else {
+        logger.error(`Reconnect attempts exhausted${detail} — exiting`);
+      }
       deps.eventBus.emit('bot:disconnected', 'reconnect attempts exhausted');
+      // Exit non-zero so supervisord / docker know this is a fault and log
+      // it appropriately. See docs/audits/irc-logic-2026-04-11.md §9 on the
+      // exit-on-exhaustion contract.
       process.exit(1);
     }
     if (!registered) {
@@ -164,15 +199,35 @@ export function registerConnectionEvents(
       logger.error(`Connection failed: ${reason}`);
       deps.eventBus.emit('bot:disconnected', `connection failed: ${reason}`);
 
+      // Interpret the server's ERROR reason (if any) and apply a retry
+      // policy. K/G-line / banned-IP responses abort startup with a fatal
+      // non-zero exit so we stop hammering a server that won't take us.
+      // Throttle-class responses use a longer backoff multiplier than the
+      // default exponential curve.
+      const policy = classifyCloseReason(lastCloseReason);
+      if (policy.kind === 'banned') {
+        logger.error(
+          `FATAL: ${policy.label} on ${cfg.host} — refusing to retry. ` +
+            `Resolve the ban before restarting the bot.`,
+        );
+        deps.eventBus.emit('bot:disconnected', `banned: ${policy.label}`);
+        // Exit to prevent hammering a banned server. supervisord will see
+        // the non-zero exit and decide whether to keep restarting us.
+        process.exit(1);
+      }
+
       // irc-framework does not auto-reconnect on initial connection failure.
       // Retry with exponential backoff if the caller provided a reconnect callback.
       if (deps.reconnect && startupAttempt < maxStartupRetries) {
         startupAttempt++;
         const jitter = Math.floor(Math.random() * 5000);
-        const delay = Math.min(1000 * 2 ** startupAttempt, maxRetryWait) + jitter;
+        const baseDelay = Math.min(1000 * 2 ** startupAttempt, maxRetryWait);
+        const delay = Math.floor(baseDelay * policy.backoffMultiplier) + jitter;
         logger.info(
           `Retrying connection in ${Math.round(delay / 1000)}s ` +
-            `(attempt ${startupAttempt + 1}/${maxStartupRetries + 1})...`,
+            `(attempt ${startupAttempt + 1}/${maxStartupRetries + 1})` +
+            (policy.kind === 'throttled' ? ` — server asked us to slow down` : '') +
+            `...`,
         );
         lastCloseReason = null;
         setTimeout(() => deps.reconnect!(), delay);
@@ -248,6 +303,87 @@ function applyServerCapabilities(deps: ConnectionLifecycleDeps): void {
       `CHANTYPES=${caps.chantypes} MODES=${caps.modesPerLine}`,
   );
   deps.applyServerCapabilities(caps);
+}
+
+// ---------------------------------------------------------------------------
+// IRC ERROR reason classification
+// ---------------------------------------------------------------------------
+
+/**
+ * Outcome of classifying an `ERROR :Closing Link (...)` string:
+ *
+ * - `'normal'`    — no recognised pattern; use the default backoff
+ * - `'throttled'` — transient overload; pause longer before retry
+ * - `'banned'`    — K/G-line or DNSBL block; abort reconnect entirely
+ */
+type CloseReasonPolicy =
+  | { kind: 'normal'; backoffMultiplier: 1 }
+  | { kind: 'throttled'; label: string; backoffMultiplier: number }
+  | { kind: 'banned'; label: string; backoffMultiplier: 1 };
+
+const BANNED_PATTERNS: Array<[RegExp, string]> = [
+  [/K[\s-]?Line/i, 'K-Lined'],
+  [/G[\s-]?Line/i, 'G-Lined'],
+  [/Z[\s-]?Line/i, 'Z-Lined'],
+  [/Banned\s+from\s+server/i, 'banned from server'],
+  [/You are banned/i, 'banned from server'],
+  [/DNSBL/i, 'blocked by DNSBL'],
+  [/You are not welcome/i, 'banned from server'],
+];
+
+const THROTTLED_PATTERNS: Array<[RegExp, string]> = [
+  [/Throttled/i, 'throttled'],
+  [/Reconnect(?:ing)?\s+too\s+fast/i, 'reconnecting too fast'],
+  [/Too\s+many\s+connections/i, 'too many connections'],
+  [/Connection\s+limit/i, 'connection limit reached'],
+  [/Excess\s+Flood/i, 'excess flood'],
+];
+
+/**
+ * Inspect an IRC `ERROR :...` reason (as captured on `irc error`/`close`)
+ * and return a retry policy. Unknown reasons fall through to `'normal'`
+ * so legacy code paths continue to work unchanged.
+ */
+function classifyCloseReason(reason: string | null): CloseReasonPolicy {
+  if (!reason) return { kind: 'normal', backoffMultiplier: 1 };
+  for (const [re, label] of BANNED_PATTERNS) {
+    if (re.test(reason)) return { kind: 'banned', label, backoffMultiplier: 1 };
+  }
+  for (const [re, label] of THROTTLED_PATTERNS) {
+    // 4× the default exponential delay keeps us off a shared server while
+    // the throttle window drains, without turning every retry into an hour
+    // of dead time.
+    if (re.test(reason)) return { kind: 'throttled', label, backoffMultiplier: 4 };
+  }
+  return { kind: 'normal', backoffMultiplier: 1 };
+}
+
+/**
+ * Read the `sts` cap from the irc-framework cap.available map and, if
+ * present, parse and forward it to the STS store. irc-framework exposes
+ * every CAP LS entry on `network.cap.available` regardless of whether we
+ * requested it, so STS is readable even though we don't CAP REQ for it.
+ *
+ * A plaintext ingestion with a port directive triggers a reconnect in the
+ * Bot callback — the caller is responsible for disconnecting and reopening
+ * the session on the TLS port. The lifecycle layer just surfaces the
+ * directive; it does not decide the reconnect policy.
+ */
+function ingestSTSDirective(deps: ConnectionLifecycleDeps): void {
+  const callback = deps.onSTSDirective;
+  if (!callback) return;
+  const rawValue = deps.client.network.cap?.available?.get('sts');
+  if (!rawValue) return;
+  const directive = parseSTSDirective(rawValue);
+  if (!directive) {
+    deps.logger.warn(`Ignoring malformed STS directive "${rawValue}"`);
+    return;
+  }
+  deps.logger.info(
+    `IRCv3 STS received: duration=${directive.duration}` +
+      (directive.port !== undefined ? ` port=${directive.port}` : ''),
+  );
+  callback(directive, deps.config.irc.tls);
 }
 
 /** Log TLS cipher info from the underlying socket. */

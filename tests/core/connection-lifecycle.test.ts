@@ -17,8 +17,12 @@ import { createMockLogger } from '../helpers/mock-logger';
 
 class MockClient extends EventEmitter implements LifecycleIRCClient {
   public joins: Array<{ channel: string; key?: string }> = [];
-  public network = {
+  public network: LifecycleIRCClient['network'] & {
+    supports: ReturnType<typeof vi.fn>;
+    cap: { available: Map<string, string>; enabled: string[] };
+  } = {
     supports: vi.fn<(feature: string) => unknown>().mockReturnValue('rfc1459'),
+    cap: { available: new Map<string, string>(), enabled: [] },
   };
   /** Simulates irc-framework's internal connection/transport chain for TLS tests. */
   public connection?: { transport?: { socket?: unknown } };
@@ -189,6 +193,49 @@ describe('registerConnectionEvents', () => {
       client.emit('registered');
       const warnCalls = (logger.warn as ReturnType<typeof vi.fn>).mock.calls.flat();
       expect(warnCalls.some((s) => String(s).includes('Unknown CASEMAPPING'))).toBe(true);
+    });
+
+    it('forwards a parsed STS directive to onSTSDirective when advertised (§5)', () => {
+      const onSTSDirective = vi.fn();
+      const { client, deps } = makeContext({ onSTSDirective });
+      client.network.cap.available.set('sts', 'port=6697,duration=2592000');
+      registerConnectionEvents(
+        deps,
+        () => {},
+        () => {},
+      );
+      client.emit('registered');
+      expect(onSTSDirective).toHaveBeenCalledOnce();
+      const [directive, currentTls] = onSTSDirective.mock.calls[0];
+      expect(directive).toEqual({ port: 6697, duration: 2592000 });
+      expect(currentTls).toBe(false);
+    });
+
+    it('does not fire onSTSDirective when no sts cap is advertised', () => {
+      const onSTSDirective = vi.fn();
+      const { client, deps } = makeContext({ onSTSDirective });
+      registerConnectionEvents(
+        deps,
+        () => {},
+        () => {},
+      );
+      client.emit('registered');
+      expect(onSTSDirective).not.toHaveBeenCalled();
+    });
+
+    it('warns and drops a malformed sts value', () => {
+      const onSTSDirective = vi.fn();
+      const { client, deps, logger } = makeContext({ onSTSDirective });
+      client.network.cap.available.set('sts', 'port=6697'); // no duration → invalid
+      registerConnectionEvents(
+        deps,
+        () => {},
+        () => {},
+      );
+      client.emit('registered');
+      expect(onSTSDirective).not.toHaveBeenCalled();
+      const warnCalls = (logger.warn as ReturnType<typeof vi.fn>).mock.calls.flat();
+      expect(warnCalls.some((s) => String(s).includes('malformed STS directive'))).toBe(true);
     });
 
     it('propagates a parsed ISUPPORT snapshot on registration', () => {
@@ -426,6 +473,83 @@ describe('registerConnectionEvents', () => {
         expect(exitSpy).not.toHaveBeenCalled();
       } finally {
         exitSpy.mockRestore();
+      }
+    });
+
+    it('exits immediately on a K-lined close reason without retrying (§9)', () => {
+      // K-line / G-line / DNSBL responses should not burn retry attempts.
+      // The bot exits non-zero and supervisord decides whether to resurrect it.
+      const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+      try {
+        const { client, deps } = makeContext();
+        const reconnect = vi.fn();
+        (deps as { reconnect?: () => void }).reconnect = reconnect;
+        registerConnectionEvents(
+          deps,
+          () => {},
+          () => {},
+        );
+        client.emit('irc error', {
+          error: 'irc',
+          reason: 'Closing Link: 1.2.3.4 (K-Lined: spam)',
+        });
+        client.emit('close');
+        expect(exitSpy).toHaveBeenCalledWith(1);
+        expect(reconnect).not.toHaveBeenCalled();
+      } finally {
+        exitSpy.mockRestore();
+      }
+    });
+
+    it('applies a longer backoff for a Throttled close reason (§9)', () => {
+      vi.useFakeTimers();
+      try {
+        const { client, deps } = makeContext();
+        const reconnect = vi.fn();
+        (deps as { reconnect?: () => void }).reconnect = reconnect;
+        registerConnectionEvents(
+          deps,
+          () => {},
+          () => {},
+        );
+        client.emit('irc error', {
+          error: 'irc',
+          reason: 'Closing Link: 1.2.3.4 (Throttled: reconnecting too fast)',
+        });
+        client.emit('close');
+        // Default first attempt would be ~2s + jitter; throttled multiplies by 4
+        // so we expect reconnect to NOT fire until significantly later than 2s.
+        vi.advanceTimersByTime(3_000);
+        expect(reconnect).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(20_000);
+        expect(reconnect).toHaveBeenCalledOnce();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('uses normal backoff for an unrecognised close reason', () => {
+      vi.useFakeTimers();
+      try {
+        const { client, deps } = makeContext();
+        const reconnect = vi.fn();
+        (deps as { reconnect?: () => void }).reconnect = reconnect;
+        registerConnectionEvents(
+          deps,
+          () => {},
+          () => {},
+        );
+        client.emit('irc error', {
+          error: 'irc',
+          reason: 'Closing Link: transient glitch',
+        });
+        client.emit('close');
+        // First retry uses a ~4s base (2^2) + jitter. Advance enough to
+        // be sure reconnect has fired.
+        vi.advanceTimersByTime(10_000);
+        expect(reconnect).toHaveBeenCalledOnce();
+      } finally {
+        vi.useRealTimers();
       }
     });
   });
