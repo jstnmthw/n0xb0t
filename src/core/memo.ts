@@ -380,7 +380,7 @@ export class MemoManager {
   // -------------------------------------------------------------------------
 
   /** Call from onPartyJoin callback to notify on DCC connect. */
-  notifyOnDCCConnect(handle: string, nick: string): void {
+  notifyOnDCCConnect(_handle: string, nick: string): void {
     if (this.pendingMemoCount <= 0) return;
     const session = this.dccManager?.getSession(nick);
     if (session) {

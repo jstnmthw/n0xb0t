@@ -17,9 +17,6 @@ import { sanitize } from '../utils/sanitize';
 /** Maximum frame size in bytes. Frames exceeding this are protocol errors. */
 export const MAX_FRAME_SIZE = 64 * 1024;
 
-/** Handshake timeout: close if HELLO not received within this window. */
-export const HANDSHAKE_TIMEOUT_MS = 30_000;
-
 /** Frames handled exclusively by the hub — never fanned out to other leaves.
  *  SECURITY: Permission-mutation frames (ADDUSER, SETFLAGS, DELUSER) MUST be
  *  hub-only. The hub is the single source of truth for permissions and broadcasts

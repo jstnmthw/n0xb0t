@@ -49,7 +49,7 @@ export function setupTopicRecovery(
  */
 export function restoreTopicIfNeeded(
   api: PluginAPI,
-  config: ChanmodConfig,
+  _config: ChanmodConfig,
   state: SharedState,
   channel: string,
 ): boolean {
