@@ -338,6 +338,17 @@ export function validateResolvedSecrets(cfg: BotConfig): void {
     }
   }
 
+  // SASL PLAIN over plaintext leaks the password on the wire — refuse to start.
+  // Networks that advertise SASL PLAIN without offering TLS are vanishingly
+  // rare and every such case is a misconfiguration. Use EXTERNAL (CertFP) or
+  // disable SASL if this really isn't what you want.
+  if (cfg.services.sasl && saslMech === 'PLAIN' && !cfg.irc.tls) {
+    throw new Error(
+      '[config] SASL PLAIN requires irc.tls=true — plaintext SASL leaks the NickServ password. ' +
+        'Enable TLS or set services.sasl_mechanism="EXTERNAL" with a client cert.',
+    );
+  }
+
   // BotLink shared secret — required when botlink enabled
   if (cfg.botlink?.enabled) {
     if (!cfg.botlink.password) {

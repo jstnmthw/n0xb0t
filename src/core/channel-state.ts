@@ -7,6 +7,25 @@ import { isModeArray, isObjectArray, toEventObject } from '../utils/irc-event';
 import { type Casemapping, ircLower } from '../utils/wildcard';
 
 // ---------------------------------------------------------------------------
+// Prefix-mode defaults
+//
+// RFC-style prefix modes with their canonical symbol. Real networks advertise
+// these (plus whatever extras their IRCd supports) via ISUPPORT `PREFIX=...`.
+// Phase 2 will populate these from the connected network's 005 line; this
+// map is the compile-time fallback that covers Solanum/Libera, InspIRCd,
+// Unreal, OFTC, ngIRCd, and every other current IRCd.
+// ---------------------------------------------------------------------------
+
+const PREFIX_MODES = new Set(['q', 'a', 'o', 'h', 'v']);
+const PREFIX_SYMBOL_TO_MODE: Record<string, string> = {
+  '~': 'q',
+  '&': 'a',
+  '@': 'o',
+  '%': 'h',
+  '+': 'v',
+};
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -274,20 +293,8 @@ export class ChannelState {
       const mode = m.mode ?? '';
       const param = m.param ? String(m.param) : '';
 
-      // User prefix modes: +o, -o, +v, -v, etc. have a nick as param
-      if (
-        param &&
-        (mode === '+o' ||
-          mode === '-o' ||
-          mode === '+v' ||
-          mode === '-v' ||
-          mode === '+h' ||
-          mode === '-h' ||
-          mode === '+a' ||
-          mode === '-a' ||
-          mode === '+q' ||
-          mode === '-q')
-      ) {
+      // User prefix modes: +q/+a/+o/+h/+v (and their negations) carry a nick param.
+      if (param && mode.length === 2 && PREFIX_MODES.has(mode.charAt(1))) {
         const user = ch.users.get(ircLower(param, this.casemapping));
         if (user) {
           const modeChar = mode.charAt(1); // 'o', 'v', etc.
@@ -347,7 +354,7 @@ export class ChannelState {
       const nick = String(u.nick ?? '');
       const ident = String(u.ident ?? '');
       const hostname = String(u.hostname ?? '');
-      const modes = this.parseUserlistModes(typeof u.modes === 'string' ? u.modes : undefined);
+      const modes = this.parseUserlistModes(u.modes);
 
       // Only add if not already present (join event may have fired first)
       if (!ch.users.has(ircLower(nick, this.casemapping))) {
@@ -498,14 +505,31 @@ export class ChannelState {
     this.listeners.push({ event, fn });
   }
 
-  /** Parse irc-framework userlist modes string into mode chars. */
-  private parseUserlistModes(modes: string | undefined): string[] {
+  /**
+   * Normalise a user's prefix modes from a NAMES reply into mode chars.
+   *
+   * irc-framework's RPL_NAMEREPLY handler walks `network.options.PREFIX` and
+   * emits an **array** of mode chars (e.g. `['o', 'v']` for `@+nick`). If
+   * `multi-prefix` is active every applicable prefix is represented; without
+   * it, only the highest. We accept the array form and filter it to prefix
+   * modes we recognise.
+   *
+   * The string branch (symbol characters or mode-char text) is retained as a
+   * defensive fallback for bot-link CHAN sync frames, which ship `modes` as a
+   * `string[]` already but historically included mixed forms.
+   */
+  private parseUserlistModes(modes: unknown): string[] {
     if (!modes) return [];
+    const chars = Array.isArray(modes) ? modes.map(String) : String(modes).split('');
     const result: string[] = [];
-    // irc-framework uses symbols: @ = op, + = voice, % = halfop
-    if (modes.includes('o') || modes.includes('@')) result.push('o');
-    if (modes.includes('v') || modes.includes('+')) result.push('v');
-    if (modes.includes('h') || modes.includes('%')) result.push('h');
+    const seen = new Set<string>();
+    for (const token of chars) {
+      const mode = PREFIX_SYMBOL_TO_MODE[token] ?? (PREFIX_MODES.has(token) ? token : null);
+      if (mode && !seen.has(mode)) {
+        seen.add(mode);
+        result.push(mode);
+      }
+    }
     return result;
   }
 }

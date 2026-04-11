@@ -170,6 +170,35 @@ describe('validateResolvedSecrets', () => {
     expect(() => validateResolvedSecrets(cfg)).not.toThrow();
   });
 
+  it('fails when SASL PLAIN is configured without TLS (credential leak, §5)', () => {
+    const cfg = baseConfig();
+    cfg.irc.tls = false;
+    cfg.services.sasl = true;
+    cfg.services.password = 'hunter2';
+    // PLAIN is the default mechanism; omitting it must still trip the check.
+    expect(() => validateResolvedSecrets(cfg)).toThrow(/SASL PLAIN requires irc\.tls=true/);
+  });
+
+  it('fails when SASL PLAIN is configured explicitly without TLS', () => {
+    const cfg = baseConfig();
+    cfg.irc.tls = false;
+    cfg.services.sasl = true;
+    cfg.services.sasl_mechanism = 'PLAIN';
+    cfg.services.password = 'hunter2';
+    expect(() => validateResolvedSecrets(cfg)).toThrow(/SASL PLAIN requires irc\.tls=true/);
+  });
+
+  it('passes when SASL EXTERNAL is configured without TLS key on the cfg shape', () => {
+    // EXTERNAL uses TLS client certs, so the plaintext-credential concern
+    // doesn't apply even though real deployments must still enable TLS.
+    const cfg = baseConfig();
+    cfg.irc.tls = false;
+    cfg.services.sasl = true;
+    cfg.services.sasl_mechanism = 'EXTERNAL';
+    cfg.services.password = '';
+    expect(() => validateResolvedSecrets(cfg)).not.toThrow();
+  });
+
   it('fails when botlink enabled + BOTLINK_PASSWORD unset', () => {
     const cfg = baseConfig();
     cfg.botlink = {

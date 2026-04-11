@@ -80,18 +80,21 @@ describe('splitMessage', () => {
     });
 
     it('should truncate when word-boundary splitting produces too many lines', () => {
-      // 6 words of 8 chars each, maxBytes=10 forces one word per line, maxLines=3
+      // 6 words of 8 chars each, maxBytes=10 forces one word per line, maxLines=3.
+      // "wordCCCC" is 8 bytes; appending " ..." (4 bytes) would overflow the
+      // 10-byte budget, so the last line is trimmed to "wordCC ..." (10 bytes).
       const text = 'wordAAAA wordBBBB wordCCCC wordDDDD wordEEEE wordFFFF';
       const result = splitMessage(text, 10, 3);
-      expect(result).toEqual(['wordAAAA', 'wordBBBB', 'wordCCCC ...']);
+      expect(result).toEqual(['wordAAAA', 'wordBBBB', 'wordCC ...']);
       expect(result.length).toBe(3);
     });
 
     it('should truncate when hard splits produce too many lines', () => {
-      // 50-char string with no spaces, maxBytes=10, maxLines=2
+      // 50-char string with no spaces, maxBytes=10, maxLines=2.
+      // Last line is trimmed from 10 a's to 6 a's to make room for " ...".
       const text = 'a'.repeat(50);
       const result = splitMessage(text, 10, 2);
-      expect(result).toEqual(['a'.repeat(10), 'a'.repeat(10) + ' ...']);
+      expect(result).toEqual(['a'.repeat(10), 'a'.repeat(6) + ' ...']);
       expect(result.length).toBe(2);
     });
 
@@ -116,10 +119,85 @@ describe('splitMessage', () => {
     });
 
     it('should stop processing input lines early when maxLines is exceeded', () => {
-      // First line splits into 3 chunks, maxLines=2, so second input line is never reached
+      // First line splits into 3 chunks, maxLines=2, so second input line is never reached.
+      // Last line trimmed to 6 a's to fit " ..." within the 10-byte budget.
       const text = 'a'.repeat(30) + '\nshould not appear';
       const result = splitMessage(text, 10, 2);
-      expect(result).toEqual(['a'.repeat(10), 'a'.repeat(10) + ' ...']);
+      expect(result).toEqual(['a'.repeat(10), 'a'.repeat(6) + ' ...']);
+    });
+  });
+
+  describe('UTF-8 byte counting (§1)', () => {
+    it('should split by bytes, not UTF-16 code units, for multi-byte characters', () => {
+      // Japanese — each codepoint is 3 UTF-8 bytes.
+      // 10 hiragana = 30 bytes; budget 15 bytes must split after 5 codepoints.
+      const text = 'あいうえおかきくけこ';
+      const result = splitMessage(text, 15, 10);
+      expect(result).toEqual(['あいうえお', 'かきくけこ']);
+      // Confirm each chunk is within budget
+      for (const chunk of result) {
+        expect(Buffer.byteLength(chunk, 'utf8')).toBeLessThanOrEqual(15);
+      }
+    });
+
+    it('should never split a surrogate pair (emoji)', () => {
+      // 🙂 is U+1F642 — two UTF-16 code units, 4 UTF-8 bytes.
+      // A naive .length-based splitter would cut mid-surrogate and produce mojibake.
+      const text = '🙂🙂🙂🙂🙂';
+      const result = splitMessage(text, 12, 10);
+      // 12-byte budget fits 3 emoji (12 bytes) per line.
+      expect(result).toEqual(['🙂🙂🙂', '🙂🙂']);
+      // Each chunk must be valid UTF-8 — round-trip through Buffer to detect mojibake.
+      for (const chunk of result) {
+        const bytes = Buffer.from(chunk, 'utf8');
+        expect(bytes.toString('utf8')).toBe(chunk);
+      }
+    });
+
+    it('should word-split Cyrillic by byte budget', () => {
+      // Each Cyrillic letter is 2 UTF-8 bytes.
+      // "привет мир" = 6*2 + 1 + 3*2 = 19 bytes; "привет" alone = 12 bytes.
+      const text = 'привет мир';
+      const result = splitMessage(text, 13, 10);
+      expect(result).toEqual(['привет', 'мир']);
+    });
+
+    it('should append ellipsis without overflowing budget on multi-byte content', () => {
+      // 4 hiragana (12 bytes) forced onto 2 lines with a 10-byte budget.
+      // Last line must fit within 10 bytes including " ..." (4 ASCII bytes).
+      const text = 'あいうえおかきくけこ';
+      const result = splitMessage(text, 10, 2);
+      for (const chunk of result) {
+        expect(Buffer.byteLength(chunk, 'utf8')).toBeLessThanOrEqual(10);
+      }
+      expect(result[result.length - 1].endsWith(' ...')).toBe(true);
+    });
+
+    it('should handle a ZWJ emoji sequence without corrupting bytes', () => {
+      // 👨‍👩‍👧 is a family ZWJ sequence — 18 UTF-8 bytes total.
+      // With a 20-byte budget the whole thing fits on one line.
+      const text = '👨‍👩‍👧';
+      const result = splitMessage(text, 20, 10);
+      expect(result).toEqual([text]);
+      expect(Buffer.from(result[0], 'utf8').toString('utf8')).toBe(text);
+    });
+  });
+
+  describe('reservedBytes (§1)', () => {
+    it('should subtract reservedBytes from the effective byte budget', () => {
+      // Budget 20, reserved 10 → effective 10.
+      const text = 'a'.repeat(30);
+      const result = splitMessage(text, 20, 10, 10);
+      expect(result).toEqual(['a'.repeat(10), 'a'.repeat(10), 'a'.repeat(10)]);
+    });
+
+    it('should never produce a zero-byte budget even when reservedBytes >= maxBytes', () => {
+      // Degenerate config — the splitter clamps to at least 1 byte rather than
+      // infinite-looping or dividing by zero.
+      const result = splitMessage('abcde', 10, 10, 100);
+      expect(result.length).toBeGreaterThan(0);
+      // Each chunk must still be non-empty
+      for (const chunk of result) expect(chunk.length).toBeGreaterThan(0);
     });
   });
 });

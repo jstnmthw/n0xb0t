@@ -125,6 +125,66 @@ describe('IRCCommands', () => {
     expect(rawMsgs[0].args[0]).toBe('MODE #test +ov Alice Bob');
   });
 
+  // -------------------------------------------------------------------------
+  // Mode batcher — direction segmentation (§2)
+  // -------------------------------------------------------------------------
+
+  it('should segment a mixed-direction mode string into per-direction lines', () => {
+    // `+o-v a b` must become two lines — the old code treated `-` as a mode
+    // char and re-applied `+` to everything, producing a wrong MODE line.
+    irc.mode('#test', '+o-v', 'Alice', 'Bob');
+
+    const rawMsgs = client.sent.filter((m) => m.type === 'raw');
+    expect(rawMsgs).toHaveLength(2);
+    expect(rawMsgs[0].args[0]).toBe('MODE #test +o Alice');
+    expect(rawMsgs[1].args[0]).toBe('MODE #test -v Bob');
+  });
+
+  it('should segment same-mode mixed directions (`+o-o`) correctly', () => {
+    irc.mode('#test', '+o-o', 'Alice', 'Bob');
+
+    const rawMsgs = client.sent.filter((m) => m.type === 'raw');
+    expect(rawMsgs).toHaveLength(2);
+    expect(rawMsgs[0].args[0]).toBe('MODE #test +o Alice');
+    expect(rawMsgs[1].args[0]).toBe('MODE #test -o Bob');
+  });
+
+  it('should batch long mixed-direction runs per direction and per modesPerLine', () => {
+    irc.setModesPerLine(2);
+    // 3 ops added, 2 ops removed — each direction batches independently.
+    irc.mode('#test', '+ooo-oo', 'a', 'b', 'c', 'd', 'e');
+
+    const rawMsgs = client.sent.filter((m) => m.type === 'raw');
+    expect(rawMsgs.map((m) => m.args[0])).toEqual([
+      'MODE #test +oo a b',
+      'MODE #test +o c',
+      'MODE #test -oo d e',
+    ]);
+  });
+
+  it('should throw on mode char / param count mismatch', () => {
+    // `+oo a` — two mode chars, one param. The old code sent `+oo a`,
+    // silently dropping the second `o`'s param.
+    expect(() => irc.mode('#test', '+oo', 'Alice')).toThrow(/must match 1:1/);
+  });
+
+  it('should throw on a mode string missing a leading direction', () => {
+    expect(() => irc.mode('#test', 'ov', 'Alice', 'Bob')).toThrow(/leading \+ or -/);
+  });
+
+  it('should send flag modes with no params (e.g. `+mn`)', () => {
+    irc.mode('#test', '+mn');
+    const rawMsgs = client.sent.filter((m) => m.type === 'raw');
+    expect(rawMsgs).toHaveLength(1);
+    expect(rawMsgs[0].args[0]).toBe('MODE #test +mn');
+  });
+
+  it('should split flag-only mixed-direction runs per direction', () => {
+    irc.mode('#test', '+mn-t');
+    const rawMsgs = client.sent.filter((m) => m.type === 'raw');
+    expect(rawMsgs.map((m) => m.args[0])).toEqual(['MODE #test +mn', 'MODE #test -t']);
+  });
+
   it('should log mod actions to database', () => {
     irc.kick('#test', 'Alice', 'reason');
 

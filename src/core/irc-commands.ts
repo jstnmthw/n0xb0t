@@ -19,6 +19,47 @@ export interface IRCCommandsClient {
 }
 
 // ---------------------------------------------------------------------------
+// Mode-string parsing
+// ---------------------------------------------------------------------------
+
+interface ModeSegment {
+  dir: '+' | '-';
+  chars: string[];
+}
+
+/**
+ * Split a mode string into per-direction segments.
+ * `"+o-v"` → `[{dir:'+',chars:['o']},{dir:'-',chars:['v']}]`
+ * Throws if the string does not start with a direction indicator.
+ */
+function parseModeString(s: string): ModeSegment[] {
+  const segments: ModeSegment[] = [];
+  let dir: '+' | '-' | null = null;
+  let chars: string[] = [];
+
+  for (const ch of s) {
+    if (ch === '+' || ch === '-') {
+      if (dir !== null && chars.length > 0) {
+        segments.push({ dir, chars });
+      }
+      dir = ch;
+      chars = [];
+      continue;
+    }
+    if (dir === null) {
+      throw new Error(`IRCCommands.mode(): mode string "${s}" is missing a leading + or -`);
+    }
+    chars.push(ch);
+  }
+
+  if (dir !== null && chars.length > 0) {
+    segments.push({ dir, chars });
+  }
+
+  return segments;
+}
+
+// ---------------------------------------------------------------------------
 // IRCCommands
 // ---------------------------------------------------------------------------
 
@@ -132,25 +173,52 @@ export class IRCCommands {
 
   /**
    * Raw mode change. Respects ISUPPORT MODES limit by batching.
+   *
+   * Mode strings with mixed directions (e.g. `"+o-v"`) are segmented so each
+   * batch contains a single direction — the server would otherwise re-apply
+   * the leading sign to every subsequent char, producing the wrong modes.
+   *
+   * When `params` is non-empty, every mode char in `modeString` is expected
+   * to carry exactly one param. A count mismatch throws rather than silently
+   * truncating the excess. Phase 2 will replace this rule with per-mode
+   * CHANMODES awareness so flag modes like `+m` can coexist with parameter
+   * modes in a single call.
+   *
    * @param channel - Target channel
-   * @param modeString - Mode string, e.g. '+oov'
+   * @param modeString - Mode string, e.g. `'+ov'`, `'+oo'`, `'+o-v'`, `'+i'`
    * @param params - Mode parameters (nicks, masks, etc.)
    */
   mode(channel: string, modeString: string, ...params: string[]): void {
-    // If the total params fit in one line, send directly
-    if (params.length <= this.modesPerLine) {
-      this.sendModeRaw(channel, modeString, params);
+    const segments = parseModeString(modeString);
+    const totalModes = segments.reduce((n, seg) => n + seg.chars.length, 0);
+
+    if (params.length === 0) {
+      // No-param modes only (e.g. `+mn`, `-t`). Batching by modesPerLine still
+      // applies in case a caller passes a long run like `+mntslk`.
+      for (const seg of segments) {
+        for (let i = 0; i < seg.chars.length; i += this.modesPerLine) {
+          const batchChars = seg.chars.slice(i, i + this.modesPerLine);
+          this.sendModeRaw(channel, seg.dir + batchChars.join(''), []);
+        }
+      }
       return;
     }
 
-    // Batch: split into groups respecting the modes-per-line limit
-    const direction = modeString.charAt(0); // '+' or '-'
-    const modeChars = modeString.slice(1).split('');
+    if (totalModes !== params.length) {
+      throw new Error(
+        `IRCCommands.mode(): mode string "${modeString}" has ${totalModes} mode char(s) ` +
+          `but ${params.length} param(s) were supplied — must match 1:1`,
+      );
+    }
 
-    for (let i = 0; i < modeChars.length; i += this.modesPerLine) {
-      const batchChars = modeChars.slice(i, i + this.modesPerLine);
-      const batchParams = params.slice(i, i + this.modesPerLine);
-      this.sendModeRaw(channel, direction + batchChars.join(''), batchParams);
+    let paramIdx = 0;
+    for (const seg of segments) {
+      for (let i = 0; i < seg.chars.length; i += this.modesPerLine) {
+        const batchChars = seg.chars.slice(i, i + this.modesPerLine);
+        const batchParams = params.slice(paramIdx, paramIdx + batchChars.length);
+        paramIdx += batchChars.length;
+        this.sendModeRaw(channel, seg.dir + batchChars.join(''), batchParams);
+      }
     }
   }
 
