@@ -840,6 +840,51 @@ describe('IRCBridge', () => {
 
       dispatcher.unbindAll('test');
     });
+
+    it('keys the rate limiter by full hostmask so nick rotation cannot bypass it (§11)', async () => {
+      const handler = vi.fn();
+      dispatcher.bind('ctcp', '-', 'VERSION', handler, 'test');
+
+      // Burn the 3-request budget for one hostmask.
+      for (let i = 0; i < 3; i++) {
+        client.simulateEvent('ctcp request', {
+          nick: `rotator${i}`,
+          ident: 'user',
+          hostname: 'attacker.host',
+          type: 'VERSION',
+          message: 'VERSION',
+        });
+        await Promise.resolve();
+      }
+      expect(handler).toHaveBeenCalledTimes(3);
+
+      // 4th request from a different nick but the same ident@host must
+      // still be blocked — the old code keyed on nick, so this sneaked
+      // past the limit.
+      handler.mockClear();
+      client.simulateEvent('ctcp request', {
+        nick: 'rotator4',
+        ident: 'user',
+        hostname: 'attacker.host',
+        type: 'VERSION',
+        message: 'VERSION',
+      });
+      await Promise.resolve();
+      expect(handler).not.toHaveBeenCalled();
+
+      // A genuinely different hostmask still has its own fresh budget.
+      client.simulateEvent('ctcp request', {
+        nick: 'innocent',
+        ident: 'user',
+        hostname: 'legit.host',
+        type: 'VERSION',
+        message: 'VERSION',
+      });
+      await Promise.resolve();
+      expect(handler).toHaveBeenCalledTimes(1);
+
+      dispatcher.unbindAll('test');
+    });
   });
 
   describe('kick events — edge cases', () => {

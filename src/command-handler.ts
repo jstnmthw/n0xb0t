@@ -48,8 +48,8 @@ export interface CommandEntry {
   handler: CommandHandlerFn;
 }
 
-/** Command prefix. */
-const COMMAND_PREFIX = '.';
+/** Default command prefix when `bot.json` doesn't set one. */
+const DEFAULT_COMMAND_PREFIX = '.';
 
 // ---------------------------------------------------------------------------
 // CommandHandler
@@ -66,22 +66,38 @@ export class CommandHandler {
   private commands: Map<string, CommandEntry> = new Map();
   private permissions: CommandPermissionsProvider | null;
   private preExecuteHook: PreExecuteHook | null = null;
+  /**
+   * Active command prefix. Configurable via `config.command_prefix` so
+   * operators can side-step the `.` default on networks where it collides
+   * with chit-chat in REPL/DCC input. A single-character prefix is the
+   * common case but the parser accepts any non-empty string.
+   */
+  private readonly prefix: string;
 
-  constructor(permissions?: CommandPermissionsProvider | null) {
+  constructor(permissions?: CommandPermissionsProvider | null, commandPrefix?: string) {
     this.permissions = permissions ?? null;
-    // Register the built-in .help command
+    this.prefix =
+      commandPrefix && commandPrefix.length > 0 ? commandPrefix : DEFAULT_COMMAND_PREFIX;
+    // Register the built-in help command. Usage string uses the configured
+    // prefix so `.help`-style docs stay accurate when an operator switches
+    // to `!` or `~`.
     this.registerCommand(
       'help',
       {
         flags: '-',
         description: 'List commands or show help for a specific command',
-        usage: '.help [command]',
+        usage: `${this.prefix}help [command]`,
         category: 'general',
       },
       (args, ctx) => {
         this.handleHelp(args, ctx);
       },
     );
+  }
+
+  /** Return the active command prefix. Used by transports to echo usage text. */
+  getPrefix(): string {
+    return this.prefix;
   }
 
   /** Register a command. */
@@ -104,11 +120,11 @@ export class CommandHandler {
     const trimmed = commandString.trim();
     if (!trimmed) return;
 
-    // Must start with command prefix
-    if (!trimmed.startsWith(COMMAND_PREFIX)) return;
+    // Must start with the configured command prefix.
+    if (!trimmed.startsWith(this.prefix)) return;
 
     // Parse command name and arguments
-    const withoutPrefix = trimmed.substring(COMMAND_PREFIX.length);
+    const withoutPrefix = trimmed.substring(this.prefix.length);
     const spaceIdx = withoutPrefix.indexOf(' ');
     const commandName =
       spaceIdx === -1
@@ -121,7 +137,9 @@ export class CommandHandler {
     // Look up the command
     const entry = this.commands.get(commandName);
     if (!entry) {
-      ctx.reply(`Unknown command: .${commandName} — type .help for a list of commands`);
+      ctx.reply(
+        `Unknown command: ${this.prefix}${commandName} — type ${this.prefix}help for a list of commands`,
+      );
       return;
     }
 
@@ -195,10 +213,10 @@ export class CommandHandler {
     const lines: string[] = ['Available commands:'];
     for (const [category, entries] of byCategory) {
       lines.push(`  [${category}]`);
-      const rows = entries.map((e) => [`.${e.name}`, `— ${e.options.description}`]);
+      const rows = entries.map((e) => [`${this.prefix}${e.name}`, `— ${e.options.description}`]);
       lines.push(formatTable(rows, { indent: '    ' }));
     }
-    lines.push('Type .help <command> for details on a specific command.');
+    lines.push(`Type ${this.prefix}help <command> for details on a specific command.`);
     return lines.join('\n');
   }
 

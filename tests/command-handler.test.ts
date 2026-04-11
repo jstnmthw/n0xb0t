@@ -378,4 +378,73 @@ describe('CommandHandler', () => {
       expect(handlerFn).toHaveBeenCalledOnce();
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Configurable command prefix (§8 Phase 7)
+  // -------------------------------------------------------------------------
+
+  describe('configurable command prefix', () => {
+    it('parses commands under a custom single-char prefix', async () => {
+      const handler = new CommandHandler(null, '!');
+      const fn = vi.fn();
+      handler.registerCommand(
+        'ping',
+        { flags: '-', description: 'Ping', usage: '!ping', category: 'test' },
+        fn,
+      );
+      const ctx = makeCtx();
+      await handler.execute('!ping', ctx);
+      expect(fn).toHaveBeenCalledOnce();
+    });
+
+    it('ignores messages under the default `.` prefix when configured for `!`', async () => {
+      const handler = new CommandHandler(null, '!');
+      const fn = vi.fn();
+      handler.registerCommand(
+        'ping',
+        { flags: '-', description: 'Ping', usage: '!ping', category: 'test' },
+        fn,
+      );
+      const ctx = makeCtx();
+      await handler.execute('.ping', ctx);
+      expect(fn).not.toHaveBeenCalled();
+    });
+
+    it('accepts multi-character prefixes', async () => {
+      const handler = new CommandHandler(null, '::');
+      const fn = vi.fn();
+      handler.registerCommand(
+        'ping',
+        { flags: '-', description: 'Ping', usage: '::ping', category: 'test' },
+        fn,
+      );
+      const ctx = makeCtx();
+      await handler.execute('::ping', ctx);
+      expect(fn).toHaveBeenCalledOnce();
+    });
+
+    it('echoes the custom prefix in unknown-command errors and help text', async () => {
+      const handler = new CommandHandler(null, '~');
+      const ctx = makeCtx();
+      await handler.execute('~bogus', ctx);
+      const unknownMsg = ctx.reply.mock.calls[0][0];
+      expect(unknownMsg).toContain('~bogus');
+      expect(unknownMsg).toContain('~help');
+
+      ctx.reply.mockClear();
+      await handler.execute('~help', ctx);
+      const helpMsg = ctx.reply.mock.calls[0][0];
+      expect(helpMsg).toContain('~help');
+    });
+
+    it('falls back to the default `.` when no prefix is supplied', () => {
+      const handler = new CommandHandler();
+      expect(handler.getPrefix()).toBe('.');
+    });
+
+    it('falls back to the default `.` when an empty string is supplied', () => {
+      const handler = new CommandHandler(null, '');
+      expect(handler.getPrefix()).toBe('.');
+    });
+  });
 });

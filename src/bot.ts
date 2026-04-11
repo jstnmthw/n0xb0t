@@ -128,7 +128,7 @@ export class Bot {
     this.eventBus = new BotEventBus();
     this.permissions = new Permissions(this.db, this.logger, this.eventBus);
     this.dispatcher = new EventDispatcher(this.permissions, this.logger);
-    this.commandHandler = new CommandHandler(this.permissions);
+    this.commandHandler = new CommandHandler(this.permissions, this.config.command_prefix);
     this.client = new IrcClient();
     this.configuredChannels = this.config.irc.channels.map((entry) =>
       typeof entry === 'string' ? { name: entry } : { name: entry.name, key: entry.key },
@@ -151,7 +151,11 @@ export class Bot {
       logger: this.logger,
     });
     this.helpRegistry = new HelpRegistry();
-    this.channelSettings = new ChannelSettings(this.db, this.logger.child('channel-settings'));
+    this.channelSettings = new ChannelSettings(
+      this.db,
+      this.logger.child('channel-settings'),
+      (s) => ircLower(s, this.getCasemapping()),
+    );
     this.banStore = new BanStore(this.db, (s) => ircLower(s, this.getCasemapping()));
     this.stsStore = new STSStore(this.db);
     this.memo = new MemoManager({

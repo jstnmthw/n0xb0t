@@ -364,6 +364,11 @@ function createPluginIrcActionsApi(
       send(target, () => ircClient?.notice(target, safe));
     },
     ctcpResponse(target: string, type: string, message: string): void {
+      // NB: irc-framework's ctcpResponse() sends a NOTICE (not a PRIVMSG) —
+      // see `node_modules/irc-framework/src/client.js`. RFC 2812 §3.3.2
+      // requires CTCP replies to be NOTICEs so a bot-to-bot exchange
+      // cannot trigger automatic replies on the other side and spiral
+      // into a CTCP loop. Do NOT reroute this through `say()` or `raw()`.
       const safeTarget = sanitize(target),
         safeType = sanitize(type),
         safeMsg = sanitize(message);

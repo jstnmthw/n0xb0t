@@ -184,11 +184,17 @@ export class IRCBridge {
   // Built-in CTCP handlers
   // -------------------------------------------------------------------------
 
-  /** Rate limit CTCP responses: max 3 per nick per 10 seconds. */
-  private ctcpAllowed(nick: string): boolean {
+  /**
+   * Rate limit CTCP responses: max 3 per sender per 10 seconds.
+   *
+   * Keyed by the persistent portion of the identity (`ident@host`) so an
+   * attacker can't dodge the limit by rotating nicks between CTCP floods.
+   * See §11 of `docs/audits/irc-logic-2026-04-11.md`.
+   */
+  private ctcpAllowed(senderKey: string): boolean {
     const WINDOW_MS = 10_000;
     const MAX_RESPONSES = 3;
-    return !this.ctcpRateLimiter.check(nick, WINDOW_MS, MAX_RESPONSES);
+    return !this.ctcpRateLimiter.check(senderKey, WINDOW_MS, MAX_RESPONSES);
   }
 
   // -------------------------------------------------------------------------
@@ -463,7 +469,14 @@ export class IRCBridge {
       args: payload,
     });
 
-    if (!this.ctcpAllowed(nick)) return;
+    // Keyed on `ident@host` (the *persistent* portion of the identity)
+    // so a nick-rotation attack can't bypass the per-sender limit. The
+    // audit called this "full hostmask", but the nick is the rotatable
+    // bit — dropping it is what closes the loophole. Falls back to the
+    // nick only if both ident and hostname are empty, which is rare and
+    // typically indicates a server-generated pseudo-source.
+    const rateLimitKey = ident && hostname ? `${ident}@${hostname}` : nick;
+    if (!this.ctcpAllowed(rateLimitKey)) return;
     this.dispatcher.dispatch('ctcp', ctx).catch(this.dispatchError('ctcp'));
   }
 

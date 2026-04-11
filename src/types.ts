@@ -679,6 +679,14 @@ export interface BotConfig {
   quit_message?: string;
   /** Interval in ms for the periodic channel presence check (rejoin missing channels). Default: 30000. Set to 0 to disable. */
   channel_rejoin_interval_ms?: number;
+  /**
+   * Prefix for built-in admin commands (`.help`, `.say`, `.join`, …) executed
+   * via the REPL or a DCC CHAT session. Default: `"."`. Change this if `.`
+   * collides with another tool's input or if you want a less-chatty prefix.
+   * Plugin-owned command binds choose their own prefixes — this setting is
+   * scoped to `CommandHandler` alone.
+   */
+  command_prefix?: string;
   /** Chanmod plugin credentials (passwords belong here, not in plugins.json). */
   chanmod?: ChanmodBotConfig;
   /** Memo / notes system. */

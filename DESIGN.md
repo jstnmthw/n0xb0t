@@ -145,6 +145,18 @@ dispatcher.unbindAll(pluginId); // Remove all binds for a plugin (used on unload
 
 **Mask matching:** Supports `*` and `?` wildcards. For `pub`/`msg`, matching is exact (case-insensitive). For `pubm`/`msgm`, the mask is matched against the full text with wildcards.
 
+**Concatenated masks for join/part/kick/invite:** `join`, `part`, `kick`, and `invite` binds match against a synthetic string of the form `#channel nick!ident@host` — the channel and the acting user separated by a single space. This lets one mask target both axes at once:
+
+| Mask              | Matches                                                         |
+| ----------------- | --------------------------------------------------------------- |
+| `*`               | every join/part/kick/invite on any channel (the common default) |
+| `#dev *`          | every event on `#dev`                                           |
+| `* *!*@evil.host` | every event from `evil.host` on any channel                     |
+| `#dev alice!*@*`  | events on `#dev` triggered by anyone whose nick is `alice`      |
+| `#ops *!~root@*`  | events on `#ops` from any user with ident `~root`               |
+
+For `kick`, the `nick!ident@host` portion is the **kicked** user (not the kicker) — the kicker appears in `ctx.args` as `"reason (by kicker)"`. See `src/dispatcher.ts` and the bind-type table in section 2.3 for the per-type field semantics.
+
 **Handler context:** Every handler receives a `ctx` object:
 
 ```typescript

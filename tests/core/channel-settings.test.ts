@@ -234,4 +234,57 @@ describe('ChannelSettings', () => {
       expect(cs.getChannelSnapshot('#test')).toEqual([]);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // CASEMAPPING normalisation (§12 Phase 7)
+  // -------------------------------------------------------------------------
+
+  describe('channel case normalisation', () => {
+    it('treats `#Foo` and `#foo` as the same record when a folder is injected', () => {
+      const normalized = new ChannelSettings(db, undefined, (s) => s.toLowerCase());
+      normalized.register('myplugin', [flagDef]);
+
+      normalized.set('#Foo', 'bitch', true);
+      expect(normalized.get('#foo', 'bitch')).toBe(true);
+      expect(normalized.get('#FOO', 'bitch')).toBe(true);
+      expect(normalized.isSet('#fOo', 'bitch')).toBe(true);
+    });
+
+    it('falls back to a legacy raw-cased record when the folded key misses', () => {
+      // Simulate a pre-normalisation database: write directly via the
+      // BotDatabase under the raw channel name, then read back through
+      // the normalised ChannelSettings instance using the SAME casing.
+      // Callers that later query with a different casing (e.g. all-lower)
+      // will see the def default — the audit calls out a one-time
+      // operator-facing re-set as the accepted cost of the cutover.
+      const normalized = new ChannelSettings(db, undefined, (s) => s.toLowerCase());
+      normalized.register('myplugin', [stringDef]);
+      db.set('chanset', '#Legacy:greet_msg', 'hi legacy');
+      expect(normalized.get('#Legacy', 'greet_msg')).toBe('hi legacy');
+    });
+
+    it('unset removes both the folded and any legacy raw-cased record', () => {
+      const normalized = new ChannelSettings(db, undefined, (s) => s.toLowerCase());
+      normalized.register('myplugin', [flagDef]);
+      db.set('chanset', '#Mix:bitch', 'true'); // legacy
+      normalized.set('#mix', 'bitch', false); // writes folded entry
+
+      expect(normalized.isSet('#mix', 'bitch')).toBe(true);
+      normalized.unset('#Mix', 'bitch');
+      expect(normalized.isSet('#mix', 'bitch')).toBe(false);
+      expect(normalized.isSet('#Mix', 'bitch')).toBe(false);
+    });
+
+    it('getChannelSnapshot prefers the folded record over a legacy one', () => {
+      const normalized = new ChannelSettings(db, undefined, (s) => s.toLowerCase());
+      normalized.register('myplugin', [flagDef]);
+      db.set('chanset', '#Mix:bitch', 'false'); // legacy raw value
+      normalized.set('#mix', 'bitch', true); // folded value wins
+
+      const snapshot = normalized.getChannelSnapshot('#MIX');
+      const entry = snapshot.find((s) => s.entry.key === 'bitch')!;
+      expect(entry.value).toBe(true);
+      expect(entry.isDefault).toBe(false);
+    });
+  });
 });
