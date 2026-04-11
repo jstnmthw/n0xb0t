@@ -19,6 +19,27 @@ const VALID_FLAGS = 'nmovd';
 /** Owner flag implies all other flags. */
 const OWNER_FLAG = 'n';
 
+/**
+ * Prefix for account-based identity patterns stored in `UserRecord.hostmasks`.
+ * Inspired by Atheme's extended-ban syntax. A pattern `$a:foobar` matches a
+ * user whose IRCv3 services account is `foobar`, regardless of their current
+ * nick or host — the critical property for a post-cloak world where hostmask
+ * matching alone is not strong enough.
+ */
+const ACCOUNT_PATTERN_PREFIX = '$a:';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolves a nick to its services account name, or returns undefined if the
+ * bot hasn't seen account data for that nick yet. Injected by Bot at wire-up
+ * time so Permissions can match account patterns without depending directly
+ * on ChannelState.
+ */
+export type AccountLookup = (nick: string) => string | null | undefined;
+
 // ---------------------------------------------------------------------------
 // Permissions class
 // ---------------------------------------------------------------------------
@@ -29,6 +50,7 @@ export class Permissions {
   private logger: Logger | null;
   private eventBus: BotEventBus | null;
   private casemapping: Casemapping = 'rfc1459';
+  private accountLookup: AccountLookup | null = null;
 
   constructor(db?: BotDatabase | null, logger?: Logger | null, eventBus?: BotEventBus | null) {
     this.db = db ?? null;
@@ -38,6 +60,15 @@ export class Permissions {
 
   setCasemapping(cm: Casemapping): void {
     this.casemapping = cm;
+  }
+
+  /**
+   * Wire up the account lookup so `$a:` patterns can resolve a nick to its
+   * services account. Without this, account patterns are inert and only
+   * hostmask patterns will match.
+   */
+  setAccountLookup(lookup: AccountLookup): void {
+    this.accountLookup = lookup;
   }
 
   // -------------------------------------------------------------------------
@@ -192,32 +223,30 @@ export class Permissions {
   }
 
   /**
-   * Find a user by matching a full hostmask (nick!ident@host) against stored patterns.
-   * Returns the first fully-matching user record, or null.
+   * Find a user by identity. Walks every stored pattern and matches whichever
+   * branch applies:
+   *
+   * - `$a:<accountpattern>` — matches when `account` is non-null and the
+   *   account name satisfies the wildcard pattern. Case-insensitive per
+   *   the connected network's CASEMAPPING.
+   * - anything else — treated as a hostmask wildcard and matched against
+   *   `fullHostmask` (`nick!ident@host`).
+   *
+   * Passing `undefined`/`null` for `account` disables account-pattern
+   * matching — hostmask patterns still match normally. That's the right
+   * answer for events without an authoritative account source.
    */
-  findByHostmask(fullHostmask: string): UserRecord | null {
+  findByHostmask(fullHostmask: string, account?: string | null): UserRecord | null {
     for (const record of this.users.values()) {
       for (const pattern of record.hostmasks) {
-        if (wildcardMatch(pattern, fullHostmask, true)) {
-          return record;
-        }
-      }
-    }
-    return null;
-  }
-
-  /** Convenience: find a user whose hostmask matches just the nick portion. */
-  findByNick(nick: string): UserRecord | null {
-    // Build a partial hostmask — only the nick is known
-    // This matches patterns like "nick!*@*" or "*!*@*"
-    // For a more reliable lookup, use findByHostmask with full nick!ident@host
-    for (const record of this.users.values()) {
-      for (const pattern of record.hostmasks) {
-        // Extract the nick portion of the pattern (before the !)
-        const bangIdx = pattern.indexOf('!');
-        if (bangIdx === -1) continue;
-        const nickPattern = pattern.substring(0, bangIdx);
-        if (wildcardMatch(nickPattern, nick, true)) {
+        if (pattern.startsWith(ACCOUNT_PATTERN_PREFIX)) {
+          if (account == null) continue;
+          const accountPattern = pattern.substring(ACCOUNT_PATTERN_PREFIX.length);
+          if (accountPattern.length === 0) continue;
+          if (wildcardMatch(accountPattern, account, true, this.casemapping)) {
+            return record;
+          }
+        } else if (wildcardMatch(pattern, fullHostmask, true, this.casemapping)) {
           return record;
         }
       }
@@ -248,7 +277,13 @@ export class Permissions {
 
     // Build full hostmask from context
     const fullHostmask = `${ctx.nick}!${ctx.ident}@${ctx.hostname}`;
-    const record = this.findByHostmask(fullHostmask);
+    // Resolve account: prefer the IRCv3 account-tag (authoritative per-message)
+    // and fall back to the channel-state lookup for events that don't carry it.
+    // The lookup returns undefined when we've seen no account data for that
+    // nick; normalise both to null so findByHostmask treats them the same.
+    const account: string | null =
+      ctx.account ?? (this.accountLookup ? (this.accountLookup(ctx.nick) ?? null) : null);
+    const record = this.findByHostmask(fullHostmask, account);
     if (!record) return false;
 
     // Parse required flags — support OR with `|`
@@ -366,11 +401,18 @@ export class Permissions {
       .join('');
   }
 
-  /** Warn about insecure hostmask patterns for privileged users. */
+  /**
+   * Warn about insecure hostmask patterns for privileged users. Account
+   * patterns (`$a:accountname`) skip the warning — they're stronger than any
+   * hostmask because they require the user to have identified with services.
+   */
   private warnInsecureHostmask(hostmask: string, flags: string, handle: string): void {
     // Check if user has +o or higher
     const hasPrivilege = flags.includes('n') || flags.includes('m') || flags.includes('o');
     if (!hasPrivilege) return;
+
+    // Account patterns are inherently stronger than hostmask patterns — skip.
+    if (hostmask.startsWith(ACCOUNT_PATTERN_PREFIX)) return;
 
     // Check for nick!*@* pattern (only nick portion is specific)
     const bangIdx = hostmask.indexOf('!');

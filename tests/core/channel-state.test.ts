@@ -1568,6 +1568,47 @@ describe('ChannelState', () => {
   });
 
   // -------------------------------------------------------------------------
+  // clearNetworkAccounts — reconnect hygiene (§7 Phase 4)
+  // -------------------------------------------------------------------------
+
+  describe('clearNetworkAccounts', () => {
+    it('drops every cached account so stale auth cannot survive reconnect', () => {
+      client.simulateEvent('join', {
+        nick: 'Alice',
+        ident: 'a',
+        hostname: 'host',
+        channel: '#test',
+        account: 'AliceAcct',
+      });
+      client.simulateEvent('join', {
+        nick: 'Bob',
+        ident: 'b',
+        hostname: 'host',
+        channel: '#test',
+        account: 'BobAcct',
+      });
+      expect(state.getAccountForNick('Alice')).toBe('AliceAcct');
+      expect(state.getAccountForNick('Bob')).toBe('BobAcct');
+
+      state.clearNetworkAccounts();
+
+      // Network-wide map must be empty; getAccountForNick returns undefined
+      // (not null) to signal "we know nothing", which lets the dispatcher's
+      // verification fall through to the NickServ slow path.
+      expect(state.getAccountForNick('Alice')).toBeUndefined();
+      expect(state.getAccountForNick('Bob')).toBeUndefined();
+      // Per-channel UserInfo.accountName also cleared so plugins don't
+      // read a stale value from a user record that survived the reset.
+      expect(state.getUser('#test', 'Alice')?.accountName).toBeUndefined();
+      expect(state.getUser('#test', 'Bob')?.accountName).toBeUndefined();
+    });
+
+    it('is a no-op when no accounts are cached', () => {
+      expect(() => state.clearNetworkAccounts()).not.toThrow();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // `+l` NaN guard (§3)
   // -------------------------------------------------------------------------
 

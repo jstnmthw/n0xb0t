@@ -45,6 +45,14 @@ export interface ConnectionLifecycleDeps {
    * IRCd with different PREFIX/CHANMODES/MODES re-seeds downstream state.
    */
   applyServerCapabilities: (caps: ServerCapabilities) => void;
+  /**
+   * Called when irc-framework signals a reconnect attempt is starting.
+   * Consumers use this hook to drop identity caches that can't survive
+   * across sessions — specifically networkAccounts, where a stale entry
+   * could let an imposter who took a known user's nick inherit permissions
+   * on the new session.
+   */
+  onReconnecting?: () => void;
   messageQueue: { clear(): void };
   dispatcher: {
     bind(type: BindType, flags: string, mask: string, handler: BindHandler, owner?: string): void;
@@ -182,6 +190,7 @@ export function registerConnectionEvents(
     expectingReconnect = true;
     lastCloseReason = null;
     deps.messageQueue.clear();
+    deps.onReconnecting?.();
     logger.info('Reconnecting...');
   });
 

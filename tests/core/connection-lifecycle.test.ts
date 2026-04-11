@@ -441,6 +441,21 @@ describe('registerConnectionEvents', () => {
       client.emit('reconnecting');
       expect(messageQueue.clear).toHaveBeenCalledOnce();
     });
+
+    it('invokes onReconnecting so identity caches can drop before retry (§7)', () => {
+      // Without clearing networkAccounts on reconnect, a user who took a
+      // known op's nick between sessions would inherit their permissions
+      // when account data flowed through the new session.
+      const onReconnecting = vi.fn();
+      const { client, deps } = makeContext({ onReconnecting });
+      registerConnectionEvents(
+        deps,
+        () => {},
+        () => {},
+      );
+      client.emit('reconnecting');
+      expect(onReconnecting).toHaveBeenCalledOnce();
+    });
   });
 
   describe('socket error event', () => {

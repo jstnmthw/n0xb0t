@@ -283,36 +283,149 @@ describe('Permissions', () => {
   });
 
   // -------------------------------------------------------------------------
-  // findByNick
+  // Account-pattern matching (§7 Phase 4) — `$a:accountname` in hostmasks
   // -------------------------------------------------------------------------
 
-  describe('findByNick', () => {
-    it('should match user by nick portion of hostmask', () => {
-      perms.addUser('nickuser', 'testnick!*@*', 'v', 'REPL');
-      const result = perms.findByNick('testnick');
-      expect(result).not.toBeNull();
-      expect(result!.handle).toBe('nickuser');
+  describe('findByHostmask with account patterns', () => {
+    it('matches $a:accountname when the supplied account equals the pattern', () => {
+      perms.addUser('alice', '$a:AliceAcct', 'n', 'REPL');
+      const result = perms.findByHostmask('Alice!alice@any.host', 'AliceAcct');
+      expect(result?.handle).toBe('alice');
     });
 
-    it('should return null for non-matching nick', () => {
-      perms.addUser('admin', '*!ident@host', 'n', 'REPL');
-      // '*' matches any nick, so this will match
-      const result = perms.findByNick('anynick');
-      expect(result).not.toBeNull();
+    it('matches $a:accountname case-insensitively via ircLower', () => {
+      perms.addUser('alice', '$a:AliceAcct', 'n', 'REPL');
+      const result = perms.findByHostmask('Alice!alice@any.host', 'aliceacct');
+      expect(result?.handle).toBe('alice');
     });
 
-    it('should skip hostmask patterns without a ! separator', () => {
-      perms.addUser('nobangs', 'justahostmask', '', 'REPL');
-      // 'justahostmask' has no !, so findByNick should skip it
-      const result = perms.findByNick('anynick');
+    it('supports wildcards in account patterns (`$a:alice*`)', () => {
+      perms.addUser('alice', '$a:alice*', 'n', 'REPL');
+      const matched = perms.findByHostmask('Any!any@any.host', 'alice_bot');
+      expect(matched?.handle).toBe('alice');
+    });
+
+    it('does not match an account pattern when account is null', () => {
+      perms.addUser('alice', '$a:AliceAcct', 'n', 'REPL');
+      const result = perms.findByHostmask('Alice!alice@any.host', null);
       expect(result).toBeNull();
     });
 
-    it('should return null when nick does not match a specific pattern', () => {
-      perms.addUser('bob', 'bob!*@*', 'v', 'REPL');
-      // The nick pattern 'bob' does not wildcard-match 'alice'
-      const result = perms.findByNick('alice');
+    it('does not match an account pattern when account is undefined', () => {
+      perms.addUser('alice', '$a:AliceAcct', 'n', 'REPL');
+      // No account argument at all — old call sites still work.
+      const result = perms.findByHostmask('Alice!alice@any.host');
       expect(result).toBeNull();
+    });
+
+    it('falls back to hostmask patterns when account does not match', () => {
+      perms.addUser('alice', '$a:OtherAcct', 'n', 'REPL');
+      perms.addHostmask('alice', '*!alice@known.host');
+      const result = perms.findByHostmask('Alice!alice@known.host', 'WrongAcct');
+      expect(result?.handle).toBe('alice');
+    });
+
+    it('ignores an empty `$a:` pattern rather than matching everyone', () => {
+      perms.addUser('alice', '$a:', 'n', 'REPL');
+      const result = perms.findByHostmask('Alice!alice@any.host', 'AliceAcct');
+      expect(result).toBeNull();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Spoofing regression (§7 Phase 4) — hostmask lookups cannot be faked
+  // -------------------------------------------------------------------------
+
+  describe('checkFlags spoofing regression', () => {
+    it('denies a user whose nick matches a stored record but whose host does not', () => {
+      // Original audit scenario: `alice` has `alice!real@host.com` +o. An
+      // attacker adopts the nick `alice` from `pwned!fake@evil.host`. With
+      // the old findByNick code that matched on nick alone, the attacker
+      // would have been granted +o. findByHostmask must reject them.
+      perms.addUser('alice', 'alice!real@host.com', 'o', 'REPL');
+      const denied = perms.checkFlags('+o', {
+        nick: 'alice',
+        ident: 'fake',
+        hostname: 'evil.host',
+        channel: '#test',
+        text: '',
+        command: '',
+        args: '',
+        reply: () => {},
+        replyPrivate: () => {},
+      });
+      expect(denied).toBe(false);
+    });
+
+    it('denies an account pattern user when ctx has no account data', () => {
+      // Without the account lookup wired, ctx.account undefined + no
+      // accountLookup means the record only matches via hostmask. `$a:`
+      // patterns must not fall back to "pass" under these conditions.
+      perms.addUser('alice', '$a:AliceAcct', 'o', 'REPL');
+      const allowed = perms.checkFlags('+o', {
+        nick: 'alice',
+        ident: 'real',
+        hostname: 'host.com',
+        channel: '#test',
+        text: '',
+        command: '',
+        args: '',
+        reply: () => {},
+        replyPrivate: () => {},
+      });
+      expect(allowed).toBe(false);
+    });
+
+    it('accepts an account pattern user when ctx.account is authoritative', () => {
+      perms.addUser('alice', '$a:AliceAcct', 'o', 'REPL');
+      const allowed = perms.checkFlags('+o', {
+        nick: 'someoneElse',
+        ident: 'x',
+        hostname: 'different.host',
+        account: 'AliceAcct',
+        channel: '#test',
+        text: '',
+        command: '',
+        args: '',
+        reply: () => {},
+        replyPrivate: () => {},
+      });
+      expect(allowed).toBe(true);
+    });
+
+    it('accepts an account pattern user when accountLookup resolves the nick', () => {
+      perms.addUser('alice', '$a:AliceAcct', 'o', 'REPL');
+      perms.setAccountLookup((nick) => (nick === 'alice' ? 'AliceAcct' : null));
+      const allowed = perms.checkFlags('+o', {
+        nick: 'alice',
+        ident: 'any',
+        hostname: 'any.host',
+        channel: '#test',
+        text: '',
+        command: '',
+        args: '',
+        reply: () => {},
+        replyPrivate: () => {},
+      });
+      expect(allowed).toBe(true);
+    });
+
+    it('prefers ctx.account over accountLookup when both disagree', () => {
+      perms.addUser('alice', '$a:RealAlice', 'o', 'REPL');
+      perms.setAccountLookup(() => 'StaleAccount');
+      const allowed = perms.checkFlags('+o', {
+        nick: 'alice',
+        ident: 'x',
+        hostname: 'x',
+        account: 'RealAlice', // authoritative per-message tag
+        channel: '#test',
+        text: '',
+        command: '',
+        args: '',
+        reply: () => {},
+        replyPrivate: () => {},
+      });
+      expect(allowed).toBe(true);
     });
   });
 

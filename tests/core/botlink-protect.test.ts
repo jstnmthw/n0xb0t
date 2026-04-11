@@ -93,7 +93,7 @@ describe('handleProtectFrame', () => {
       // Should send a failure ACK
       expect(result).toBeDefined();
       expect(result!.success).toBe(false);
-      expect(result!.message).toContain('not in permissions DB');
+      expect(result!.message).toContain('not recognized by hostmask/account');
 
       // Should NOT have issued a MODE +o
       const opMsgs = bot.client.messages.filter(
@@ -137,6 +137,45 @@ describe('handleProtectFrame', () => {
         (m) => m.type === 'mode' && m.message === '+o' && m.args?.includes('trusted'),
       );
       expect(opMsgs.length).toBeGreaterThan(0);
+    });
+
+    it('refuses to op an imposter whose host does not match the stored pattern (§7)', () => {
+      setupChannel(bot, '#test', true);
+      // The real `trusted` user has a specific host.
+      bot.permissions.addUser('trusted', 'trusted!real@known.host', 'o', 'test');
+      // Attacker adopts the nick from a different host.
+      addUserToChannel(bot, '#test', 'trusted', {
+        ident: 'fake',
+        hostname: 'evil.host',
+      });
+
+      const acks: LinkFrame[] = [];
+      const deps: ProtectHandlerDeps = {
+        channelState: bot.channelState,
+        permissions: bot.permissions,
+        ircCommands: bot.ircCommands,
+        botNick: bot.client.user.nick,
+        sendAck: (ack) => acks.push(ack),
+      };
+
+      const result = handleProtectFrame(
+        {
+          type: 'PROTECT_OP',
+          channel: '#test',
+          nick: 'trusted',
+          requestedBy: 'leaf1',
+          ref: 'ref-spoof',
+        },
+        deps,
+      );
+
+      expect(result).toBeDefined();
+      expect(result!.success).toBe(false);
+      // No +o handed to the imposter.
+      const opMsgs = bot.client.messages.filter(
+        (m) => m.type === 'mode' && m.message === '+o' && m.args?.includes('trusted'),
+      );
+      expect(opMsgs).toHaveLength(0);
     });
 
     it('does nothing when bot does not have ops', () => {

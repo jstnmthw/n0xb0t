@@ -184,6 +184,27 @@ export class ChannelState {
   }
 
   /**
+   * Drop the entire network-wide account map. Called on reconnect so stale
+   * identity data can't survive across sessions and let an imposter who
+   * took a known user's nick inherit their permissions. Per-channel user
+   * records are not touched — NAMES will refresh them on rejoin. Fresh
+   * account data arrives via extended-join / account-notify / account-tag
+   * on the new session.
+   */
+  clearNetworkAccounts(): void {
+    if (this.networkAccounts.size === 0) return;
+    this.logger?.debug(`clearing ${this.networkAccounts.size} cached account entries on reconnect`);
+    this.networkAccounts.clear();
+    // Also strip accountName from any per-channel UserInfo so a subsequent
+    // `user.accountName` read can't return a pre-reconnect value.
+    for (const ch of this.channels.values()) {
+      for (const user of ch.users.values()) {
+        user.accountName = undefined;
+      }
+    }
+  }
+
+  /**
    * Update the network-wide account map from a source outside the event
    * stream — currently only `irc-bridge` when consuming the IRCv3
    * `account-tag` on an incoming PRIVMSG. Centralising this here keeps the

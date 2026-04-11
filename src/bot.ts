@@ -132,6 +132,10 @@ export class Bot {
       typeof entry === 'string' ? { name: entry } : { name: entry.name, key: entry.key },
     );
     this.channelState = new ChannelState(this.client, this.eventBus, this.logger);
+    // Permissions can match account-based patterns (`$a:accountname`) once
+    // we can ask channel-state for a nick's services account. Wire it now,
+    // before any handler runs — plugins never call checkFlags before start().
+    this.permissions.setAccountLookup((nick) => this.channelState.getAccountForNick(nick));
     this.ircCommands = new IRCCommands(this.client, this.db, undefined, this.logger);
     this.messageQueue = new MessageQueue({
       rate: this.config.queue?.rate,
@@ -484,6 +488,13 @@ export class Bot {
             this.channelState.setCapabilities(caps);
             this.ircCommands.setCapabilities(caps);
             this.bridge?.setCapabilities(caps);
+          },
+          onReconnecting: () => {
+            // Drop cached services-account state so a user who took a
+            // recognised nick between sessions can't inherit its flags on
+            // the new connection. Fresh account data will arrive via
+            // extended-join / account-notify / account-tag on rejoin.
+            this.channelState.clearNetworkAccounts();
           },
           messageQueue: this.messageQueue,
           dispatcher: this.dispatcher,
