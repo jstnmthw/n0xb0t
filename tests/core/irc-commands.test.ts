@@ -185,6 +185,68 @@ describe('IRCCommands', () => {
     expect(rawMsgs.map((m) => m.args[0])).toEqual(['MODE #test +mn', 'MODE #test -t']);
   });
 
+  // -------------------------------------------------------------------------
+  // Mode batcher — CHANMODES-aware param allocation (§2 Phase 2)
+  // -------------------------------------------------------------------------
+
+  it('should mix flag and param modes in one call using expectsParam', () => {
+    // `+mo alice` — 'm' is Type D (flag), 'o' is a prefix mode.
+    // Total 1 param needed; caller passes 1. Phase 1's 1:1 rule would have
+    // rejected this because it treated every mode char as param-taking.
+    irc.mode('#test', '+mo', 'Alice');
+    const rawMsgs = client.sent.filter((m) => m.type === 'raw');
+    expect(rawMsgs).toHaveLength(1);
+    expect(rawMsgs[0].args[0]).toBe('MODE #test +mo Alice');
+  });
+
+  it('should treat +l as param-taking but -l as paramless (CHANMODES type C)', () => {
+    irc.mode('#test', '+l', '50');
+    let rawMsgs = client.sent.filter((m) => m.type === 'raw');
+    expect(rawMsgs.at(-1)!.args[0]).toBe('MODE #test +l 50');
+
+    irc.mode('#test', '-l');
+    rawMsgs = client.sent.filter((m) => m.type === 'raw');
+    expect(rawMsgs.at(-1)!.args[0]).toBe('MODE #test -l');
+  });
+
+  it('should handle +ko (key + op) with two params', () => {
+    // `+ko channelkey alice` — 'k' is Type B (always param), 'o' is prefix.
+    irc.mode('#test', '+ko', 'secretkey', 'Alice');
+    const rawMsgs = client.sent.filter((m) => m.type === 'raw');
+    expect(rawMsgs).toHaveLength(1);
+    expect(rawMsgs[0].args[0]).toBe('MODE #test +ko secretkey Alice');
+  });
+
+  it('should throw when a +l direction is missing its param', () => {
+    expect(() => irc.mode('#test', '+l')).toThrow(/needs 1 param/);
+  });
+
+  it('should accept server-advertised modesPerLine from capabilities', async () => {
+    const { parseISupport } = await import('../../src/core/isupport');
+    irc.setCapabilities(
+      parseISupport({
+        network: {
+          supports(k: string): unknown {
+            if (k === 'MODES') return '20';
+            if (k === 'PREFIX')
+              return [
+                { symbol: '@', mode: 'o' },
+                { symbol: '+', mode: 'v' },
+              ];
+            if (k === 'CHANMODES') return ['beI', 'k', 'l', 'imnpst'];
+            return undefined;
+          },
+        },
+      }),
+    );
+
+    // 5 ops should now fit on a single line (InspIRCd advertises up to 20).
+    irc.mode('#test', '+ooooo', 'a', 'b', 'c', 'd', 'e');
+    const rawMsgs = client.sent.filter((m) => m.type === 'raw');
+    expect(rawMsgs).toHaveLength(1);
+    expect(rawMsgs[0].args[0]).toBe('MODE #test +ooooo a b c d e');
+  });
+
   it('should log mod actions to database', () => {
     irc.kick('#test', 'Alice', 'reason');
 

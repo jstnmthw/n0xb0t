@@ -3,6 +3,7 @@
 import type { BotDatabase } from '../database';
 import type { Logger } from '../logger';
 import { sanitize } from '../utils/sanitize';
+import { type ServerCapabilities, defaultServerCapabilities } from './isupport';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -68,6 +69,7 @@ export class IRCCommands {
   private db: BotDatabase | null;
   private logger: Logger | null;
   private modesPerLine: number;
+  private capabilities: ServerCapabilities = defaultServerCapabilities();
 
   constructor(
     client: IRCCommandsClient,
@@ -84,6 +86,15 @@ export class IRCCommands {
   /** Update the max modes per line from ISUPPORT. */
   setModesPerLine(n: number): void {
     this.modesPerLine = n;
+  }
+
+  /**
+   * Apply a parsed ISUPPORT snapshot. Pulls `modesPerLine` from the network
+   * and stores the full capability object for `mode()`'s param allocation.
+   */
+  setCapabilities(caps: ServerCapabilities): void {
+    this.capabilities = caps;
+    this.modesPerLine = caps.modesPerLine;
   }
 
   // -------------------------------------------------------------------------
@@ -178,47 +189,63 @@ export class IRCCommands {
    * batch contains a single direction — the server would otherwise re-apply
    * the leading sign to every subsequent char, producing the wrong modes.
    *
-   * When `params` is non-empty, every mode char in `modeString` is expected
-   * to carry exactly one param. A count mismatch throws rather than silently
-   * truncating the excess. Phase 2 will replace this rule with per-mode
-   * CHANMODES awareness so flag modes like `+m` can coexist with parameter
-   * modes in a single call.
+   * Per-char param allocation is driven by the ISUPPORT `CHANMODES` snapshot
+   * exposed by `ServerCapabilities.expectsParam()`. Prefix modes (`o`, `v`,
+   * ...) and type A/B modes (`b`, `k`, ...) always consume a param; type C
+   * modes (`l`) consume a param only on `+`; type D modes (`m`, `n`, `t`,
+   * ...) never consume one. This lets callers mix `"+mo alice"` in a single
+   * call — the old code could only handle uniform-param runs.
+   *
+   * Param count is checked up-front: a mismatch throws rather than silently
+   * truncating the excess or dropping modes off the end of the line.
    *
    * @param channel - Target channel
-   * @param modeString - Mode string, e.g. `'+ov'`, `'+oo'`, `'+o-v'`, `'+i'`
-   * @param params - Mode parameters (nicks, masks, etc.)
+   * @param modeString - Mode string, e.g. `'+ov'`, `'+mo'`, `'+o-v'`, `'+i'`
+   * @param params - Mode parameters for the param-taking chars only
    */
   mode(channel: string, modeString: string, ...params: string[]): void {
     const segments = parseModeString(modeString);
-    const totalModes = segments.reduce((n, seg) => n + seg.chars.length, 0);
+    const caps = this.capabilities;
 
-    if (params.length === 0) {
-      // No-param modes only (e.g. `+mn`, `-t`). Batching by modesPerLine still
-      // applies in case a caller passes a long run like `+mntslk`.
-      for (const seg of segments) {
-        for (let i = 0; i < seg.chars.length; i += this.modesPerLine) {
-          const batchChars = seg.chars.slice(i, i + this.modesPerLine);
-          this.sendModeRaw(channel, seg.dir + batchChars.join(''), []);
-        }
+    // Pre-count params needed so callers get a clear error before anything
+    // hits the wire. Counting `+o-v` correctly requires walking each segment
+    // with its own direction because type C modes depend on it.
+    let paramsNeeded = 0;
+    for (const seg of segments) {
+      for (const ch of seg.chars) {
+        if (caps.expectsParam(ch, seg.dir)) paramsNeeded++;
       }
-      return;
     }
-
-    if (totalModes !== params.length) {
+    if (paramsNeeded !== params.length) {
       throw new Error(
-        `IRCCommands.mode(): mode string "${modeString}" has ${totalModes} mode char(s) ` +
-          `but ${params.length} param(s) were supplied — must match 1:1`,
+        `IRCCommands.mode(): mode string "${modeString}" needs ${paramsNeeded} param(s) ` +
+          `but ${params.length} were supplied — must match 1:1`,
       );
     }
 
     let paramIdx = 0;
     for (const seg of segments) {
-      for (let i = 0; i < seg.chars.length; i += this.modesPerLine) {
-        const batchChars = seg.chars.slice(i, i + this.modesPerLine);
-        const batchParams = params.slice(paramIdx, paramIdx + batchChars.length);
-        paramIdx += batchChars.length;
+      // Batch chars within the segment, respecting `modesPerLine` as the cap
+      // on total chars per line (conservative — real servers only count
+      // param-taking modes against MODES=, but the stricter rule is always
+      // legal and keeps the batcher simpler).
+      let batchChars: string[] = [];
+      let batchParams: string[] = [];
+      const flush = (): void => {
+        if (batchChars.length === 0) return;
         this.sendModeRaw(channel, seg.dir + batchChars.join(''), batchParams);
+        batchChars = [];
+        batchParams = [];
+      };
+
+      for (const ch of seg.chars) {
+        batchChars.push(ch);
+        if (caps.expectsParam(ch, seg.dir)) {
+          batchParams.push(params[paramIdx++]);
+        }
+        if (batchChars.length >= this.modesPerLine) flush();
       }
+      flush();
     }
   }
 

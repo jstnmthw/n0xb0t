@@ -5,25 +5,7 @@ import type { BotEventBus } from '../event-bus';
 import type { Logger } from '../logger';
 import { isModeArray, isObjectArray, toEventObject } from '../utils/irc-event';
 import { type Casemapping, ircLower } from '../utils/wildcard';
-
-// ---------------------------------------------------------------------------
-// Prefix-mode defaults
-//
-// RFC-style prefix modes with their canonical symbol. Real networks advertise
-// these (plus whatever extras their IRCd supports) via ISUPPORT `PREFIX=...`.
-// Phase 2 will populate these from the connected network's 005 line; this
-// map is the compile-time fallback that covers Solanum/Libera, InspIRCd,
-// Unreal, OFTC, ngIRCd, and every other current IRCd.
-// ---------------------------------------------------------------------------
-
-const PREFIX_MODES = new Set(['q', 'a', 'o', 'h', 'v']);
-const PREFIX_SYMBOL_TO_MODE: Record<string, string> = {
-  '~': 'q',
-  '&': 'a',
-  '@': 'o',
-  '%': 'h',
-  '+': 'v',
-};
+import { type ServerCapabilities, defaultServerCapabilities } from './isupport';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -69,6 +51,7 @@ export class ChannelState {
   private logger: Logger | null;
   private listeners: Array<{ event: string; fn: (...args: unknown[]) => void }> = [];
   private casemapping: Casemapping = 'rfc1459';
+  private capabilities: ServerCapabilities = defaultServerCapabilities();
 
   constructor(client: ChannelStateClient, eventBus: BotEventBus, logger?: Logger | null) {
     this.client = client;
@@ -78,6 +61,11 @@ export class ChannelState {
 
   setCasemapping(cm: Casemapping): void {
     this.casemapping = cm;
+  }
+
+  /** Apply a parsed ISUPPORT snapshot; drives PREFIX-aware mode tracking. */
+  setCapabilities(caps: ServerCapabilities): void {
+    this.capabilities = caps;
   }
 
   /** Start listening to IRC events. */
@@ -293,8 +281,11 @@ export class ChannelState {
       const mode = m.mode ?? '';
       const param = m.param ? String(m.param) : '';
 
-      // User prefix modes: +q/+a/+o/+h/+v (and their negations) carry a nick param.
-      if (param && mode.length === 2 && PREFIX_MODES.has(mode.charAt(1))) {
+      // User prefix modes carry a nick param. Which chars count as prefix modes
+      // is ISUPPORT-driven — we consult the current capabilities snapshot so
+      // networks with non-standard prefixes (e.g. InspIRCd halfop-only
+      // `PREFIX=(oh)@%`) get tracked correctly.
+      if (param && mode.length === 2 && this.capabilities.prefixSet.has(mode.charAt(1))) {
         const user = ch.users.get(ircLower(param, this.casemapping));
         if (user) {
           const modeChar = mode.charAt(1); // 'o', 'v', etc.
@@ -324,14 +315,17 @@ export class ChannelState {
         }
       } else if (modeChar === 'l') {
         if (adding) {
-          ch.limit = parseInt(param, 10);
+          const parsed = parseInt(param, 10);
+          ch.limit = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
           if (!ch.modes.includes('l')) ch.modes += 'l';
         } else {
           ch.limit = 0;
           ch.modes = ch.modes.replace('l', '');
         }
-      } else if (modeChar === 'b' || modeChar === 'e' || modeChar === 'I') {
-        // Ban/except/invite list modes — don't track in ch.modes (they're lists, not flags)
+      } else if (this.capabilities.chanmodesA.has(modeChar)) {
+        // Type A list modes (b/e/I by default) — we don't track the lists
+        // themselves in ch.modes because they represent per-mask state, not
+        // a flag. Consumers that need ban-list tracking subscribe to RPL_BANLIST.
       } else {
         // Simple channel mode flag (i, m, n, p, s, t, etc.)
         if (adding) {
@@ -511,20 +505,21 @@ export class ChannelState {
    * irc-framework's RPL_NAMEREPLY handler walks `network.options.PREFIX` and
    * emits an **array** of mode chars (e.g. `['o', 'v']` for `@+nick`). If
    * `multi-prefix` is active every applicable prefix is represented; without
-   * it, only the highest. We accept the array form and filter it to prefix
-   * modes we recognise.
+   * it, only the highest. We accept the array form and filter it to the
+   * prefix modes advertised by the connected network.
    *
    * The string branch (symbol characters or mode-char text) is retained as a
-   * defensive fallback for bot-link CHAN sync frames, which ship `modes` as a
-   * `string[]` already but historically included mixed forms.
+   * defensive fallback for bot-link CHAN sync frames and any legacy path
+   * that ships `modes` as a concatenated string.
    */
   private parseUserlistModes(modes: unknown): string[] {
     if (!modes) return [];
-    const chars = Array.isArray(modes) ? modes.map(String) : String(modes).split('');
+    const tokens = Array.isArray(modes) ? modes.map(String) : String(modes).split('');
+    const { symbolToPrefix, prefixSet } = this.capabilities;
     const result: string[] = [];
     const seen = new Set<string>();
-    for (const token of chars) {
-      const mode = PREFIX_SYMBOL_TO_MODE[token] ?? (PREFIX_MODES.has(token) ? token : null);
+    for (const token of tokens) {
+      const mode = symbolToPrefix[token] ?? (prefixSet.has(token) ? token : null);
       if (mode && !seen.has(mode)) {
         seen.add(mode);
         result.push(mode);

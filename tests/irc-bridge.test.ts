@@ -2054,4 +2054,54 @@ describe('IRCBridge', () => {
       dispatcher.unbindAll('test');
     });
   });
+
+  // -------------------------------------------------------------------------
+  // ISUPPORT CHANTYPES — §4 network-agnostic channel validation
+  // -------------------------------------------------------------------------
+
+  describe('CHANTYPES / isValidChannel', () => {
+    it('dispatches join on `!` channels when CHANTYPES advertises them (IRCnet)', async () => {
+      // Before Phase 2 the bridge hardcoded `[#&]`, silently dropping every
+      // join/part/privmsg event on IRCnet-style `!CHANNELS`.
+      const { parseISupport } = await import('../src/core/isupport');
+      bridge.setCapabilities(
+        parseISupport({
+          network: { supports: (k: string) => (k === 'CHANTYPES' ? ['#', '&', '!'] : undefined) },
+        }),
+      );
+
+      const handler = vi.fn();
+      dispatcher.bind('join', '-', '*', handler, 'test');
+
+      client.simulateEvent('join', {
+        nick: 'irc2user',
+        ident: 'user',
+        hostname: 'host',
+        channel: '!FOOBAR',
+      });
+
+      await Promise.resolve();
+      expect(handler).toHaveBeenCalledOnce();
+      expect((handler.mock.calls[0][0] as HandlerContext).channel).toBe('!FOOBAR');
+      dispatcher.unbindAll('test');
+    });
+
+    it('drops a join on `!` channels when CHANTYPES does not include `!`', async () => {
+      // Default capabilities only advertise '#&'. An unsolicited `!FOOBAR`
+      // event on a network that doesn't support them must be ignored.
+      const handler = vi.fn();
+      dispatcher.bind('join', '-', '*', handler, 'test');
+
+      client.simulateEvent('join', {
+        nick: 'someone',
+        ident: 'user',
+        hostname: 'host',
+        channel: '!FOOBAR',
+      });
+
+      await Promise.resolve();
+      expect(handler).not.toHaveBeenCalled();
+      dispatcher.unbindAll('test');
+    });
+  });
 });

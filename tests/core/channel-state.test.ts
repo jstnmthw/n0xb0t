@@ -1379,4 +1379,116 @@ describe('ChannelState', () => {
       expect(ch!.key).toBe('');
     });
   });
+
+  // -------------------------------------------------------------------------
+  // NAMES multi-prefix parsing (§A.3) — the audit's P0 finding
+  // -------------------------------------------------------------------------
+
+  describe('NAMES prefix-mode tracking', () => {
+    it('tracks every prefix from a multi-prefix NAMES array', () => {
+      // irc-framework parses `~&@%+nick` into modes = ['q','a','o','h','v'].
+      // The audit found that the old code silently ignored this array and
+      // stored [] for every user, breaking every op-check in every plugin.
+      client.simulateEvent('userlist', {
+        channel: '#test',
+        users: [
+          {
+            nick: 'founder',
+            ident: 'f',
+            hostname: 'h',
+            modes: ['q', 'o', 'v'],
+          },
+          {
+            nick: 'admin',
+            ident: 'a',
+            hostname: 'h',
+            modes: ['a'],
+          },
+          {
+            nick: 'voice',
+            ident: 'v',
+            hostname: 'h',
+            modes: ['v'],
+          },
+          {
+            nick: 'plain',
+            ident: 'p',
+            hostname: 'h',
+            modes: [],
+          },
+        ],
+      });
+
+      expect(state.getUserModes('#test', 'founder').sort()).toEqual(['o', 'q', 'v']);
+      expect(state.getUserModes('#test', 'admin')).toEqual(['a']);
+      expect(state.getUserModes('#test', 'voice')).toEqual(['v']);
+      expect(state.getUserModes('#test', 'plain')).toEqual([]);
+    });
+
+    it('maps status symbols to modes when NAMES ships symbol strings', () => {
+      // Bot-link CHAN sync frames historically used a concatenated string
+      // of status symbols — the fallback path should still work.
+      client.simulateEvent('userlist', {
+        channel: '#test',
+        users: [
+          { nick: 'Bob', ident: 'b', hostname: 'h', modes: '@+' },
+          { nick: 'Carol', ident: 'c', hostname: 'h', modes: '%' },
+        ],
+      });
+      expect(state.getUserModes('#test', 'Bob').sort()).toEqual(['o', 'v']);
+      expect(state.getUserModes('#test', 'Carol')).toEqual(['h']);
+    });
+
+    it('dedupes a mode that arrives twice (symbol + mode char)', () => {
+      client.simulateEvent('userlist', {
+        channel: '#test',
+        users: [{ nick: 'Dave', ident: 'd', hostname: 'h', modes: ['@', 'o', '+', 'v'] }],
+      });
+      expect(state.getUserModes('#test', 'Dave').sort()).toEqual(['o', 'v']);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Prefix-mode tracking via MODE events (§3) — now ISUPPORT-aware
+  // -------------------------------------------------------------------------
+
+  describe('MODE events with non-default prefix modes', () => {
+    it('tracks +q/+a changes against the default q/a/o/h/v prefix set', () => {
+      // Seed a user in the channel so the MODE handler has someone to update.
+      client.simulateEvent('userlist', {
+        channel: '#test',
+        users: [{ nick: 'Eve', ident: 'e', hostname: 'h', modes: [] }],
+      });
+
+      // +q (founder) — present in the default PREFIX set now.
+      client.simulateEvent('mode', {
+        target: '#test',
+        modes: [{ mode: '+q', param: 'Eve' }],
+      });
+      expect(state.getUserModes('#test', 'Eve')).toContain('q');
+
+      // -q removes it again.
+      client.simulateEvent('mode', {
+        target: '#test',
+        modes: [{ mode: '-q', param: 'Eve' }],
+      });
+      expect(state.getUserModes('#test', 'Eve')).not.toContain('q');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // `+l` NaN guard (§3)
+  // -------------------------------------------------------------------------
+
+  describe('channel limit (+l) NaN guard', () => {
+    it('ignores non-numeric +l params instead of storing NaN', () => {
+      client.simulateEvent('mode', {
+        target: '#test',
+        modes: [{ mode: '+l', param: 'abc' }],
+      });
+      const ch = state.getChannel('#test');
+      // Old behaviour stored NaN; new behaviour clamps to 0.
+      expect(ch?.limit ?? 0).toBe(0);
+    });
+  });
 });

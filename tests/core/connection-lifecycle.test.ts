@@ -18,7 +18,7 @@ import { createMockLogger } from '../helpers/mock-logger';
 class MockClient extends EventEmitter implements LifecycleIRCClient {
   public joins: Array<{ channel: string; key?: string }> = [];
   public network = {
-    supports: vi.fn<(feature: string) => string | boolean>().mockReturnValue('rfc1459'),
+    supports: vi.fn<(feature: string) => unknown>().mockReturnValue('rfc1459'),
   };
   /** Simulates irc-framework's internal connection/transport chain for TLS tests. */
   public connection?: { transport?: { socket?: unknown } };
@@ -76,6 +76,7 @@ function makeContext(overrides?: Partial<ConnectionLifecycleDeps>): TestContext 
     configuredChannels: [],
     eventBus,
     applyCasemapping,
+    applyServerCapabilities: vi.fn(),
     messageQueue,
     dispatcher,
     logger,
@@ -173,6 +174,59 @@ describe('registerConnectionEvents', () => {
       );
       client.emit('registered');
       expect(applyCasemapping).toHaveBeenCalledWith('rfc1459');
+    });
+
+    it('warns on unknown casemapping instead of silently falling through (§4)', () => {
+      // Atheme networks may advertise `rfc7613` (unicode). hexbot still uses
+      // rfc1459 but the operator needs to see the mismatch in the log.
+      const { client, deps, logger } = makeContext();
+      client.network.supports.mockReturnValue('rfc7613');
+      registerConnectionEvents(
+        deps,
+        () => {},
+        () => {},
+      );
+      client.emit('registered');
+      const warnCalls = (logger.warn as ReturnType<typeof vi.fn>).mock.calls.flat();
+      expect(warnCalls.some((s) => String(s).includes('Unknown CASEMAPPING'))).toBe(true);
+    });
+
+    it('propagates a parsed ISUPPORT snapshot on registration', () => {
+      const applyServerCapabilities = vi.fn();
+      const { client, deps } = makeContext({ applyServerCapabilities });
+      // Stage a realistic PREFIX/CHANMODES/MODES/CHANTYPES snapshot.
+      client.network.supports.mockImplementation((feature: string) => {
+        switch (feature) {
+          case 'PREFIX':
+            return [
+              { symbol: '~', mode: 'q' },
+              { symbol: '@', mode: 'o' },
+              { symbol: '+', mode: 'v' },
+            ];
+          case 'CHANMODES':
+            return ['beI', 'k', 'l', 'imnpst'];
+          case 'CHANTYPES':
+            return ['#', '&', '!'];
+          case 'MODES':
+            return '6';
+          case 'CASEMAPPING':
+            return 'rfc1459';
+          default:
+            return false;
+        }
+      });
+      registerConnectionEvents(
+        deps,
+        () => {},
+        () => {},
+      );
+      client.emit('registered');
+      expect(applyServerCapabilities).toHaveBeenCalledOnce();
+      const caps = applyServerCapabilities.mock.calls[0][0];
+      expect(caps.prefixModes).toEqual(['q', 'o', 'v']);
+      expect(caps.chantypes).toBe('#&!');
+      expect(caps.modesPerLine).toBe(6);
+      expect(caps.isValidChannel('!retro')).toBe(true);
     });
 
     it('does not mention TLS when tls is false', () => {

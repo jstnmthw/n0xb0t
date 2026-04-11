@@ -480,6 +480,11 @@ export class Bot {
             if (this._dccManager) this._dccManager.setCasemapping(cm);
             this.memo.setCasemapping(cm);
           },
+          applyServerCapabilities: (caps) => {
+            this.channelState.setCapabilities(caps);
+            this.ircCommands.setCapabilities(caps);
+            this.bridge?.setCapabilities(caps);
+          },
           messageQueue: this.messageQueue,
           dispatcher: this.dispatcher,
           channelState: this.channelState,

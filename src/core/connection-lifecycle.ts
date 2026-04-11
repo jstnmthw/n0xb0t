@@ -7,6 +7,7 @@ import type { BotConfig, Casemapping } from '../types';
 import type { BindHandler, BindType } from '../types';
 import { toEventObject } from '../utils/irc-event';
 import { ircLower } from '../utils/wildcard';
+import { type ServerCapabilities, parseISupport } from './isupport';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -16,7 +17,13 @@ import { ircLower } from '../utils/wildcard';
 export interface LifecycleIRCClient {
   on(event: string, listener: (...args: unknown[]) => void): void;
   join(channel: string, key?: string): void;
-  network: { supports(feature: string): string | boolean };
+  /**
+   * irc-framework's `network.supports()` returns a string for most tokens, a
+   * boolean for flag-only tokens, and parsed arrays for a handful of special
+   * cases (`PREFIX`, `CHANMODES`, `CHANTYPES`). The widest honest type is
+   * `unknown` — callers that care narrow from there.
+   */
+  network: { supports(feature: string): unknown };
 }
 
 /** Minimal channel-state interface for presence checks (avoids importing the full class). */
@@ -31,6 +38,13 @@ export interface ConnectionLifecycleDeps {
   eventBus: BotEventBus;
   /** Callback to propagate the server's casemapping to the Bot and all modules. */
   applyCasemapping: (cm: Casemapping) => void;
+  /**
+   * Callback to propagate a parsed ISUPPORT snapshot to the Bot and all
+   * capability-aware modules (channel-state, irc-commands, irc-bridge, …).
+   * Fires on every successful registration so reconnecting to a different
+   * IRCd with different PREFIX/CHANMODES/MODES re-seeds downstream state.
+   */
+  applyServerCapabilities: (caps: ServerCapabilities) => void;
   messageQueue: { clear(): void };
   dispatcher: {
     bind(type: BindType, flags: string, mask: string, handler: BindHandler, owner?: string): void;
@@ -103,6 +117,7 @@ export function registerConnectionEvents(
 
     deps.eventBus.emit('bot:connected');
     applyCasemapping(deps);
+    applyServerCapabilities(deps);
 
     joinConfiguredChannels(deps);
 
@@ -197,10 +212,33 @@ export function registerConnectionEvents(
 /** Read CASEMAPPING from ISUPPORT and propagate it to all modules. */
 function applyCasemapping(deps: ConnectionLifecycleDeps): void {
   const raw = deps.client.network.supports('CASEMAPPING');
-  const cm: Casemapping =
-    raw === 'ascii' || raw === 'strict-rfc1459' || raw === 'rfc1459' ? raw : 'rfc1459'; // safe fallback for unknown values
+  let cm: Casemapping;
+  if (raw === 'ascii' || raw === 'strict-rfc1459' || raw === 'rfc1459') {
+    cm = raw;
+  } else {
+    cm = 'rfc1459';
+    if (typeof raw === 'string' && raw.length > 0) {
+      // Explicit warn so operators can track down a network advertising
+      // something like `rfc7613` (Atheme unicode case folding) — we fall
+      // through to rfc1459 but the behaviour is wrong for that network.
+      deps.logger.warn(
+        `Unknown CASEMAPPING "${raw}" advertised by server — falling back to rfc1459. ` +
+          `Nick/channel case folding may be wrong on this network.`,
+      );
+    }
+  }
   deps.logger.info(`CASEMAPPING: ${cm}`);
   deps.applyCasemapping(cm);
+}
+
+/** Parse the server's ISUPPORT snapshot and propagate it to all modules. */
+function applyServerCapabilities(deps: ConnectionLifecycleDeps): void {
+  const caps = parseISupport(deps.client);
+  deps.logger.info(
+    `ISUPPORT: PREFIX=${caps.prefixModes.map((m) => `${caps.prefixToSymbol[m]}${m}`).join('')} ` +
+      `CHANTYPES=${caps.chantypes} MODES=${caps.modesPerLine}`,
+  );
+  deps.applyServerCapabilities(caps);
 }
 
 /** Log TLS cipher info from the underlying socket. */

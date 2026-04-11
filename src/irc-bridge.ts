@@ -1,6 +1,7 @@
 // HexBot — IRC bridge
 // Translates irc-framework events into dispatcher events.
 // This is the trust boundary — all IRC data entering the dispatcher passes through here.
+import { type ServerCapabilities, defaultServerCapabilities } from './core/isupport';
 import type { MessageQueue } from './core/message-queue';
 import type { EventDispatcher } from './dispatcher';
 import type { Logger } from './logger';
@@ -45,15 +46,6 @@ interface IRCBridgeOptions {
 const STARTUP_GRACE_MS = 5000;
 
 // ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Validate channel name starts with # or &. */
-function isValidChannel(name: string): boolean {
-  return /^[#&]/.test(name);
-}
-
-// ---------------------------------------------------------------------------
 // IRCBridge
 // ---------------------------------------------------------------------------
 
@@ -67,6 +59,7 @@ export class IRCBridge {
   private listeners: Array<{ event: string; fn: (...args: unknown[]) => void }> = [];
   private ctcpRateLimiter = new SlidingWindowCounter();
   private topicStartupGrace = false;
+  private capabilities: ServerCapabilities = defaultServerCapabilities();
 
   constructor(options: IRCBridgeOptions) {
     this.client = options.client;
@@ -75,6 +68,19 @@ export class IRCBridge {
     this.messageQueue = options.messageQueue ?? null;
     this.channelState = options.channelState ?? null;
     this.logger = options.logger?.child('irc-bridge') ?? null;
+  }
+
+  /**
+   * Apply a parsed ISUPPORT snapshot. `isValidChannel` uses the advertised
+   * `CHANTYPES` so `!channel` on IRCnet-style networks is accepted instead
+   * of being silently dropped by the old hardcoded `[#&]` check.
+   */
+  setCapabilities(caps: ServerCapabilities): void {
+    this.capabilities = caps;
+  }
+
+  private isValidChannel(name: string): boolean {
+    return this.capabilities.isValidChannel(name);
   }
 
   /** Register all irc-framework event listeners. */
@@ -143,7 +149,7 @@ export class IRCBridge {
     const target = sanitize(String(event.target ?? ''));
     const message = sanitize(String(event.message ?? ''));
 
-    const isChannel = isValidChannel(target);
+    const isChannel = this.isValidChannel(target);
     const channel = isChannel ? target : null;
 
     // Parse command and args from the message text
@@ -189,7 +195,7 @@ export class IRCBridge {
     const target = sanitize(String(event.target ?? ''));
     const message = sanitize(String(event.message ?? ''));
 
-    const isChannel = isValidChannel(target);
+    const isChannel = this.isValidChannel(target);
     const channel = isChannel ? target : null;
 
     const ctx = this.buildContext({
@@ -216,7 +222,7 @@ export class IRCBridge {
     const hostname = sanitize(String(event.hostname ?? ''));
     const channel = sanitize(String(event.channel ?? ''));
 
-    if (!isValidChannel(channel)) return;
+    if (!this.isValidChannel(channel)) return;
 
     const ctx = this.buildContext({
       nick,
@@ -238,7 +244,7 @@ export class IRCBridge {
     const channel = sanitize(String(event.channel ?? ''));
     const message = sanitize(String(event.message ?? ''));
 
-    if (!isValidChannel(channel)) return;
+    if (!this.isValidChannel(channel)) return;
 
     const ctx = this.buildContext({
       nick,
@@ -259,7 +265,7 @@ export class IRCBridge {
     const kicked = sanitize(String(event.kicked ?? ''));
     const message = sanitize(String(event.message ?? ''));
 
-    if (!isValidChannel(channel)) return;
+    if (!this.isValidChannel(channel)) return;
 
     // Look up the kicked user's hostmask from channel state (more accurate than the kicker's ident/hostname)
     const kickedHostmask = this.channelState?.getUserHostmask(channel, kicked);
@@ -311,7 +317,7 @@ export class IRCBridge {
     const ident = sanitize(String(event.ident ?? ''));
     const hostname = sanitize(String(event.hostname ?? ''));
     const target = sanitize(String(event.target ?? ''));
-    if (!isModeArray(event.modes) || !isValidChannel(target)) return;
+    if (!isModeArray(event.modes) || !this.isValidChannel(target)) return;
     const modes = event.modes;
 
     // Break compound modes into individual dispatches
@@ -341,7 +347,7 @@ export class IRCBridge {
     const target = sanitize(String(event.target ?? ''));
     const message = sanitize(String(event.message ?? ''));
 
-    const isChannel = isValidChannel(target);
+    const isChannel = this.isValidChannel(target);
     const channel = isChannel ? target : null;
 
     const ctx = this.buildContext({
@@ -390,7 +396,7 @@ export class IRCBridge {
     if (this.topicStartupGrace) return;
 
     const channel = sanitize(String(event.channel ?? ''));
-    if (!isValidChannel(channel)) return;
+    if (!this.isValidChannel(channel)) return;
 
     const nick = sanitize(String(event.nick ?? ''));
     const ident = sanitize(String(event.ident ?? ''));
@@ -438,7 +444,7 @@ export class IRCBridge {
     const hostname = sanitize(String(event.hostname ?? ''));
     const channel = sanitize(String(event.channel ?? ''));
 
-    if (!isValidChannel(channel)) return;
+    if (!this.isValidChannel(channel)) return;
 
     const ctx = this.buildContext({
       nick,
@@ -470,7 +476,7 @@ export class IRCBridge {
     if (!IRCBridge.JOIN_ERROR_NAMES.has(error)) return;
 
     const channel = sanitize(String(event.channel ?? ''));
-    if (!isValidChannel(channel)) return;
+    if (!this.isValidChannel(channel)) return;
 
     const reason = sanitize(String(event.reason ?? ''));
 
@@ -492,7 +498,7 @@ export class IRCBridge {
 
     const params = Array.isArray(event.params) ? (event.params as unknown[]) : [];
     const channel = sanitize(String(params[1] ?? ''));
-    if (!isValidChannel(channel)) return;
+    if (!this.isValidChannel(channel)) return;
 
     const reason = sanitize(String(params.slice(2).join(' ') || ''));
 
